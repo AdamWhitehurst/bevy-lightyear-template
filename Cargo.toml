@@ -1,0 +1,11 @@
+[workspace]
+members = [
+    "crates/client",
+    "crates/server",
+]
+resolver = "2"
+
+[workspace.dependencies]
+avian3d = "0.4.1"
+bevy = "0.17.2"
+lightyear = "0.25.5"

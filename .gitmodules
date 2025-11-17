@@ -1,0 +1,9 @@
+[submodule "git/bevy"]
+	path = git/bevy
+	url = https://github.com/bevyengine/bevy.git
+[submodule "git/lightyear"]
+	path = git/lightyear
+	url = https://github.com/cBournhonesque/lightyear.git
+[submodule "git/avian"]
+	path = git/avian
+	url = https://github.com/Jondolf/avian.git

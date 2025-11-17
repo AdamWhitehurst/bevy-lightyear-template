@@ -1,0 +1,14 @@
+{
+  "rust-analyzer.linkedProjects": [
+    // "Cargo.toml",
+    // "git/lightyear/Cargo.toml",
+    // "git/bevy/Cargo.toml",
+    // "git/bevy_asset_loader/Cargo.toml",
+    // "git/bevy_common_assets/Cargo.toml",
+    // "git/lightyer-template/Cargo.toml"
+  ],
+  "rust-analyzer.cargo.allTargets": true,
+  "rust-analyzer.cargo.features": "all",
+  "rust-analyzer.check.features": "all",
+  "rust-analyzer.check.allTargets": true
+}
