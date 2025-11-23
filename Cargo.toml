@@ -1,7 +1,9 @@
 [workspace]
 members = [
+    "crates/protocol",
     "crates/client",
     "crates/server",
+    "crates/web",
 ]
 resolver = "2"
 
@@ -9,3 +11,10 @@ resolver = "2"
 avian3d = "0.4.1"
 bevy = "0.17.2"
 lightyear = "0.25.5"
+protocol = { path = "crates/protocol" }
+serde = "1.0"
+
+# WASM-specific dependencies
+wasm-bindgen = "=0.2.105"
+console_error_panic_hook = "0.1"
+getrandom = { version = "0.3", features = ["wasm_js"] }

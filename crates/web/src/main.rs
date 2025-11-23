@@ -1,23 +1,31 @@
 use bevy::prelude::*;
 use lightyear::netcode::Key;
-use lightyear::prelude::*;
 use lightyear::prelude::client::*;
+use lightyear::prelude::*;
 use protocol::*;
 use std::net::SocketAddr;
 use std::time::Duration;
 
-const CLIENT_ADDR: SocketAddr = SocketAddr::new(
-    std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
-    0, // Random port
-);
 const SERVER_ADDR: SocketAddr = SocketAddr::new(
     std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
-    5000, // UDP server port
+    5001, // WebTransport server port
 );
 
+const CLIENT_ADDR: SocketAddr =
+    SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)), 0);
+
 fn main() {
+    #[cfg(target_family = "wasm")]
+    console_error_panic_hook::set_once();
+
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "Lightyear WASM Client".to_string(),
+                ..default()
+            }),
+            ..default()
+        }))
         .add_plugins(ClientPlugins {
             tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
         })
@@ -31,7 +39,7 @@ fn main() {
 fn setup(mut commands: Commands) {
     commands.spawn(Camera3d::default());
 
-    info!("Connecting to server at {}...", SERVER_ADDR);
+    info!("WASM Client: Connecting to server at {}...", SERVER_ADDR);
 
     let auth = Authentication::Manual {
         server_addr: SERVER_ADDR,
@@ -40,9 +48,23 @@ fn setup(mut commands: Commands) {
         protocol_id: PROTOCOL_ID,
     };
 
+    // Load certificate digest at compile time
+    let certificate_digest = {
+        #[cfg(target_family = "wasm")]
+        {
+            include_str!("../../../certificates/digest.txt").to_string()
+        }
+        #[cfg(not(target_family = "wasm"))]
+        {
+            String::new()
+        }
+    };
+
+    info!("Using certificate digest: {}", certificate_digest);
+
     let client = commands
         .spawn((
-            Name::new("Client"),
+            Name::new("WASM Client"),
             Client::default(),
             LocalAddr(CLIENT_ADDR),
             PeerAddr(SERVER_ADDR),
@@ -50,7 +72,8 @@ fn setup(mut commands: Commands) {
             ReplicationReceiver::default(),
             NetcodeClient::new(auth, NetcodeConfig::default())
                 .expect("Failed to create NetcodeClient"),
-            UdpIo::default(),
+            #[cfg(target_family = "wasm")]
+            WebTransportClientIo { certificate_digest },
         ))
         .id();
 
@@ -58,9 +81,15 @@ fn setup(mut commands: Commands) {
 }
 
 fn on_connected(trigger: On<Add, Connected>) {
-    info!("Successfully connected to server! Entity: {:?}", trigger.entity);
+    info!(
+        "WASM Client: Successfully connected to server! Entity: {:?}",
+        trigger.entity
+    );
 }
 
 fn on_disconnected(trigger: On<Add, Disconnected>) {
-    info!("Disconnected from server. Entity: {:?}", trigger.entity);
+    info!(
+        "WASM Client: Disconnected from server. Entity: {:?}",
+        trigger.entity
+    );
 }

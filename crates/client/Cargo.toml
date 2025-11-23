@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-avian3d = { workspace = true }
 bevy = { workspace = true }
-lightyear = { workspace = true }
+lightyear = { workspace = true, features = ["client", "netcode", "udp"] }
+protocol = { workspace = true }
+anyhow = "1.0"

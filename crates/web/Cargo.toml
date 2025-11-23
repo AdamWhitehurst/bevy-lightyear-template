@@ -1,0 +1,30 @@
+[package]
+name = "web"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "web"
+path = "src/main.rs"
+
+[dependencies]
+bevy = { workspace = true, features = ["bevy_winit", "webgl2"] }
+lightyear = { workspace = true, features = [
+    "client",
+    "netcode",
+    "webtransport",
+    "websocket",
+] }
+protocol = { workspace = true }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+wasm-bindgen = { workspace = true }
+console_error_panic_hook = { workspace = true }
+getrandom = { workspace = true }
+# Explicit dependency for older getrandom 0.2 used by some transitive deps
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
+
+[package.metadata.bevy_cli.web]
+rustflags = ["--cfg", "getrandom_backend=\"wasm_js\""]
+default-features = false
+

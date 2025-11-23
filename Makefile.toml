@@ -1,0 +1,91 @@
+[config]
+skip_core_tasks = true
+
+[tasks.setup]
+description = "Install dependencies and generate certificates"
+script = '''
+#!/bin/bash
+set -e
+
+echo "Setting up Lightyear development environment..."
+
+# Install WASM target
+echo "Installing wasm32-unknown-unknown target..."
+rustup target add wasm32-unknown-unknown
+
+# Install Bevy CLI if not already installed
+if ! command -v bevy &> /dev/null; then
+    echo "Installing Bevy CLI..."
+    cargo install bevy_cli
+else
+    echo "Bevy CLI already installed"
+fi
+
+# Generate certificates
+echo "Generating certificates..."
+cargo make generate-certs
+
+echo "Setup complete!"
+echo ""
+echo "To run:"
+echo "  Server:  cargo server"
+echo "  Client:  cargo client"
+echo "  Web:     cargo web"
+'''
+
+[tasks.generate-certs]
+description = "Generate self-signed certificates for WebTransport/WebSocket"
+script = '''
+#!/bin/bash
+set -e
+
+CERT_DIR="certificates"
+mkdir -p "$CERT_DIR"
+cd "$CERT_DIR"
+
+echo "Generating self-signed certificate..."
+
+openssl req -x509 \
+    -newkey ec \
+    -pkeyopt ec_paramgen_curve:prime256v1 \
+    -keyout key.pem \
+    -out cert.pem \
+    -days 14 \
+    -nodes \
+    -subj "/CN=localhost"
+
+echo "Extracting certificate digest..."
+
+FINGERPRINT=$(openssl x509 -in cert.pem -noout -sha256 -fingerprint | \
+    sed 's/^.*=//' | sed 's/://g')
+
+echo -n "$FINGERPRINT" > digest.txt
+
+echo "Certificate generated successfully!"
+echo "Digest: $FINGERPRINT"
+'''
+
+[tasks.web]
+description = "Run WASM client with automatic certificate generation"
+dependencies = ["ensure-certs"]
+script = '''
+#!/bin/bash
+set -e
+
+echo "Starting WASM client with Bevy CLI..."
+cd crates/web
+bevy run web "$@"
+'''
+
+[tasks.ensure-certs]
+description = "Ensure certificates exist, generate if missing"
+script = '''
+#!/bin/bash
+
+if [ ! -f "certificates/digest.txt" ]; then
+    echo "Certificates not found, generating..."
+    cargo make generate-certs
+else
+    echo "Certificates found"
+fi
+'''

@@ -1,0 +1,16 @@
+[alias]
+client = "run -p client"
+server = "run -p server"
+web = "make web"
+setup = "make setup"
+
+# Utility aliases
+check-all = "check --workspace"
+build-all = "build --workspace --exclude web"
+web-build = "build --release -p web --target wasm32-unknown-unknown"
+
+[target.wasm32-unknown-unknown]
+rustflags = [
+    "--cfg", "web_sys_unstable_apis",
+    "-C", "target-feature=+reference-types",
+]
