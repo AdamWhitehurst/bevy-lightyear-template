@@ -3,12 +3,36 @@ name = "web"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [[bin]]
 name = "web"
 path = "src/main.rs"
 
 [dependencies]
-bevy = { workspace = true, features = ["bevy_winit", "webgl2"] }
+# Optimized Bevy features for WASM: disable unnecessary features while keeping rendering
+bevy = { workspace = true, default-features = false, features = [
+    "bevy_animation",
+    "bevy_asset",
+    "bevy_color",
+    "bevy_core_pipeline",
+    "bevy_gilrs",
+    "bevy_gizmos",
+    "bevy_pbr",
+    "bevy_picking",
+    "bevy_render",
+    "bevy_scene",
+    "bevy_sprite",
+    "bevy_state",
+    "bevy_text",
+    "bevy_ui",
+    "bevy_winit",
+    "bevy_log",
+    "png",
+    "webgl2",
+    "serialize",
+] }
 lightyear = { workspace = true, features = [
     "client",
     "netcode",
@@ -23,6 +47,13 @@ console_error_panic_hook = { workspace = true }
 getrandom = { workspace = true }
 # Explicit dependency for older getrandom 0.2 used by some transitive deps
 getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
+
+[dev-dependencies]
+protocol = { workspace = true, features = ["test_utils"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
+console_error_panic_hook = { workspace = true }
 
 [package.metadata.bevy_cli.web]
 rustflags = ["--cfg", "getrandom_backend=\"wasm_js\""]

@@ -8,9 +8,16 @@ setup = "make setup"
 check-all = "check --workspace"
 build-all = "build --workspace --exclude web"
 web-build = "build --release -p web --target wasm32-unknown-unknown"
+test-all = "make test-all"
+
+[build]
+incremental = true
+# Note: Job limit is applied via environment variable in Makefile.toml for WASM builds only
 
 [target.wasm32-unknown-unknown]
 rustflags = [
     "--cfg", "web_sys_unstable_apis",
     "-C", "target-feature=+reference-types",
+    "-C", "codegen-units=1",        # Reduce parallelism to lower peak RAM usage
+    "-C", "opt-level=z",             # Optimize for size to reduce memory pressure
 ]

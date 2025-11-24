@@ -73,9 +73,9 @@ Establish workspace test infrastructure, add protocol unit tests, create test ut
 
 ### Changes Required
 
-#### 1. Workspace Root Configuration
+- [x] #### 1. Workspace Root Configuration
 **File**: `Cargo.toml`
-**Changes**: Add workspace-level dev-dependencies for shared test infrastructure
+**Changes**: Add workspace-level dev-dependencies for shared test infrastructure (NOTE: workspace.dev-dependencies not valid, added profile optimizations only)
 
 ```toml
 # Add after [workspace.dependencies]
@@ -94,7 +94,7 @@ debug = true
 opt-level = 3
 ```
 
-#### 2. Protocol Crate Configuration
+- [x] #### 2. Protocol Crate Configuration
 **File**: `crates/protocol/Cargo.toml`
 **Changes**: Add dev-dependencies and test_utils feature
 
@@ -108,7 +108,7 @@ test-log = { workspace = true }
 serde_test = "1.0"
 ```
 
-#### 3. Protocol Test Utilities Module
+- [x] #### 3. Protocol Test Utilities Module
 **File**: `crates/protocol/src/test_utils.rs` (NEW)
 **Changes**: Create test utility functions and builders
 
@@ -147,7 +147,7 @@ pub fn assert_message_registered<M: Message>(app: &App) {
 }
 ```
 
-#### 4. Protocol Library Exports
+- [x] #### 4. Protocol Library Exports
 **File**: `crates/protocol/src/lib.rs`
 **Changes**: Export test_utils module conditionally
 
@@ -158,7 +158,7 @@ pub fn assert_message_registered<M: Message>(app: &App) {
 pub mod test_utils;
 ```
 
-#### 5. Protocol Unit Tests (Inline)
+- [x] #### 5. Protocol Unit Tests (Inline)
 **File**: `crates/protocol/src/lib.rs`
 **Changes**: Add inline unit tests for protocol types
 
@@ -210,7 +210,7 @@ mod tests {
 }
 ```
 
-#### 6. Makefile.toml Test Tasks
+- [x] #### 6. Makefile.toml Test Tasks
 **File**: `Makefile.toml`
 **Changes**: Add test-related tasks
 
@@ -263,7 +263,7 @@ Implement integration tests for client, server, and web crates using ClientServe
 
 ### Changes Required
 
-#### 1. Client Crate Dependencies
+- [x] #### 1. Client Crate Dependencies
 **File**: `crates/client/Cargo.toml`
 **Changes**: Add dev-dependencies for integration testing
 
@@ -276,7 +276,7 @@ protocol = { workspace = true, features = ["test_utils"] }
 lightyear = { workspace = true, features = ["test_utils"] }
 ```
 
-#### 2. Client Integration Test: Connection
+- [x] #### 2. Client Integration Test: Connection
 **File**: `crates/client/tests/connection.rs` (NEW)
 **Changes**: Test client connection lifecycle
 
@@ -355,7 +355,7 @@ fn test_client_has_ping_manager() {
 }
 ```
 
-#### 3. Server Crate Dependencies
+- [x] #### 3. Server Crate Dependencies
 **File**: `crates/server/Cargo.toml`
 **Changes**: Add dev-dependencies
 
@@ -368,7 +368,7 @@ protocol = { workspace = true, features = ["test_utils"] }
 lightyear = { workspace = true, features = ["test_utils"] }
 ```
 
-#### 4. Server Integration Test: Multi-Transport
+- [x] #### 4. Server Integration Test: Multi-Transport
 **File**: `crates/server/tests/multi_transport.rs` (NEW)
 **Changes**: Test server multi-transport setup
 
@@ -461,7 +461,7 @@ fn test_server_creates_websocket() {
 }
 ```
 
-#### 5. Server Integration Test: Connection Flow
+- [x] #### 5. Server Integration Test: Connection Flow
 **File**: `crates/server/tests/connection_flow.rs` (NEW)
 **Changes**: Test client-server connection using ClientServerStepper
 
@@ -590,7 +590,7 @@ fn test_server_started() {
 }
 ```
 
-#### 6. Web Crate Dependencies
+- [x] #### 6. Web Crate Dependencies
 **File**: `crates/web/Cargo.toml`
 **Changes**: Add WASM test dependencies
 
@@ -606,7 +606,7 @@ wasm-bindgen-test = "0.3"
 console_error_panic_hook = { workspace = true }
 ```
 
-#### 7. Web WASM Integration Tests
+- [x] #### 7. Web WASM Integration Tests
 **File**: `crates/web/tests/wasm_integration.rs` (NEW)
 **Changes**: WASM-specific smoke tests
 
@@ -646,7 +646,7 @@ fn test_bevy_minimal_app() {
 }
 ```
 
-#### 8. Server Integration Test: Observer Lifecycle
+- [x] #### 8. Server Integration Test: Observer Lifecycle
 **File**: `crates/server/tests/observers.rs` (NEW)
 **Changes**: Test server observer registration and triggering
 
@@ -699,7 +699,7 @@ fn test_server_observer_registration() {
 }
 ```
 
-#### 9. Client Integration Test: Message Sending
+- [x] #### 9. Client Integration Test: Message Sending
 **File**: `crates/client/tests/messages.rs` (NEW)
 **Changes**: Test bidirectional message passing
 

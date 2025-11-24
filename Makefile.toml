@@ -89,3 +89,45 @@ else
     echo "Certificates found"
 fi
 '''
+
+[tasks.test-protocol]
+description = "Run protocol crate unit tests"
+workspace = false
+command = "cargo"
+args = ["test", "-p", "protocol", "--all-features"]
+
+[tasks.test-client]
+description = "Run client crate integration tests"
+workspace = false
+command = "cargo"
+args = ["test", "-p", "client"]
+
+[tasks.test-server]
+description = "Run server crate integration tests"
+workspace = false
+command = "cargo"
+args = ["test", "-p", "server"]
+
+[tasks.test-native]
+description = "Run all native tests (protocol, client, server)"
+workspace = false
+dependencies = ["test-protocol", "test-client", "test-server"]
+
+[tasks.test-all]
+description = "Run all tests including WASM (WARNING: WASM compilation is very resource-intensive)"
+workspace = false
+run_task = { name = ["test-native", "test-wasm"], parallel = false }
+
+[tasks.test-wasm]
+description = "Run WASM tests (Optimized: ~4GB RAM, 5-10 minutes)"
+workspace = false
+script = '''
+#!/bin/bash
+echo "⚠️  WASM tests compile Bevy for wasm32-unknown-unknown (optimized for low memory)"
+echo "   Resource usage: ~4GB RAM with size optimizations and limited parallelism"
+echo "   Time: 5-10 minutes on first build, ~2-3 minutes with incremental cache"
+echo ""
+# Limit parallel jobs to reduce RAM usage (CARGO_BUILD_JOBS applies only to this command)
+# Use CARGO_PROFILE env var to set the profile
+CARGO_BUILD_JOBS=2 CARGO_PROFILE=wasm-test wasm-pack test --headless --firefox crates/web
+'''

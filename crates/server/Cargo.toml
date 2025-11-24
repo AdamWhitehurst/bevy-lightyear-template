@@ -4,7 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = { workspace = true }
+bevy = { workspace = true, default-features = true }
 lightyear = { workspace = true, features = ["server", "netcode", "udp", "webtransport", "websocket"] }
 protocol = { workspace = true }
 anyhow = "1.0"
+
+[dev-dependencies]
+approx = { workspace = true }
+mock_instant = { workspace = true }
+test-log = { workspace = true }
+protocol = { workspace = true, features = ["test_utils"] }
