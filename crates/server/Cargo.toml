@@ -3,9 +3,17 @@ name = "server"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
 [dependencies]
 bevy = { workspace = true, default-features = true }
 lightyear = { workspace = true, features = ["server", "netcode", "udp", "webtransport", "websocket"] }
+lightyear_crossbeam = "0.25.5"
 protocol = { workspace = true }
 anyhow = "1.0"
 
@@ -14,3 +22,5 @@ approx = { workspace = true }
 mock_instant = { workspace = true }
 test-log = { workspace = true }
 protocol = { workspace = true, features = ["test_utils"] }
+client = { path = "../client" }
+lightyear_crossbeam = "0.25.5"

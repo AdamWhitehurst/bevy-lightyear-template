@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 bevy = { workspace = true, default-features = true }
-lightyear = { workspace = true, features = ["client", "netcode", "udp"] }
+lightyear = { workspace = true, features = ["client", "netcode", "udp", "crossbeam", "webtransport"] }
 protocol = { workspace = true }
 anyhow = "1.0"
 

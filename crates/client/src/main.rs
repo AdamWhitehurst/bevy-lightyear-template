@@ -1,19 +1,10 @@
-use bevy::prelude::*;
-use lightyear::netcode::Key;
-use lightyear::prelude::*;
-use lightyear::prelude::client::*;
-use protocol::*;
-use std::net::SocketAddr;
-use std::time::Duration;
+pub mod network;
 
-const CLIENT_ADDR: SocketAddr = SocketAddr::new(
-    std::net::IpAddr::V4(std::net::Ipv4Addr::new(0, 0, 0, 0)),
-    0, // Random port
-);
-const SERVER_ADDR: SocketAddr = SocketAddr::new(
-    std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
-    5000, // UDP server port
-);
+use bevy::prelude::*;
+use lightyear::prelude::client::*;
+use network::ClientNetworkPlugin;
+use protocol::*;
+use std::time::Duration;
 
 fn main() {
     App::new()
@@ -22,45 +13,6 @@ fn main() {
             tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
         })
         .add_plugins(ProtocolPlugin)
-        .add_systems(Startup, setup)
-        .add_observer(on_connected)
-        .add_observer(on_disconnected)
+        .add_plugins(ClientNetworkPlugin::default())
         .run();
-}
-
-fn setup(mut commands: Commands) {
-    commands.spawn(Camera3d::default());
-
-    info!("Connecting to server at {}...", SERVER_ADDR);
-
-    let auth = Authentication::Manual {
-        server_addr: SERVER_ADDR,
-        client_id: 0,
-        private_key: Key::from(PRIVATE_KEY),
-        protocol_id: PROTOCOL_ID,
-    };
-
-    let client = commands
-        .spawn((
-            Name::new("Client"),
-            Client::default(),
-            LocalAddr(CLIENT_ADDR),
-            PeerAddr(SERVER_ADDR),
-            Link::new(None),
-            ReplicationReceiver::default(),
-            NetcodeClient::new(auth, NetcodeConfig::default())
-                .expect("Failed to create NetcodeClient"),
-            UdpIo::default(),
-        ))
-        .id();
-
-    commands.trigger(Connect { entity: client });
-}
-
-fn on_connected(trigger: On<Add, Connected>) {
-    info!("Successfully connected to server! Entity: {:?}", trigger.entity);
-}
-
-fn on_disconnected(trigger: On<Add, Disconnected>) {
-    info!("Disconnected from server. Entity: {:?}", trigger.entity);
 }

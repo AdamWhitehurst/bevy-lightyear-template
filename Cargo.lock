@@ -3975,6 +3975,7 @@ dependencies = [
  "lightyear_avian3d",
  "lightyear_connection",
  "lightyear_core",
+ "lightyear_crossbeam",
  "lightyear_frame_interpolation",
  "lightyear_inputs",
  "lightyear_inputs_bei",
@@ -4096,6 +4097,22 @@ dependencies = [
  "lightyear_serde",
  "lightyear_utils",
  "serde",
+ "tracing",
+]
+
+[[package]]
+name = "lightyear_crossbeam"
+version = "0.25.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5e2fc3706fe95570be409ed13ecce0b970459293cce2be445354a81dc86971b"
+dependencies = [
+ "aeronet_io",
+ "bevy_app",
+ "bevy_ecs",
+ "bytes",
+ "crossbeam-channel",
+ "lightyear_core",
+ "lightyear_link",
  "tracing",
 ]
 
@@ -6403,7 +6420,9 @@ dependencies = [
  "anyhow",
  "approx",
  "bevy",
+ "client",
  "lightyear",
+ "lightyear_crossbeam",
  "mock_instant",
  "protocol",
  "test-log",
@@ -7519,6 +7538,7 @@ name = "web"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "client",
  "console_error_panic_hook",
  "getrandom 0.2.16",
  "getrandom 0.3.4",

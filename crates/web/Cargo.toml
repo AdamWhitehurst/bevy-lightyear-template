@@ -40,6 +40,7 @@ lightyear = { workspace = true, features = [
     "websocket",
 ] }
 protocol = { workspace = true }
+client = { path = "../client" }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 wasm-bindgen = { workspace = true }
