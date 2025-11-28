@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use lightyear::prelude::client::*;
 use protocol::*;
+use render::RenderPlugin;
 use std::time::Duration;
 
 pub mod network;
@@ -23,5 +24,6 @@ fn main() {
         })
         .add_plugins(ProtocolPlugin)
         .add_plugins(WebClientPlugin::default())
+        .add_plugins(RenderPlugin)
         .run();
 }

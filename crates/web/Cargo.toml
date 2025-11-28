@@ -41,6 +41,7 @@ lightyear = { workspace = true, features = [
 ] }
 protocol = { workspace = true }
 client = { path = "../client" }
+render = { path = "../render" }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 wasm-bindgen = { workspace = true }

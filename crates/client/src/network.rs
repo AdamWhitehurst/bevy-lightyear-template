@@ -73,9 +73,6 @@ impl Plugin for ClientNetworkPlugin {
 }
 
 fn setup_client(mut commands: Commands, config: ClientNetworkConfig) {
-    // Spawn camera
-    commands.spawn(Camera3d::default());
-
     // Create authentication
     let auth = Authentication::Manual {
         server_addr: config.server_addr,

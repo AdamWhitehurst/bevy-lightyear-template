@@ -39,6 +39,15 @@ Then wait for the user's research query.
    - Create multiple Task agents to research different aspects concurrently
    - We now have specialized agents that know how to do specific research tasks:
 
+   **CRITICAL: SUB-AGENT DIRECTION:**
+   - **Only search and report**: Sub-agents should ONLY search the codebase and return findings in their response
+   - **YOU synthesize**: Only YOU (the main research agent) create the final research document in thoughts/shared/research/
+   - **Use "find and report back" language**: When prompting sub-agents, use phrases like:
+     - "Find and report back on..."
+     - "Search for and describe..."
+     - "Locate and return information about..."
+   - **Do NOT use "document" language**: Avoid phrases like "document this" or "create documentation" which may trigger file creation
+
    **For codebase research (PRIMARY AGENTS FOR RESEARCH):**
    - Use the **codebase-locator** agent to find WHERE files and components live
    - Use the **codebase-analyzer** agent to understand HOW specific code works (without critiquing it)
@@ -50,7 +59,7 @@ Then wait for the user's research query.
    - Use the **thoughts-locator** agent to discover what documents exist about the topic
    - Use the **thoughts-analyzer** agent to extract key insights from specific documents (only the most relevant ones)
 
-   **For web research (only if user explicitly asks):**
+   **For web research:**
    - Use the **web-search-researcher** agent for external documentation and resources
    - IF you use web-research agents, instruct them to return LINKS with their findings, and please INCLUDE those links in your final report
 
@@ -115,9 +124,10 @@ Then wait for the user's research query.
       - The research question EXPLICITLY relates to their domain (e.g., "how does networking work in this Bevy game?" → game-developer)
       - You're researching implementation patterns specific to a technology stack
 
-   3. **Domain specialists are DOCUMENTARIANS in research mode**:
-      - Remind them they are documenting EXISTING implementations
+   3. **Domain specialists search and report in research mode**:
+      - Remind them they are FINDING and REPORTING on EXISTING implementations
       - They should NOT suggest improvements or identify issues
+      - They should NOT create any files - only return findings in their response
       - They should focus on "what exists" and "how it works"
 
    4. **Run agents in parallel when they research different aspects**:
@@ -145,12 +155,12 @@ Then wait for the user's research query.
 
    The key is to use these agents intelligently:
    - Start with locator agents to find what exists
-   - Then use analyzer agents on the most promising findings to document how they work
+   - Then use analyzer agents on the most promising findings to describe how they work
    - Add domain specialists when their expertise adds value to the research
    - Run multiple agents in parallel when they're searching for different things
    - Each agent knows its job - just tell it what you're looking for
    - Don't write detailed prompts about HOW to search - the agents already know
-   - Remind agents they are documenting, not evaluating or improving
+   - Remind agents they are finding and reporting, not evaluating or improving
 
 4. **Wait for all sub-agents to complete and synthesize findings:**
    - IMPORTANT: Wait for ALL sub-agent tasks to complete before proceeding
@@ -261,16 +271,17 @@ Then wait for the user's research query.
 - The thoughts/ directory provides historical context to supplement live findings
 - Focus on finding concrete file paths and line numbers for developer reference
 - Research documents should be self-contained with all necessary context
-- Each sub-agent prompt should be specific and focused on read-only documentation operations
-- Document cross-component connections and how systems interact
+- Each sub-agent prompt should be specific and focused on read-only search and reporting operations
+- YOU (main agent) document cross-component connections and how systems interact in the final research document
 - Include temporal context (when the research was conducted)
 - Link to GitHub when possible for permanent references
 - Keep the main agent focused on synthesis, not deep file reading
-- Have sub-agents document examples and usage patterns as they exist
+- Have sub-agents find and describe examples and usage patterns as they exist
 - Explore all of thoughts/ directory, not just research subdirectory
-- **CRITICAL**: You and all sub-agents are documentarians, not evaluators
-- **REMEMBER**: Document what IS, not what SHOULD BE
+- **CRITICAL**: You and all sub-agents search and report findings, not evaluate or improve
+- **REMEMBER**: Report what IS, not what SHOULD BE
 - **NO RECOMMENDATIONS**: Only describe the current state of the codebase
+- **SUB-AGENTS DO NOT CREATE FILES**: Only the main research agent creates the final document in thoughts/shared/research/
 - **File reading**: Always read mentioned files FULLY (no limit/offset) before spawning sub-tasks
 - **Critical ordering**: Follow the numbered steps exactly
   - ALWAYS read mentioned files first before spawning sub-tasks (step 1)

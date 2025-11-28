@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use lightyear::prelude::client::*;
 use network::ClientNetworkPlugin;
 use protocol::*;
+use render::RenderPlugin;
 use std::time::Duration;
 
 fn main() {
@@ -14,5 +15,6 @@ fn main() {
         })
         .add_plugins(ProtocolPlugin)
         .add_plugins(ClientNetworkPlugin::default())
+        .add_plugins(RenderPlugin)
         .run();
 }
