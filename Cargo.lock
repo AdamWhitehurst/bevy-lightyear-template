@@ -2177,6 +2177,7 @@ dependencies = [
  "protocol",
  "render",
  "test-log",
+ "ui",
 ]
 
 [[package]]
@@ -6434,6 +6435,7 @@ dependencies = [
  "mock_instant",
  "protocol",
  "test-log",
+ "ui",
 ]
 
 [[package]]
@@ -7174,6 +7176,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8c1ae7cc0fdb8b842d65d127cb981574b0d2b249b74d1c7a2986863dc134f71"
 
 [[package]]
+name = "ui"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "lightyear",
+ "protocol",
+]
+
+[[package]]
 name = "unicode-bidi"
 version = "0.3.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7553,6 +7564,7 @@ dependencies = [
  "lightyear",
  "protocol",
  "render",
+ "ui",
  "wasm-bindgen",
  "wasm-bindgen-test",
 ]

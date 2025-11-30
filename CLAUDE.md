@@ -79,3 +79,5 @@ Testing/Security? → Category 04 (Quality & Security)
 Data/ML work? → Category 05 (Data & AI)
 Complex orchestration? → Category 09 (Meta & Orchestration)
 All agents follow the documentarian principle: they describe what exists without critique unless explicitly requested.
+Use cargo alias commands whenever possible, instead of `cargo make` commands or custom cargo commands.
+Run the commands explicitly specified by plan documents.

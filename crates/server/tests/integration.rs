@@ -63,6 +63,20 @@ fn test_client_server_udp_connection() {
     server_app.update();
     client_app.update();
 
+    // Manually trigger connection (since UI plugin isn't used in this test)
+    let client_entity = client_app
+        .world_mut()
+        .query_filtered::<Entity, With<lightyear_client::Client>>()
+        .single(client_app.world())
+        .unwrap();
+    client_app
+        .world_mut()
+        .commands()
+        .trigger(lightyear_client::Connect {
+            entity: client_entity,
+        });
+    client_app.update();
+
     // Verify server spawned UDP entity
     let mut query = server_app
         .world_mut()

@@ -1,9 +1,7 @@
-use bevy::prelude::*;
-use lightyear::prelude::*;
-use lightyear::prelude::server as lightyear_server;
-use lightyear_server::*;
-use protocol::*;
 use ::server::network::{ServerNetworkConfig, ServerNetworkPlugin, ServerTransport};
+use bevy::prelude::*;
+use lightyear::prelude::server::*;
+use protocol::*;
 
 #[test]
 fn test_server_network_plugin_spawns_all_transports() {
@@ -28,16 +26,34 @@ fn test_server_network_plugin_spawns_all_transports() {
     app.update();
 
     // Verify UDP server entity
-    let mut udp_query = app.world_mut().query_filtered::<Entity, (With<NetcodeServer>, With<ServerUdpIo>)>();
-    assert_eq!(udp_query.iter(app.world()).count(), 1, "Should have one UDP server");
+    let mut udp_query = app
+        .world_mut()
+        .query_filtered::<Entity, (With<NetcodeServer>, With<ServerUdpIo>)>();
+    assert_eq!(
+        udp_query.iter(app.world()).count(),
+        1,
+        "Should have one UDP server"
+    );
 
     // Verify WebTransport server entity
-    let mut wt_query = app.world_mut().query_filtered::<Entity, (With<NetcodeServer>, With<WebTransportServerIo>)>();
-    assert_eq!(wt_query.iter(app.world()).count(), 1, "Should have one WebTransport server");
+    let mut wt_query = app
+        .world_mut()
+        .query_filtered::<Entity, (With<NetcodeServer>, With<WebTransportServerIo>)>();
+    assert_eq!(
+        wt_query.iter(app.world()).count(),
+        1,
+        "Should have one WebTransport server"
+    );
 
     // Verify WebSocket server entity
-    let mut ws_query = app.world_mut().query_filtered::<Entity, (With<NetcodeServer>, With<WebSocketServerIo>)>();
-    assert_eq!(ws_query.iter(app.world()).count(), 1, "Should have one WebSocket server");
+    let mut ws_query = app
+        .world_mut()
+        .query_filtered::<Entity, (With<NetcodeServer>, With<WebSocketServerIo>)>();
+    assert_eq!(
+        ws_query.iter(app.world()).count(),
+        1,
+        "Should have one WebSocket server"
+    );
 }
 
 #[test]
@@ -80,8 +96,14 @@ fn test_server_network_plugin_observer_registration() {
     app.update();
 
     // Verify the plugin was added successfully and server entities exist
-    let mut server_query = app.world_mut().query_filtered::<Entity, With<NetcodeServer>>();
-    assert_eq!(server_query.iter(app.world()).count(), 1, "Server should have spawned");
+    let mut server_query = app
+        .world_mut()
+        .query_filtered::<Entity, With<NetcodeServer>>();
+    assert_eq!(
+        server_query.iter(app.world()).count(),
+        1,
+        "Server should have spawned"
+    );
 }
 
 #[test]
@@ -103,14 +125,32 @@ fn test_server_network_plugin_single_transport() {
     app.update();
 
     // Verify only UDP server entity exists
-    let mut udp_query = app.world_mut().query_filtered::<Entity, (With<NetcodeServer>, With<ServerUdpIo>)>();
-    assert_eq!(udp_query.iter(app.world()).count(), 1, "Should have one UDP server");
+    let mut udp_query = app
+        .world_mut()
+        .query_filtered::<Entity, (With<NetcodeServer>, With<ServerUdpIo>)>();
+    assert_eq!(
+        udp_query.iter(app.world()).count(),
+        1,
+        "Should have one UDP server"
+    );
 
     // Verify no WebTransport server
-    let mut wt_query = app.world_mut().query_filtered::<Entity, (With<NetcodeServer>, With<WebTransportServerIo>)>();
-    assert_eq!(wt_query.iter(app.world()).count(), 0, "Should have no WebTransport server");
+    let mut wt_query = app
+        .world_mut()
+        .query_filtered::<Entity, (With<NetcodeServer>, With<WebTransportServerIo>)>();
+    assert_eq!(
+        wt_query.iter(app.world()).count(),
+        0,
+        "Should have no WebTransport server"
+    );
 
     // Verify no WebSocket server
-    let mut ws_query = app.world_mut().query_filtered::<Entity, (With<NetcodeServer>, With<WebSocketServerIo>)>();
-    assert_eq!(ws_query.iter(app.world()).count(), 0, "Should have no WebSocket server");
+    let mut ws_query = app
+        .world_mut()
+        .query_filtered::<Entity, (With<NetcodeServer>, With<WebSocketServerIo>)>();
+    assert_eq!(
+        ws_query.iter(app.world()).count(),
+        0,
+        "Should have no WebSocket server"
+    );
 }

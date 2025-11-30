@@ -1,0 +1,11 @@
+[package]
+name = "ui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = { workspace = true, default-features = true }
+lightyear = { workspace = true, features = ["client"] }
+
+[dev-dependencies]
+protocol = { workspace = true, features = ["test_utils"] }

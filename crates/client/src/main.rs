@@ -5,6 +5,7 @@ use lightyear::prelude::client::*;
 use network::ClientNetworkPlugin;
 use protocol::*;
 use render::RenderPlugin;
+use ui::UiPlugin;
 use std::time::Duration;
 
 fn main() {
@@ -16,5 +17,6 @@ fn main() {
         .add_plugins(ProtocolPlugin)
         .add_plugins(ClientNetworkPlugin::default())
         .add_plugins(RenderPlugin)
+        .add_plugins(UiPlugin)
         .run();
 }

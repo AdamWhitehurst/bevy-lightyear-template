@@ -23,4 +23,5 @@ mock_instant = { workspace = true }
 test-log = { workspace = true }
 protocol = { workspace = true, features = ["test_utils"] }
 client = { path = "../client" }
+ui = { path = "../ui" }
 lightyear_crossbeam = "0.25.5"

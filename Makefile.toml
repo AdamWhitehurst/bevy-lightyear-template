@@ -127,6 +127,8 @@ echo "⚠️  WASM tests compile Bevy for wasm32-unknown-unknown (optimized for 
 echo "   Resource usage: ~4GB RAM with size optimizations and limited parallelism"
 echo "   Time: 5-10 minutes on first build, ~2-3 minutes with incremental cache"
 echo ""
+# Add cargo bin to PATH
+export PATH="$HOME/.cargo/bin:$PATH"
 # Limit parallel jobs to reduce RAM usage (CARGO_BUILD_JOBS applies only to this command)
 # Use CARGO_PROFILE env var to set the profile
 CARGO_BUILD_JOBS=2 CARGO_PROFILE=wasm-test wasm-pack test --headless --firefox crates/web

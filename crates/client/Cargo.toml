@@ -8,6 +8,7 @@ bevy = { workspace = true, default-features = true }
 lightyear = { workspace = true, features = ["client", "netcode", "udp", "crossbeam", "webtransport"] }
 protocol = { workspace = true }
 render = { path = "../render" }
+ui = { path = "../ui" }
 anyhow = "1.0"
 
 [dev-dependencies]

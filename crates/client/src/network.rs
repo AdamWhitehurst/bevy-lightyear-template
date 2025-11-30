@@ -94,6 +94,7 @@ fn setup_client(mut commands: Commands, config: ClientNetworkConfig) {
 
     // Add transport-specific component
     match config.transport {
+        #[cfg(not(target_family = "wasm"))]
         ClientTransport::Udp => {
             entity_builder.insert(UdpIo::default());
         }
@@ -103,12 +104,11 @@ fn setup_client(mut commands: Commands, config: ClientNetworkConfig) {
         ClientTransport::Crossbeam(crossbeam_io) => {
             entity_builder.insert(crossbeam_io);
         }
+        #[cfg(target_family = "wasm")]
+        ClientTransport::Udp => {
+            panic!("UDP transport is not supported on WASM");
+        }
     }
-
-    let client = entity_builder.id();
-
-    // Trigger connection
-    commands.trigger(Connect { entity: client });
 }
 
 fn on_connected(trigger: On<Add, Connected>) {
