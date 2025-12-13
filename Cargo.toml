@@ -10,9 +10,10 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
-avian3d = "0.4.1"
+avian3d = { version = "0.4.1", default-features = false, features = ["3d", "f32", "parry-f32", "default-collider"] }
 bevy = { version = "0.17.2", default-features = false }
-lightyear = "0.25.5"
+leafwing-input-manager = "0.19"
+lightyear = { version = "0.25.5", features = ["leafwing"] }
 protocol = { path = "crates/protocol" }
 serde = "1.0"
 

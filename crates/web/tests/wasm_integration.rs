@@ -12,10 +12,10 @@ fn test_wasm_panic_hook() {
 
 #[wasm_bindgen_test]
 fn test_protocol_imports() {
-    use protocol::Message1;
+    use protocol::CharacterMarker;
 
-    let msg = Message1(42);
-    assert_eq!(msg.0, 42);
+    let marker = CharacterMarker;
+    assert_eq!(marker, CharacterMarker);
 }
 
 #[wasm_bindgen_test]

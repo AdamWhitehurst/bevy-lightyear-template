@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use client::gameplay::ClientGameplayPlugin;
 use lightyear::prelude::client::*;
 use protocol::*;
 use render::RenderPlugin;
@@ -23,8 +24,9 @@ fn main() {
         .add_plugins(ClientPlugins {
             tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
         })
-        .add_plugins(ProtocolPlugin)
+        .add_plugins(SharedGameplayPlugin)
         .add_plugins(WebClientPlugin::default())
+        .add_plugins(ClientGameplayPlugin)
         .add_plugins(RenderPlugin)
         .add_plugins(UiPlugin)
         .run();

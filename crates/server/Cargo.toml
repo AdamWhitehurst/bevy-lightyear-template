@@ -12,10 +12,12 @@ path = "src/main.rs"
 
 [dependencies]
 bevy = { workspace = true, default-features = true }
-lightyear = { workspace = true, features = ["server", "netcode", "udp", "webtransport", "websocket"] }
+leafwing-input-manager = { workspace = true }
+lightyear = { workspace = true, features = ["server", "netcode", "udp", "webtransport", "websocket", "leafwing", "replication" ] }
 lightyear_crossbeam = "0.25.5"
 protocol = { workspace = true }
 anyhow = "1.0"
+avian3d = { workspace = true }
 
 [dev-dependencies]
 approx = { workspace = true }

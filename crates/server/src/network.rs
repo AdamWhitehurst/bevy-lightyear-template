@@ -34,11 +34,9 @@ pub struct ServerNetworkConfig {
 impl Default for ServerNetworkConfig {
     fn default() -> Self {
         Self {
-            transports: vec![
-                ServerTransport::Udp { port: 5000 },
-                ServerTransport::WebTransport { port: 5001 },
-                ServerTransport::WebSocket { port: 5002 },
-            ],
+            // TODO: add WebTransport and WebSocket transports
+            // Use only UDP for now - multiple Server entities may confuse replication
+            transports: vec![ServerTransport::Udp { port: 5000 }],
             bind_addr: [0, 0, 0, 0],
             protocol_id: PROTOCOL_ID,
             private_key: PRIVATE_KEY,
@@ -81,6 +79,7 @@ fn start_server(mut commands: Commands, config: ServerNetworkConfig) {
                 let server = commands
                     .spawn((
                         Name::new("UDP Server"),
+                        Server::default(),
                         NetcodeServer::new(server::NetcodeConfig {
                             protocol_id: config.protocol_id,
                             private_key: Key::from(config.private_key),
@@ -91,9 +90,16 @@ fn start_server(mut commands: Commands, config: ServerNetworkConfig) {
                     ))
                     .id();
                 commands.trigger(Start { entity: server });
-                info!("UDP server listening on {}:{}",
-                    config.bind_addr.iter().map(|b| b.to_string()).collect::<Vec<_>>().join("."),
-                    port);
+                info!(
+                    "UDP server listening on {}:{}",
+                    config
+                        .bind_addr
+                        .iter()
+                        .map(|b| b.to_string())
+                        .collect::<Vec<_>>()
+                        .join("."),
+                    port
+                );
             }
             ServerTransport::WebTransport { port } => {
                 let wt_sans = vec![
@@ -101,11 +107,13 @@ fn start_server(mut commands: Commands, config: ServerNetworkConfig) {
                     "127.0.0.1".to_string(),
                     "::1".to_string(),
                 ];
-                let wt_certificate = lightyear::webtransport::prelude::Identity::self_signed(wt_sans)
-                    .expect("Failed to generate WebTransport certificate");
+                let wt_certificate =
+                    lightyear::webtransport::prelude::Identity::self_signed(wt_sans)
+                        .expect("Failed to generate WebTransport certificate");
                 let server = commands
                     .spawn((
                         Name::new("WebTransport Server"),
+                        Server::default(),
                         NetcodeServer::new(server::NetcodeConfig {
                             protocol_id: config.protocol_id,
                             private_key: Key::from(config.private_key),
@@ -118,9 +126,16 @@ fn start_server(mut commands: Commands, config: ServerNetworkConfig) {
                     ))
                     .id();
                 commands.trigger(Start { entity: server });
-                info!("WebTransport server listening on {}:{}",
-                    config.bind_addr.iter().map(|b| b.to_string()).collect::<Vec<_>>().join("."),
-                    port);
+                info!(
+                    "WebTransport server listening on {}:{}",
+                    config
+                        .bind_addr
+                        .iter()
+                        .map(|b| b.to_string())
+                        .collect::<Vec<_>>()
+                        .join("."),
+                    port
+                );
             }
             ServerTransport::WebSocket { port } => {
                 let ws_config = lightyear::websocket::server::ServerConfig::builder()
@@ -130,11 +145,12 @@ fn start_server(mut commands: Commands, config: ServerNetworkConfig) {
                             "localhost".to_string(),
                             "127.0.0.1".to_string(),
                         ])
-                        .expect("Failed to generate WebSocket certificate")
+                        .expect("Failed to generate WebSocket certificate"),
                     );
                 let server = commands
                     .spawn((
                         Name::new("WebSocket Server"),
+                        Server::default(),
                         NetcodeServer::new(server::NetcodeConfig {
                             protocol_id: config.protocol_id,
                             private_key: Key::from(config.private_key),
@@ -145,14 +161,22 @@ fn start_server(mut commands: Commands, config: ServerNetworkConfig) {
                     ))
                     .id();
                 commands.trigger(Start { entity: server });
-                info!("WebSocket server listening on {}:{}",
-                    config.bind_addr.iter().map(|b| b.to_string()).collect::<Vec<_>>().join("."),
-                    port);
+                info!(
+                    "WebSocket server listening on {}:{}",
+                    config
+                        .bind_addr
+                        .iter()
+                        .map(|b| b.to_string())
+                        .collect::<Vec<_>>()
+                        .join("."),
+                    port
+                );
             }
             ServerTransport::Crossbeam { io } => {
                 let server = commands
                     .spawn((
                         Name::new("Crossbeam Server"),
+                        Server::default(),
                         NetcodeServer::new(server::NetcodeConfig {
                             protocol_id: config.protocol_id,
                             private_key: Key::from(config.private_key),
@@ -176,9 +200,11 @@ fn handle_new_client(
     config: Res<ServerNetworkConfig>,
 ) {
     info!("New client connected: {:?}", trigger.entity);
-    commands.entity(trigger.entity).insert(ReplicationSender::new(
-        config.replication_interval,
-        SendUpdatesMode::SinceLastAck,
-        false,
-    ));
+    commands
+        .entity(trigger.entity)
+        .insert(ReplicationSender::new(
+            config.replication_interval,
+            SendUpdatesMode::SinceLastAck,
+            false,
+        ));
 }

@@ -561,6 +561,8 @@ dependencies = [
  "itertools 0.13.0",
  "nalgebra",
  "parry3d",
+ "parry3d-f64",
+ "serde",
  "slab",
  "smallvec",
  "thiserror 2.0.17",
@@ -1080,6 +1082,7 @@ dependencies = [
  "bevy_math",
  "bevy_reflect",
  "glam_matrix_extras",
+ "serde",
 ]
 
 [[package]]
@@ -1729,6 +1732,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "284738382605476667bbe80cf0959f4dffb61adbdb0149e22e67f4dbf97a5bc2"
 dependencies = [
  "bevy",
+ "serde",
 ]
 
 [[package]]
@@ -2171,7 +2175,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "approx",
+ "avian3d",
  "bevy",
+ "leafwing-input-manager",
  "lightyear",
  "mock_instant",
  "protocol",
@@ -3170,7 +3176,7 @@ dependencies = [
  "vec_map",
  "wasm-bindgen",
  "web-sys",
- "windows 0.58.0",
+ "windows 0.61.3",
 ]
 
 [[package]]
@@ -3295,6 +3301,7 @@ checksum = "6cb141d04d0bbebc52c325352ae0c930a6d42c77ccd02b7c591a73bd7bc1d859"
 dependencies = [
  "bevy_reflect",
  "glam 0.30.9",
+ "serde",
 ]
 
 [[package]]
@@ -4838,6 +4845,7 @@ dependencies = [
  "num-complex",
  "num-rational",
  "num-traits",
+ "serde",
  "simba",
  "typenum",
 ]
@@ -4993,6 +5001,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73f88a1307638156682bada9d7604135552957b7818057dcef22705b4d509495"
 dependencies = [
  "num-traits",
+ "serde",
 ]
 
 [[package]]
@@ -5502,11 +5511,42 @@ dependencies = [
  "num-traits",
  "ordered-float 5.1.0",
  "rstar",
+ "serde",
+ "serde_arrays",
  "simba",
  "slab",
  "smallvec",
  "spade",
  "static_assertions",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "parry3d-f64"
+version = "0.25.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38fe282b81b60a2aee7f24db25ea73b3c82f6451888eeb5936b621adb87aa653"
+dependencies = [
+ "approx",
+ "arrayvec",
+ "bitflags 2.10.0",
+ "downcast-rs 2.0.2",
+ "either",
+ "ena",
+ "foldhash 0.2.0",
+ "hashbrown 0.16.0",
+ "log",
+ "nalgebra",
+ "num-derive",
+ "num-traits",
+ "ordered-float 5.1.0",
+ "rstar",
+ "serde",
+ "serde_arrays",
+ "simba",
+ "slab",
+ "smallvec",
+ "spade",
  "thiserror 2.0.17",
 ]
 
@@ -5761,7 +5801,9 @@ checksum = "3eb8486b569e12e2c32ad3e204dbaba5e4b5b216e9367044f25f1dba42341773"
 name = "protocol"
 version = "0.1.0"
 dependencies = [
+ "avian3d",
  "bevy",
+ "leafwing-input-manager",
  "lightyear",
  "lightyear_transport",
  "serde",
@@ -6057,7 +6099,10 @@ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 name = "render"
 version = "0.1.0"
 dependencies = [
+ "avian3d",
  "bevy",
+ "lightyear",
+ "protocol",
 ]
 
 [[package]]
@@ -6380,6 +6425,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_arrays"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94a16b99c5ea4fe3daccd14853ad260ec00ea043b2708d1fd1da3106dcd8d9df"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_core"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6428,8 +6482,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "approx",
+ "avian3d",
  "bevy",
  "client",
+ "leafwing-input-manager",
  "lightyear",
  "lightyear_crossbeam",
  "mock_instant",
@@ -6597,6 +6653,7 @@ dependencies = [
  "hashbrown 0.15.5",
  "num-traits",
  "robust",
+ "serde",
  "smallvec",
 ]
 
@@ -7556,6 +7613,7 @@ dependencies = [
 name = "web"
 version = "0.1.0"
 dependencies = [
+ "avian3d",
  "bevy",
  "client",
  "console_error_panic_hook",

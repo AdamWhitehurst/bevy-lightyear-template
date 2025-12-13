@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+avian3d = { workspace = true }
 bevy = { workspace = true, default-features = true }
-lightyear = { workspace = true, features = ["client", "netcode", "udp", "crossbeam", "webtransport"] }
+leafwing-input-manager = { workspace = true }
+lightyear = { workspace = true, features = ["client", "netcode", "udp", "crossbeam", "webtransport", "leafwing", "prediction", "replication", "interpolation" ] }
 protocol = { workspace = true }
 render = { path = "../render" }
 ui = { path = "../ui" }

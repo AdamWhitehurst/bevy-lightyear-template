@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use lightyear::crossbeam::CrossbeamIo;
 use lightyear::netcode::Key;
-use lightyear::prelude::*;
 use lightyear::prelude::client::*;
+use lightyear::prelude::*;
 use lightyear::webtransport::client::WebTransportClientIo;
 use protocol::*;
 use std::net::SocketAddr;
@@ -89,6 +89,7 @@ fn setup_client(mut commands: Commands, config: ClientNetworkConfig) {
         PeerAddr(config.server_addr),
         Link::new(None),
         ReplicationReceiver::default(),
+        PredictionManager::default(),
         NetcodeClient::new(auth, NetcodeConfig::default()).unwrap(),
     ));
 

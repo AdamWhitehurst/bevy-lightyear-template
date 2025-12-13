@@ -43,6 +43,7 @@ protocol = { workspace = true }
 client = { path = "../client" }
 render = { path = "../render" }
 ui = { path = "../ui" }
+avian3d = { workspace = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 wasm-bindgen = { workspace = true }

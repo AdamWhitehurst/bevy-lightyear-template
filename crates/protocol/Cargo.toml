@@ -7,8 +7,10 @@ edition = "2021"
 test_utils = ["dep:lightyear_transport"]
 
 [dependencies]
-bevy = { workspace = true }
-lightyear = { workspace = true }
+avian3d = { workspace = true, features = ["serialize"] }
+bevy = { workspace = true, features = ["bevy_color"] }
+leafwing-input-manager = { workspace = true }
+lightyear = { workspace = true, features = ["avian3d", "leafwing"] }
 lightyear_transport = { version = "0.25.5", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 
