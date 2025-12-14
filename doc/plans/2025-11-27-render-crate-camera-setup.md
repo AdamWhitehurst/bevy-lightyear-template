@@ -455,7 +455,7 @@ Existing integration tests should continue to pass. Camera setup doesn't affect 
 
 ## References
 
-- Original research: [thoughts/shared/research/2025-11-27-render-crate-camera-setup.md](thoughts/shared/research/2025-11-27-render-crate-camera-setup.md)
+- Original research: [doc/research/2025-11-27-render-crate-camera-setup.md](doc/research/2025-11-27-render-crate-camera-setup.md)
 - Current camera implementation: [crates/client/src/network.rs:77](crates/client/src/network.rs#L77)
 - Plugin pattern example: [crates/protocol/src/lib.rs:13-28](crates/protocol/src/lib.rs#L13-L28)
 - Client plugin example: [crates/client/src/network.rs:64-72](crates/client/src/network.rs#L64-L72)

@@ -1499,7 +1499,7 @@ pub mod network;
 
 ## References
 
-- Research document: [thoughts/shared/research/2025-11-24-network-plugin-refactoring.md](thoughts/shared/research/2025-11-24-network-plugin-refactoring.md)
+- Research document: [doc/research/2025-11-24-network-plugin-refactoring.md](doc/research/2025-11-24-network-plugin-refactoring.md)
 - Lightyear plugin patterns: `git/lightyear/lightyear/src/client.rs:13-65`
 - Observer registration example: `git/lightyear/lightyear_netcode/src/server_plugin.rs:338-371`
 - Config struct pattern: `git/lightyear/lightyear_core/src/plugin.rs:6-18`

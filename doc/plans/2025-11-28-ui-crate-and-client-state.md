@@ -1158,7 +1158,7 @@ fn test_client_connects_to_server() {
 
 ## References
 
-- Research document: `thoughts/shared/research/2025-11-28-ui-crate-and-client-state.md`
+- Research document: `doc/research/2025-11-28-ui-crate-and-client-state.md`
 - Render crate pattern: `crates/render/src/lib.rs`
 - ClientNetworkPlugin: `crates/client/src/network.rs:52-73`
 - Bevy States example: `git/bevy/examples/state/states.rs`

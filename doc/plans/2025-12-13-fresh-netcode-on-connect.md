@@ -177,5 +177,5 @@ fn on_entering_connecting_state(
 
 ## References
 
-- Research: `thoughts/shared/research/2025-12-13-netcode-token-expired-fix.md`
+- Research: `doc/research/2025-12-13-netcode-token-expired-fix.md`
 - Lightyear lobby example: `git/lightyear/examples/lobby/src/client.rs:62-96`

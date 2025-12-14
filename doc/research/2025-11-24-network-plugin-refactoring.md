@@ -327,7 +327,7 @@ assert!(app.is_message_registered::<Message1>());
 - Allows synchronized stepping of client and server apps
 - Can test actual message passing (referenced in `crates/server/tests/connection_flow.rs:78-80`)
 
-## Historical Context (from thoughts/)
+## Historical Context (from doc/)
 
 No existing research documents found for this topic. This is the initial research document for network plugin refactoring.
 

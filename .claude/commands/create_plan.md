@@ -22,8 +22,8 @@ Please provide:
 
 I'll analyze this information and work with you to create a comprehensive plan.
 
-Tip: You can also invoke this command with a task file directly: `/create_plan thoughts/shared/tasks/feature-description.md`
-For deeper analysis, try: `/create_plan think deeply about thoughts/shared/tasks/feature-description.md`
+Tip: You can also invoke this command with a task file directly: `/create_plan doc/tasks/feature-description.md`
+For deeper analysis, try: `/create_plan think deeply about doc/tasks/feature-description.md`
 ```
 
 Then wait for the user's input.
@@ -33,7 +33,7 @@ Then wait for the user's input.
 ### Step 1: Context Gathering & Initial Analysis
 
 1. **Read all mentioned files immediately and FULLY**:
-   - Task files (e.g., `thoughts/shared/tasks/feature-description.md`)
+   - Task files (e.g., `doc/tasks/feature-description.md`)
    - Research documents
    - Related implementation plans
    - Any JSON/data files mentioned
@@ -46,7 +46,7 @@ Then wait for the user's input.
 
    - Use the **codebase-locator** agent to find all files related to the task
    - Use the **codebase-analyzer** agent to understand how the current implementation works
-   - If relevant, use the **thoughts-locator** agent to find any existing thoughts documents about this feature
+   - If relevant, use the **doc-locator** agent to find any existing doc documents about this feature
 
    These agents will:
    - Find relevant source files, configs, and tests
@@ -104,8 +104,8 @@ After getting initial clarifications:
    - **codebase-pattern-finder** - To find similar features we can model after
 
    **For historical context:**
-   - **thoughts-locator** - To find any research, plans, or decisions about this area
-   - **thoughts-analyzer** - To extract key insights from the most relevant documents
+   - **doc-locator** - To find any research, plans, or decisions about this area
+   - **doc-analyzer** - To extract key insights from the most relevant documents
 
    Each agent knows how to:
    - Find the right files and code patterns
@@ -160,7 +160,7 @@ Once aligned on approach:
 
 After structure approval:
 
-1. **Write the plan** to `thoughts/shared/plans/YYYY-MM-DD-description.md`
+1. **Write the plan** to `doc/plans/YYYY-MM-DD-description.md`
    - Format: `YYYY-MM-DD-description.md` where:
      - YYYY-MM-DD is today's date
      - description is a brief kebab-case description
@@ -258,8 +258,8 @@ After structure approval:
 
 ## References
 
-- Original task: `thoughts/shared/tasks/[relevant].md`
-- Related research: `thoughts/shared/research/[relevant].md`
+- Original task: `doc/tasks/[relevant].md`
+- Related research: `doc/research/[relevant].md`
 - Similar implementation: `[file:line]`
 ````
 
@@ -272,7 +272,7 @@ After structure approval:
 2. **Present the draft plan location**:
    ```
    I've created the initial implementation plan at:
-   `thoughts/shared/plans/YYYY-MM-DD-description.md`
+   `doc/plans/YYYY-MM-DD-description.md`
 
    Please review it and let me know:
    - Are the phases properly scoped?
@@ -416,7 +416,7 @@ tasks = [
 User: /create_plan
 Assistant: I'll help you create a detailed implementation plan...
 
-User: We need to add parent-child tracking for Claude sub-tasks. See thoughts/shared/tasks/parent-child-tracking.md
+User: We need to add parent-child tracking for Claude sub-tasks. See doc/tasks/parent-child-tracking.md
 Assistant: Let me read that task file completely first...
 
 [Reads file fully]

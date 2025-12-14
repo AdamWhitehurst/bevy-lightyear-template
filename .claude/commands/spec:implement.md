@@ -1,6 +1,6 @@
 # Implement Plan
 
-You are tasked with **orchestrating** the implementation of an approved technical plan from `thoughts/shared/plans/`. These plans contain phases with specific changes and success criteria.
+You are tasked with **orchestrating** the implementation of an approved technical plan from `doc/plans/`. These plans contain phases with specific changes and success criteria.
 
 **CRITICAL: Your role is to act as a driver-orchestrator, not as the primary implementer.** Delegate implementation work to specialized subagents wherever appropriate.
 

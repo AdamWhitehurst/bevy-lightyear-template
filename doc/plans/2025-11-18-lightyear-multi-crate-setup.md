@@ -1036,7 +1036,7 @@ If using older Lightyear/Bevy versions, adapt:
 
 ## References
 
-- Original research: `thoughts/shared/research/2025-11-16-lightyear-multi-crate-setup.md`
+- Original research: `doc/research/2025-11-16-lightyear-multi-crate-setup.md`
 - Lightyear simple_setup example: `git/lightyear/examples/simple_setup/`
 - Lightyear protocol patterns: `git/lightyear/examples/*/src/protocol.rs`
 - Certificate generation: `git/lightyear/certificates/generate.sh`

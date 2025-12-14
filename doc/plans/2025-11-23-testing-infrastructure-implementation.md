@@ -842,7 +842,7 @@ No migration needed - this is net-new infrastructure with zero existing tests.
 
 ## References
 
-- Research document: `thoughts/shared/research/2025-11-22-testing-infrastructure-patterns.md`
+- Research document: `doc/research/2025-11-22-testing-infrastructure-patterns.md`
 - Lightyear stepper: `git/lightyear/lightyear_tests/src/stepper.rs:36-567`
 - Lightyear connection tests: `git/lightyear/lightyear_tests/src/client_server/base.rs:9-105`
 - Lightyear message tests: `git/lightyear/lightyear_tests/src/client_server/messages.rs:32-80`

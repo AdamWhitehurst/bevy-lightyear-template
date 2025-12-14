@@ -41,7 +41,7 @@ Then wait for the user's research query.
 
    **CRITICAL: SUB-AGENT DIRECTION:**
    - **Only search and report**: Sub-agents should ONLY search the codebase and return findings in their response
-   - **YOU synthesize**: Only YOU (the main research agent) create the final research document in thoughts/shared/research/
+   - **YOU synthesize**: Only YOU (the main research agent) create the final research document in doc/research/
    - **Use "find and report back" language**: When prompting sub-agents, use phrases like:
      - "Find and report back on..."
      - "Search for and describe..."
@@ -55,9 +55,9 @@ Then wait for the user's research query.
 
    **IMPORTANT**: All agents are documentarians, not critics. They will describe what exists without suggesting improvements or identifying issues.
 
-   **For thoughts directory:**
-   - Use the **thoughts-locator** agent to discover what documents exist about the topic
-   - Use the **thoughts-analyzer** agent to extract key insights from specific documents (only the most relevant ones)
+   **For doc directory:**
+   - Use the **doc-locator** agent to discover what documents exist about the topic
+   - Use the **doc-analyzer** agent to extract key insights from specific documents (only the most relevant ones)
 
    **For web research:**
    - Use the **web-search-researcher** agent for external documentation and resources
@@ -164,18 +164,18 @@ Then wait for the user's research query.
 
 4. **Wait for all sub-agents to complete and synthesize findings:**
    - IMPORTANT: Wait for ALL sub-agent tasks to complete before proceeding
-   - Compile all sub-agent results (both codebase and thoughts findings)
+   - Compile all sub-agent results (both codebase and doc findings)
    - Prioritize live codebase findings as primary source of truth
-   - Use thoughts/ findings as supplementary historical context
+   - Use doc/ findings as supplementary historical context
    - Connect findings across different components
    - Include specific file paths and line numbers for reference
-   - Verify all thoughts/ paths are correct (e.g., thoughts/allison/ not thoughts/shared/ for personal files)
+   - Verify all doc/ paths are correct (e.g., doc/allison/ not doc/ for personal files)
    - Highlight patterns, connections, and architectural decisions
    - Answer the user's specific questions with concrete evidence
 
 5. **Gather metadata for the research document:**
    - Run the `scripts/spec_metadata.sh` script to generate all relevant metadata
-   - Filename: `thoughts/shared/research/YYYY-MM-DD-description.md`
+   - Filename: `doc/research/YYYY-MM-DD-description.md`
      - Format: `YYYY-MM-DD-description.md` where:
        - YYYY-MM-DD is today's date
        - description is a brief kebab-case description of the research topic
@@ -189,7 +189,7 @@ Then wait for the user's research query.
      ```markdown
      ---
      date: [Current date and time with timezone in ISO format]
-     researcher: [Researcher name from thoughts status]
+     researcher: [Researcher name from doc status]
      git_commit: [Current commit hash]
      branch: [Current branch name]
      repository: [Repository name]
@@ -203,7 +203,7 @@ Then wait for the user's research query.
      # Research: [User's Question/Topic]
 
      **Date**: [Current date and time with timezone from step 4]
-     **Researcher**: [Researcher name from thoughts status]
+     **Researcher**: [Researcher name from doc status]
      **Git Commit**: [Current commit hash from step 4]
      **Branch**: [Current branch name from step 4]
      **Repository**: [Repository name]
@@ -232,14 +232,14 @@ Then wait for the user's research query.
      ## Architecture Documentation
      [Current patterns, conventions, and design implementations found in the codebase]
 
-     ## Historical Context (from thoughts/)
-     [Relevant insights from thoughts/ directory with references]
-     - `thoughts/shared/something.md` - Historical decision about X
-     - `thoughts/local/notes.md` - Past exploration of Y
+     ## Historical Context (from doc/)
+     [Relevant insights from doc/ directory with references]
+     - `doc/something.md` - Historical decision about X
+     - `doc/local/notes.md` - Past exploration of Y
      Note: Paths exclude "searchable/" even if found there
 
      ## Related Research
-     [Links to other research documents in thoughts/shared/research/]
+     [Links to other research documents in doc/research/]
 
      ## Open Questions
      [Any areas that need further investigation]
@@ -268,7 +268,7 @@ Then wait for the user's research query.
 ## Important notes:
 - Always use parallel Task agents to maximize efficiency and minimize context usage
 - Always run fresh codebase research - never rely solely on existing research documents
-- The thoughts/ directory provides historical context to supplement live findings
+- The doc/ directory provides historical context to supplement live findings
 - Focus on finding concrete file paths and line numbers for developer reference
 - Research documents should be self-contained with all necessary context
 - Each sub-agent prompt should be specific and focused on read-only search and reporting operations
@@ -277,23 +277,23 @@ Then wait for the user's research query.
 - Link to GitHub when possible for permanent references
 - Keep the main agent focused on synthesis, not deep file reading
 - Have sub-agents find and describe examples and usage patterns as they exist
-- Explore all of thoughts/ directory, not just research subdirectory
+- Explore all of doc/ directory, not just research subdirectory
 - **CRITICAL**: You and all sub-agents search and report findings, not evaluate or improve
 - **REMEMBER**: Report what IS, not what SHOULD BE
 - **NO RECOMMENDATIONS**: Only describe the current state of the codebase
-- **SUB-AGENTS DO NOT CREATE FILES**: Only the main research agent creates the final document in thoughts/shared/research/
+- **SUB-AGENTS DO NOT CREATE FILES**: Only the main research agent creates the final document in doc/research/
 - **File reading**: Always read mentioned files FULLY (no limit/offset) before spawning sub-tasks
 - **Critical ordering**: Follow the numbered steps exactly
   - ALWAYS read mentioned files first before spawning sub-tasks (step 1)
   - ALWAYS wait for all sub-agents to complete before synthesizing (step 4)
   - ALWAYS gather metadata before writing the document (step 5 before step 6)
   - NEVER write the research document with placeholder values
-- **Path handling**: The thoughts/searchable/ directory contains hard links for searching
+- **Path handling**: The doc/searchable/ directory contains hard links for searching
   - Always document paths by removing ONLY "searchable/" - preserve all other subdirectories
   - Examples of correct transformations:
-    - `thoughts/searchable/allison/old_stuff/notes.md` → `thoughts/allison/old_stuff/notes.md`
-    - `thoughts/searchable/shared/prs/123.md` → `thoughts/shared/prs/123.md`
-    - `thoughts/searchable/global/shared/templates.md` → `thoughts/global/shared/templates.md`
+    - `doc/searchable/allison/old_stuff/notes.md` → `doc/allison/old_stuff/notes.md`
+    - `doc/searchable/shared/prs/123.md` → `doc/prs/123.md`
+    - `doc/searchable/global/shared/templates.md` → `doc/global/shared/templates.md`
   - NEVER change allison/ to shared/ or vice versa - preserve the exact directory structure
   - This ensures paths are correct for editing and navigation
 - **Frontmatter consistency**:
