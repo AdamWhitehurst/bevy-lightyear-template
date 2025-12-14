@@ -5,7 +5,8 @@ edition = "2021"
 
 [dependencies]
 bevy = { workspace = true, default-features = true }
-lightyear = { workspace = true, features = ["client"] }
+lightyear = { workspace = true, features = ["client", "netcode"] }
+protocol = { path = "../protocol" }
 
 [dev-dependencies]
 protocol = { workspace = true, features = ["test_utils"] }

@@ -4,14 +4,43 @@ pub mod components;
 use bevy::prelude::*;
 use bevy::ecs::message::MessageWriter;
 use lightyear::prelude::client::*;
+use lightyear::prelude::Authentication;
+use lightyear::netcode::Key;
+use protocol::{PROTOCOL_ID, PRIVATE_KEY};
 pub use state::ClientState;
 pub use components::*;
+use std::net::SocketAddr;
+
+/// Lightweight client config for UI - mirrors essential fields from client::ClientNetworkConfig
+/// This exists to avoid circular dependency between client and ui crates.
+/// The main.rs is responsible for syncing this with ClientNetworkConfig.
+#[derive(Clone, Resource)]
+pub struct UiClientConfig {
+    pub server_addr: SocketAddr,
+    pub client_id: u64,
+    pub protocol_id: u64,
+    pub private_key: [u8; 32],
+}
+
+impl Default for UiClientConfig {
+    fn default() -> Self {
+        Self {
+            server_addr: SocketAddr::from(([127, 0, 0, 1], 5000)),
+            client_id: 0,
+            protocol_id: PROTOCOL_ID,
+            private_key: PRIVATE_KEY,
+        }
+    }
+}
 
 /// Plugin that manages UI and client state
 pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
+        // Initialize resources
+        app.init_resource::<UiClientConfig>();
+
         // Initialize state management
         app.init_state::<ClientState>();
 
@@ -39,9 +68,25 @@ impl Plugin for UiPlugin {
 fn on_entering_connecting_state(
     mut commands: Commands,
     client_query: Query<Entity, With<Client>>,
+    config: Res<UiClientConfig>,
 ) {
     info!("Entering Connecting state, triggering connection...");
     let client_entity = client_query.single().expect("Client entity should exist");
+
+    // Create fresh authentication with new token
+    let auth = Authentication::Manual {
+        server_addr: config.server_addr,
+        client_id: config.client_id,
+        private_key: Key::from(config.private_key),
+        protocol_id: config.protocol_id,
+    };
+
+    // Insert fresh NetcodeClient (replaces old one, generates new token)
+    commands.entity(client_entity).insert(
+        NetcodeClient::new(auth, NetcodeConfig::default())
+            .expect("Failed to create NetcodeClient"),
+    );
+
     commands.trigger(Connect {
         entity: client_entity,
     });

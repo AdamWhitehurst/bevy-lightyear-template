@@ -25,7 +25,7 @@ impl Default for ClientTransport {
 }
 
 /// Configuration for the client network plugin
-#[derive(Clone)]
+#[derive(Clone, Resource)]
 pub struct ClientNetworkConfig {
     pub client_addr: SocketAddr,
     pub server_addr: SocketAddr,
@@ -64,6 +64,7 @@ impl Default for ClientNetworkPlugin {
 impl Plugin for ClientNetworkPlugin {
     fn build(&self, app: &mut App) {
         let config = self.config.clone();
+        app.insert_resource(config.clone());
         app.add_systems(Startup, move |commands: Commands| {
             setup_client(commands, config.clone());
         });
