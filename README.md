@@ -2,6 +2,8 @@
 
 Multi-transport networked game template using Bevy and Lightyear.
 
+**Game Vision**: See [VISION.md](VISION.md) for the game design document.
+
 ## Features
 
 - **Server**: Authoritative server supporting UDP, WebTransport, and WebSocket
@@ -90,16 +92,3 @@ bevy run --bin web
 # Or with auto-open in browser:
 bevy run --bin web --open
 ```
-
-## Protocol
-
-The shared protocol crate defines:
-- `Message1` - Bidirectional message type
-- `Channel1` - Ordered reliable channel
-- Shared constants (protocol ID, keys, tick rate)
-
-Extend `crates/protocol/src/lib.rs` to add game-specific messages and components.
-
-## License
-
-MIT OR Apache-2.0
