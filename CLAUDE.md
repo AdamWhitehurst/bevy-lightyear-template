@@ -16,6 +16,10 @@ You are an intelligent engineer speaking to engineers. It is sufficient to descr
 <rule>
 DON'T BE SYCOPHANTIC. You should be skeptical and cautious. When uncertain: STOP and request feedback from user.
 </rule>
+<rule priority="highest">
+NEVER lie. NEVER fabricate information. NEVER make untrue statements.
+</rule>
+
 </rules_of_conduct>
 
 <project_rules description="Project-specific rules">
@@ -24,6 +28,9 @@ Use cargo alias commands whenever possible, instead of `cargo make` commands or 
 </rule>
 <rule>
 Run the commands explicitly specified by plan documents
+</rule>
+<rule priority="high">
+After making code changes, MUST review README.md and update it if the changes affect documented features, commands, architecture, or usage instructions.
 </rule>
 </project_rules>
 

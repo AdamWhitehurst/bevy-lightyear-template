@@ -43,7 +43,6 @@ The key insight: Players loved becoming "proud parents" of unique creatures with
 ### Core Combat Mechanics
 
 **Lightning-Fast Arena Fighting:**
-- **10-second knockout cycles** (vs. 30+ seconds in Smash Bros)
 - **Pseudo-3D arenas** with free movement and eight-directional dashing
 - **Simple controls**: B (attack), A (jump), L (block/heal), R (special)
 - **Juggling system**: Multiple attack types for air combos
@@ -182,7 +181,7 @@ Battle → Earn Skill Card → Customize Emerl → Test Build → Repeat
 **Key Success Factors:**
 1. **Simple + Deep**: "Beginner-friendly and easy to play, featuring no complicated combos or button inputs"
 2. **Power Copying**: First Sonic game built around copying/customization as core mechanic
-3. **Portable Design**: 10-second battles perfect for handheld sessions
+3. **Portable Design**: Short battles perfect for handheld sessions
 4. **Collection Hook**: 309 cards drove completionist gameplay
 
 **Sources:**
@@ -1007,7 +1006,6 @@ fn apply_combat_actions(
     physics_config: Res<PhysicsConfig>,
 ) {
     for (actions, moveset, mut combat, mut comeback, stats, pos, vel) in query.iter_mut() {
-        // Fast-paced knockouts (10-second cycles)
         if actions.just_pressed(&PlayerAction::Attack) {
             let move_id = if combat.is_airborne {
                 moveset.air_attack
@@ -1114,7 +1112,7 @@ fn update_comeback_gauge(
 ```
 
 **Why This Works:**
-- **Fast-Paced**: Short attack durations (0.1s hitboxes) create 10-second knockout cycles
+- **Fast-Paced**: Short attack durations (0.1s hitboxes)
 - **Simple Controls**: 6 action buttons (Move, Jump, Dash, Attack, Special, Block)
 - **Strategic Depth**: Slot allocation (ground/air/defend) + comeback gauge
 - **Sonic Battle DNA**: Directly maps core systems (juggling, specials, Ichikoro)
@@ -2362,7 +2360,7 @@ app.add_systems(
 ## Summary: Core Essence Captured
 
 ### From Sonic Battle:
-✅ **Fast combat** (10-second knockout cycles)
+✅ **Fast combat**
 ✅ **Simple controls** (6 action buttons)
 ✅ **Deep customization** (309 fragments, 500-point budget)
 ✅ **Strategic slot allocation** (ground/air/defend specials)
@@ -2442,11 +2440,11 @@ app.add_systems(
 This research provides a comprehensive foundation for creating a multiplayer 2.5D game that captures the essence of Sonic Battle's fast-paced combat and Chao Garden's deep emotional engagement. The proposed Bevy ECS architecture leverages your existing codebase (Lightyear networking, Avian3D physics, asset-driven design) while introducing:
 
 1. **Character-as-Chao**: Persistent entities with stats, personality, and appearance
-2. **Fast Arena Combat**: 10-second knockout cycles with customizable movesets
+2. **Fast Arena Combat**: Short knockout cycles with customizable movesets
 3. **Deep Customization**: 309 fragments with skill point budget (Emerl DNA)
 4. **Emotional Systems**: Happiness, personality, and reincarnation (Chao DNA)
 5. **Long-term Progression**: Multi-generational stat grades and ranked competition
 
-The key to success: **Make players feel like proud parents of unique creatures they've raised and customized, then let them show off in thrilling 10-second battles that reward mastery and strategic loadout decisions.**
+The key to success: **Make players feel like proud parents of unique creatures they've raised and customized, then let them show off in thrilling battles that reward mastery and strategic loadout decisions.**
 
 This design respects both the technical constraints (Lightyear's rollback, Bevy's ECS) and the emotional core that made these systems beloved 20+ years later.
