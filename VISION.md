@@ -152,14 +152,10 @@ A player should feel:
 - **Variety** from different challenge types beyond just fighting
 - **Community** through overworld encounters and player quests
 
-## Open Questions
+## Design Decisions
 
-1. Lifespan: Real-time hours vs. activity-based aging?
-2. Permadeath: Character deletion vs. "retirement" to trophy room?
-3. PvP consent: Can players be challenged without opting in?
-4. Economy: Trading brawlers/items between players?
-5. Monetization: Cosmetic-only or progression shortcuts?
+1. **Lifespan**: Activity-based (~80% from playing with that brawler, ~20% from overall session time). Idle aging only accrues while player is online, not logged out.
+2. **Permadeath**: Optional "hardcore" mode—leave flexibility for both retirement and deletion.
+3. **Economy**: Items tradeable; brawlers are not.
+4. **Monetization**: Cosmetic-only, no progression shortcuts.
 
----
-
-*See [doc/research/2025-09-30-sonic-battle-chao-design-research.md](doc/research/2025-09-30-sonic-battle-chao-design-research.md) for detailed mechanics analysis and technical implementation plans.*
