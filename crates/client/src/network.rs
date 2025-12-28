@@ -33,6 +33,8 @@ pub struct ClientNetworkConfig {
     pub protocol_id: u64,
     pub private_key: [u8; 32],
     pub transport: ClientTransport,
+    /// Token expiry in seconds. Default is 30 seconds.
+    pub token_expire_secs: i32,
 }
 
 impl Default for ClientNetworkConfig {
@@ -44,6 +46,7 @@ impl Default for ClientNetworkConfig {
             protocol_id: PROTOCOL_ID,
             private_key: PRIVATE_KEY,
             transport: ClientTransport::default(),
+            token_expire_secs: 30,
         }
     }
 }
@@ -82,6 +85,11 @@ fn setup_client(mut commands: Commands, config: ClientNetworkConfig) {
         protocol_id: config.protocol_id,
     };
 
+    let netcode_config = NetcodeConfig {
+        token_expire_secs: config.token_expire_secs,
+        ..Default::default()
+    };
+
     // Base components (always present)
     let mut entity_builder = commands.spawn((
         Name::new("Client"),
@@ -91,7 +99,7 @@ fn setup_client(mut commands: Commands, config: ClientNetworkConfig) {
         Link::new(None),
         ReplicationReceiver::default(),
         PredictionManager::default(),
-        NetcodeClient::new(auth, NetcodeConfig::default()).unwrap(),
+        NetcodeClient::new(auth, netcode_config).unwrap(),
     ));
 
     // Add transport-specific component

@@ -31,6 +31,7 @@ impl Plugin for WebClientPlugin {
             protocol_id: PROTOCOL_ID,
             private_key: PRIVATE_KEY,
             transport: ClientTransport::WebTransport { certificate_digest },
+            ..default()
         };
 
         // Reuse ClientNetworkPlugin with WebTransport config
