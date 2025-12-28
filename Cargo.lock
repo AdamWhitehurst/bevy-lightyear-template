@@ -191,6 +191,17 @@ dependencies = [
 
 [[package]]
 name = "ahash"
+version = "0.7.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "891477e0c6a8957309ee5c45a6368af3ae14bb510732d2684ffa19af310920f9"
+dependencies = [
+ "getrandom 0.2.16",
+ "once_cell",
+ "version_check",
+]
+
+[[package]]
+name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
@@ -1812,6 +1823,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_voxel_world"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f218fdd0e34eb6327426628b724c3841a1b2fc8d3caa363efa03bc5e2d50636"
+dependencies = [
+ "ahash 0.8.12",
+ "bevy",
+ "bevy_shader",
+ "block-mesh",
+ "futures-lite",
+ "hashbrown 0.16.0",
+ "ndshape",
+ "rand",
+ "weak-table",
+]
+
+[[package]]
 name = "bevy_web_keepalive"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1964,6 +1992,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71"
 dependencies = [
  "generic-array",
+]
+
+[[package]]
+name = "block-mesh"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c0345520b5aa77d7d154bd578a18e7a974350931b5f41f641a7844e951b978f"
+dependencies = [
+ "ilattice",
+ "ndcopy",
+ "ndshape",
 ]
 
 [[package]]
@@ -2177,6 +2216,7 @@ dependencies = [
  "approx",
  "avian3d",
  "bevy",
+ "bevy_voxel_world",
  "leafwing-input-manager",
  "lightyear",
  "mock_instant",
@@ -3703,6 +3743,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ilattice"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3db9046391c0e0658a18e23877706d16e48cc8b4711702b9f703776410c2b84"
+dependencies = [
+ "glam 0.19.0",
+]
+
+[[package]]
 name = "image"
 version = "0.25.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4696,7 +4745,7 @@ version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25dea7ac8057892855ec285c440160265225438c3c45072613c25a4b26e98ef5"
 dependencies = [
- "ahash",
+ "ahash 0.8.12",
  "portable-atomic",
 ]
 
@@ -4862,6 +4911,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ndcopy"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24f4e41b81e3f7a4b742755be1bb368a6faafc43af555fe135c36b0efe095c59"
+dependencies = [
+ "ndshape",
+]
+
+[[package]]
 name = "ndk"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4912,6 +4970,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee6cda3051665f1fb8d9e08fc35c96d5a244fb1be711a03b71118828afc9a873"
 dependencies = [
  "jni-sys",
+]
+
+[[package]]
+name = "ndshape"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "975bce586ad637e27f6dc26ee907c07050686a588695bfd64b7873a9d48a700c"
+dependencies = [
+ "static_assertions",
 ]
 
 [[package]]
@@ -5803,6 +5870,7 @@ version = "0.1.0"
 dependencies = [
  "avian3d",
  "bevy",
+ "bevy_voxel_world",
  "leafwing-input-manager",
  "lightyear",
  "lightyear_transport",
@@ -6101,6 +6169,7 @@ version = "0.1.0"
 dependencies = [
  "avian3d",
  "bevy",
+ "bevy_voxel_world",
  "lightyear",
  "protocol",
 ]
@@ -6484,10 +6553,12 @@ dependencies = [
  "approx",
  "avian3d",
  "bevy",
+ "bevy_voxel_world",
  "client",
  "leafwing-input-manager",
  "lightyear",
  "lightyear_crossbeam",
+ "lightyear_raw_connection",
  "mock_instant",
  "protocol",
  "test-log",
@@ -7610,6 +7681,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "weak-table"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "323f4da9523e9a669e1eaf9c6e763892769b1d38c623913647bfdc1532fe4549"
+dependencies = [
+ "ahash 0.7.8",
+]
+
+[[package]]
 name = "web"
 version = "0.1.0"
 dependencies = [
@@ -8352,7 +8432,7 @@ version = "0.30.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c66d4b9ed69c4009f6321f762d6e61ad8a2389cd431b97cb1e146812e9e6c732"
 dependencies = [
- "ahash",
+ "ahash 0.8.12",
  "android-activity",
  "atomic-waker",
  "bitflags 2.10.0",

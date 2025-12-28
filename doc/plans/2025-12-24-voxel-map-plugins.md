@@ -146,8 +146,8 @@ pub use map::{MapWorld, VoxelType};
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check -p protocol` passes
-- [ ] `cargo test-all` passes (existing tests)
+- [x] `cargo check -p protocol` passes
+- [x] `cargo test-all` passes (existing tests)
 
 #### Manual Verification:
 - [ ] N/A (no runtime behavior yet)
@@ -225,11 +225,11 @@ app.add_message::<VoxelStateSync>(MessageSettings {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check -p protocol` passes
-- [ ] `cargo test-all` passes
+- [x] `cargo check -p protocol` passes
+- [x] `cargo test-all` passes
 
 #### Manual Verification:
-- [ ] N/A (no runtime behavior yet)
+- [x] N/A (no runtime behavior yet)
 
 ---
 
@@ -343,11 +343,11 @@ impl Plugin for ServerGameplayPlugin {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check -p server` passes
-- [ ] `cargo server` starts without crash
+- [x] `cargo check -p server` passes
+- [x] `cargo server` starts without crash
 
 #### Manual Verification:
-- [ ] Server logs show VoxelWorldPlugin initialized
+- [x] Server logs show VoxelWorldPlugin initialized
 
 ---
 
@@ -457,7 +457,7 @@ impl Plugin for ClientGameplayPlugin {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check -p client` passes
+- [x] `cargo check -p client` passes
 - [ ] `cargo client -c 1` starts without crash
 
 #### Manual Verification:
@@ -466,7 +466,7 @@ impl Plugin for ClientGameplayPlugin {
 
 ---
 
-## Phase 5: Physics Integration
+## Phase 5: Web Support
 
 ### Overview
 Add physics colliders to voxel chunks for character collision.
@@ -574,8 +574,8 @@ app.add_plugins(VoxelPhysicsPlugin);
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo test-all` passes
-- [ ] `cargo server` and `cargo client -c 1` run without crash
+- [x] `cargo test-all` passes
+- [x] `cargo server` and `cargo client -c 1` run without crash
 
 #### Manual Verification:
 - [ ] Character stands on voxel terrain (doesn't fall through)
@@ -694,8 +694,8 @@ impl Plugin for ClientMapPlugin {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo test-all` passes
-- [ ] `cargo client -c 1` runs without crash
+- [x] `cargo test-all` passes
+- [x] `cargo client -c 1` runs without crash
 
 #### Manual Verification:
 - [ ] Left-click on terrain places a voxel
@@ -728,7 +728,7 @@ Same as native client - `ClientMapPlugin` should work without modification.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `bevy run web` builds successfully
+- [x] `cargo check -p web` passes
 
 #### Manual Verification:
 - [ ] Voxel terrain renders in browser

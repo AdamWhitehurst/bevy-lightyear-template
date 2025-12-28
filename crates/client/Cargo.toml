@@ -4,8 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-avian3d = { workspace = true }
+avian3d = { workspace = true, features = [ "debug-plugin" ]}
 bevy = { workspace = true, default-features = true }
+bevy_voxel_world = { workspace = true }
 leafwing-input-manager = { workspace = true }
 lightyear = { workspace = true, features = ["client", "netcode", "udp", "crossbeam", "webtransport", "leafwing", "prediction", "replication", "interpolation" ] }
 protocol = { workspace = true }

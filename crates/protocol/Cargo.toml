@@ -9,6 +9,7 @@ test_utils = ["dep:lightyear_transport"]
 [dependencies]
 avian3d = { workspace = true, features = ["serialize"] }
 bevy = { workspace = true, features = ["bevy_color"] }
+bevy_voxel_world = { workspace = true }
 leafwing-input-manager = { workspace = true }
 lightyear = { workspace = true, features = ["avian3d", "leafwing"] }
 lightyear_transport = { version = "0.25.5", optional = true }

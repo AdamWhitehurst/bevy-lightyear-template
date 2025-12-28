@@ -1,10 +1,11 @@
 use bevy::prelude::*;
 use client::gameplay::ClientGameplayPlugin;
+use client::map::ClientMapPlugin;
 use lightyear::prelude::client::*;
 use protocol::*;
 use render::RenderPlugin;
-use ui::UiPlugin;
 use std::time::Duration;
+use ui::UiPlugin;
 
 pub mod network;
 use network::WebClientPlugin;
@@ -27,6 +28,7 @@ fn main() {
         .add_plugins(SharedGameplayPlugin)
         .add_plugins(WebClientPlugin::default())
         .add_plugins(ClientGameplayPlugin)
+        .add_plugins(ClientMapPlugin)
         .add_plugins(RenderPlugin)
         .add_plugins(UiPlugin)
         .run();

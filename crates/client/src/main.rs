@@ -1,14 +1,17 @@
-pub mod network;
 pub mod gameplay;
+pub mod map;
+pub mod network;
 
+use avian3d::prelude::PhysicsDebugPlugin;
 use bevy::prelude::*;
-use lightyear::prelude::client::*;
-use network::{ClientNetworkConfig, ClientNetworkPlugin};
 use gameplay::ClientGameplayPlugin;
+use lightyear::prelude::client::*;
+use map::ClientMapPlugin;
+use network::{ClientNetworkConfig, ClientNetworkPlugin};
 use protocol::*;
 use render::RenderPlugin;
-use ui::{UiPlugin, UiClientConfig};
 use std::time::Duration;
+use ui::{UiClientConfig, UiPlugin};
 
 fn main() {
     let client_id = parse_client_id();
@@ -35,10 +38,12 @@ fn main() {
         .add_plugins(ClientNetworkPlugin {
             config: network_config,
         })
-        .insert_resource(ui_config)  // Override default UiClientConfig
+        .insert_resource(ui_config) // Override default UiClientConfig
         .add_plugins(ClientGameplayPlugin)
+        .add_plugins(ClientMapPlugin)
         .add_plugins(RenderPlugin)
         .add_plugins(UiPlugin)
+        .add_plugins(PhysicsDebugPlugin::default())
         .run();
 }
 

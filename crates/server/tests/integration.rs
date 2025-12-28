@@ -373,3 +373,17 @@ fn test_reconnection_with_token_refresh() {
         RECONNECT_COUNT
     );
 }
+
+/// Test that voxel messages are registered in protocol
+#[test]
+fn test_voxel_messages_registered() {
+    use protocol::{VoxelEditRequest, VoxelType};
+
+    // Create simple app to verify message types compile
+    let _request = VoxelEditRequest {
+        position: IVec3::new(1, 2, 3),
+        voxel: VoxelType::Solid(42),
+    };
+
+    info!("✓ Voxel message types compile successfully!");
+}

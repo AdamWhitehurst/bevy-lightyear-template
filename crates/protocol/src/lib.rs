@@ -6,6 +6,12 @@ use lightyear::prelude::input::leafwing::InputPlugin;
 use lightyear::prelude::*;
 use serde::{Deserialize, Serialize};
 
+pub mod map;
+pub use map::{
+    attach_chunk_colliders, MapWorld, VoxelChannel, VoxelEditBroadcast, VoxelEditRequest,
+    VoxelStateSync, VoxelType,
+};
+
 pub const PROTOCOL_ID: u64 = 0;
 pub const PRIVATE_KEY: [u8; 32] = [0; 32];
 pub const FIXED_TIMESTEP_HZ: f64 = 64.0;
@@ -19,13 +25,15 @@ pub const CHARACTER_CAPSULE_HEIGHT: f32 = 0.5;
 pub enum PlayerActions {
     Move,
     Jump,
+    PlaceVoxel,
+    RemoveVoxel,
 }
 
 impl Actionlike for PlayerActions {
     fn input_control_kind(&self) -> InputControlKind {
         match self {
             Self::Move => InputControlKind::DualAxis,
-            Self::Jump => InputControlKind::Button,
+            Self::Jump | Self::PlaceVoxel | Self::RemoveVoxel => InputControlKind::Button,
         }
     }
 }
@@ -83,6 +91,21 @@ impl Plugin for ProtocolPlugin {
                 ..default()
             },
         });
+
+        // Voxel channel
+        app.add_channel::<VoxelChannel>(ChannelSettings {
+            mode: ChannelMode::OrderedReliable(ReliableSettings::default()),
+            ..default()
+        })
+        .add_direction(NetworkDirection::Bidirectional);
+
+        // Voxel messages
+        app.register_message::<VoxelEditRequest>()
+            .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<VoxelEditBroadcast>()
+            .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<VoxelStateSync>()
+            .add_direction(NetworkDirection::ServerToClient);
 
         // Marker components
         app.register_component::<ColorComponent>();

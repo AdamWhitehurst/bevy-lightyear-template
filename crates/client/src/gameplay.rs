@@ -43,7 +43,9 @@ fn handle_new_character(
                 InputMap::new([(PlayerActions::Jump, KeyCode::Space)])
                     .with(PlayerActions::Jump, GamepadButton::South)
                     .with_dual_axis(PlayerActions::Move, GamepadStick::LEFT)
-                    .with_dual_axis(PlayerActions::Move, VirtualDPad::wasd()),
+                    .with_dual_axis(PlayerActions::Move, VirtualDPad::wasd())
+                    .with(PlayerActions::PlaceVoxel, MouseButton::Left)
+                    .with(PlayerActions::RemoveVoxel, MouseButton::Right),
             );
         } else {
             info!("Remote character predicted for us: {entity:?}");

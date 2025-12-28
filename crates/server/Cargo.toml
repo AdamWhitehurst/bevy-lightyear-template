@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 bevy = { workspace = true, default-features = true }
+bevy_voxel_world = { workspace = true }
 leafwing-input-manager = { workspace = true }
 lightyear = { workspace = true, features = ["server", "netcode", "udp", "webtransport", "websocket", "leafwing", "replication" ] }
 lightyear_crossbeam = "0.25.5"
@@ -27,3 +28,4 @@ protocol = { workspace = true, features = ["test_utils"] }
 client = { path = "../client" }
 ui = { path = "../ui" }
 lightyear_crossbeam = "0.25.5"
+lightyear_raw_connection = { version = "0.25.5", features = ["client", "server"] }
