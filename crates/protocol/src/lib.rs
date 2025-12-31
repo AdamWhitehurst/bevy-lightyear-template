@@ -81,6 +81,12 @@ impl Default for FloorPhysicsBundle {
     }
 }
 
+#[cfg(feature = "test_utils")]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Reflect, Event)]
+pub struct TestTrigger {
+    pub data: String,
+}
+
 pub struct ProtocolPlugin;
 
 impl Plugin for ProtocolPlugin {
@@ -106,6 +112,10 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<VoxelStateSync>()
             .add_direction(NetworkDirection::ServerToClient);
+
+        #[cfg(feature = "test_utils")]
+        app.register_event::<TestTrigger>()
+            .add_direction(NetworkDirection::Bidirectional);
 
         // Marker components
         app.register_component::<ColorComponent>();

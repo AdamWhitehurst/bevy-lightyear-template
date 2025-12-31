@@ -59,14 +59,14 @@ impl From<WorldVoxel> for VoxelType {
 }
 
 /// Client requests a voxel edit (admin only)
-#[derive(Serialize, Deserialize, Clone, Debug, Reflect, Message)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
 pub struct VoxelEditRequest {
     pub position: IVec3,
     pub voxel: VoxelType,
 }
 
 /// Server broadcasts voxel edit to all clients
-#[derive(Serialize, Deserialize, Clone, Debug, Reflect, Message)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
 pub struct VoxelEditBroadcast {
     pub position: IVec3,
     pub voxel: VoxelType,

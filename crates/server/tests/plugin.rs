@@ -7,7 +7,6 @@ use protocol::*;
 fn test_server_network_plugin_spawns_all_transports() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
-    app.add_plugins(bevy::log::LogPlugin::default());
     app.add_plugins(ServerPlugins::default());
     app.add_plugins(ProtocolPlugin);
 
@@ -110,7 +109,6 @@ fn test_server_network_plugin_observer_registration() {
 fn test_server_network_plugin_single_transport() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
-    app.add_plugins(bevy::log::LogPlugin::default());
     app.add_plugins(ServerPlugins::default());
     app.add_plugins(ProtocolPlugin);
 

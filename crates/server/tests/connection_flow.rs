@@ -1,4 +1,3 @@
-use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use lightyear::prelude::*;
 use lightyear::prelude::server::*;
@@ -8,7 +7,7 @@ use std::time::Duration;
 #[test]
 fn test_server_started() {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, LogPlugin::default()));
+    app.add_plugins(MinimalPlugins);
 
     let tick_duration = Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ);
     app.add_plugins(ServerPlugins { tick_duration });
@@ -47,7 +46,7 @@ fn test_client_server_connection() {
     // For actual connection testing with message passing, see lightyear_tests/src/stepper.rs
 
     let mut server_app = App::new();
-    server_app.add_plugins((MinimalPlugins, LogPlugin::default()));
+    server_app.add_plugins(MinimalPlugins);
 
     let tick_duration = Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ);
     server_app.add_plugins(ServerPlugins { tick_duration });

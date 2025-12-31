@@ -1,4 +1,3 @@
-use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use lightyear::prelude::*;
 use lightyear::prelude::server::*;
@@ -28,7 +27,7 @@ fn on_client_disconnected(
 #[test]
 fn test_server_observer_registration() {
     let mut app = App::new();
-    app.add_plugins((MinimalPlugins, LogPlugin::default()));
+    app.add_plugins(MinimalPlugins);
 
     let tick_duration = Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ);
     app.add_plugins(ServerPlugins { tick_duration });
