@@ -81,41 +81,26 @@ bevy run web "$@"
 description = "Ensure certificates exist, generate if missing"
 script = '''
 #!/bin/bash
+set -e
 
 if [ ! -f "certificates/digest.txt" ]; then
     echo "Certificates not found, generating..."
-    cargo make generate-certs
+    bash certificates/generate.sh
 else
     echo "Certificates found"
 fi
 '''
 
-[tasks.test-protocol]
-description = "Run protocol crate unit tests"
-workspace = false
-command = "cargo"
-args = ["test", "-p", "protocol", "--all-features"]
-
-[tasks.test-client]
-description = "Run client crate integration tests"
-workspace = false
-command = "cargo"
-args = ["test", "-p", "client"]
-
-[tasks.test-server]
-description = "Run server crate integration tests"
-workspace = false
-command = "cargo"
-args = ["test", "-p", "server"]
-
 [tasks.test-native]
-description = "Run all native tests (protocol, client, server)"
+description = "Run all native tests (excludes WASM)"
 workspace = false
-dependencies = ["test-protocol", "test-client", "test-server"]
+command = "cargo"
+args = ["test", "--workspace", "--exclude", "web"]
 
 [tasks.test-all]
 description = "Run all tests including WASM (WARNING: WASM compilation is very resource-intensive)"
 workspace = false
+dependencies = ["ensure-certs"]
 run_task = { name = ["test-native", "test-wasm"], parallel = false }
 
 [tasks.test-wasm]

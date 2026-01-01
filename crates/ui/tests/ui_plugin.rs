@@ -145,6 +145,8 @@ fn test_connecting_state_spawns_cancel_button() {
         Client::default(),
     ));
 
+    app.update();
+
     // Transition to Connecting state
     app.world_mut().resource_mut::<NextState<ClientState>>().set(ClientState::Connecting);
     app.update();
