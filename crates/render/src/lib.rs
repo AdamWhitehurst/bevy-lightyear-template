@@ -9,6 +9,19 @@ pub struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
+        if !app.world().is_resource_added::<Assets<Mesh>>() {
+            app.init_resource::<Assets<Mesh>>();
+        }
+        if !app.world().is_resource_added::<Assets<StandardMaterial>>() {
+            app.init_resource::<Assets<StandardMaterial>>();
+        }
+        if !app.world().is_resource_added::<Time<Fixed>>() {
+            app.init_resource::<Time<Fixed>>();
+        }
+        if !app.world().is_resource_added::<InterpolationRegistry>() {
+            app.init_resource::<InterpolationRegistry>();
+        }
+
         app.add_systems(Startup, (setup_camera, setup_lighting));
         app.add_systems(Update, (add_character_cosmetics, add_floor_cosmetics));
 
