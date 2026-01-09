@@ -23,10 +23,7 @@ impl Plugin for RenderPlugin {
         }
 
         app.add_systems(Startup, (setup_camera, setup_lighting));
-        app.add_systems(
-            Update,
-            (add_character_cosmetics, add_floor_cosmetics, follow_player),
-        );
+        app.add_systems(Update, (add_character_cosmetics, follow_player));
 
         // FrameInterpolationPlugin for visual smoothing between physics ticks
         app.add_plugins(FrameInterpolationPlugin::<Position>::default());
@@ -96,21 +93,6 @@ fn add_character_cosmetics(
                 CHARACTER_CAPSULE_HEIGHT,
             ))),
             MeshMaterial3d(materials.add(color)),
-        ));
-    }
-}
-
-fn add_floor_cosmetics(
-    mut commands: Commands,
-    floor_query: Query<Entity, Added<FloorMarker>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    for entity in &floor_query {
-        info!(?entity, "Adding cosmetics to floor");
-        commands.entity(entity).insert((
-            Mesh3d(meshes.add(Cuboid::new(FLOOR_WIDTH, FLOOR_HEIGHT, FLOOR_WIDTH))),
-            MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
         ));
     }
 }
