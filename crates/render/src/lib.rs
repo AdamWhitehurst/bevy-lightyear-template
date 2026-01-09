@@ -23,7 +23,10 @@ impl Plugin for RenderPlugin {
         }
 
         app.add_systems(Startup, (setup_camera, setup_lighting));
-        app.add_systems(Update, (add_character_cosmetics, add_floor_cosmetics));
+        app.add_systems(
+            Update,
+            (add_character_cosmetics, add_floor_cosmetics, follow_player),
+        );
 
         // FrameInterpolationPlugin for visual smoothing between physics ticks
         app.add_plugins(FrameInterpolationPlugin::<Position>::default());
@@ -110,4 +113,20 @@ fn add_floor_cosmetics(
             MeshMaterial3d(materials.add(Color::srgb(0.3, 0.5, 0.3))),
         ));
     }
+}
+
+fn follow_player(
+    player_query: Query<&Position, With<Controlled>>,
+    mut camera_query: Query<&mut Transform, With<Camera3d>>,
+) {
+    let Ok(player_pos) = player_query.single() else {
+        return;
+    };
+    let Ok(mut camera_transform) = camera_query.single_mut() else {
+        return;
+    };
+
+    let offset = Vec3::new(0.0, 4.5, -9.0);
+    camera_transform.translation = **player_pos + offset;
+    camera_transform.look_at(**player_pos, Dir3::Y);
 }
