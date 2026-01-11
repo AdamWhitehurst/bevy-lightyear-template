@@ -10,7 +10,6 @@ pub struct ServerGameplayPlugin;
 
 impl Plugin for ServerGameplayPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup);
         app.add_observer(handle_connected);
         app.add_systems(FixedUpdate, handle_character_movement);
     }
@@ -41,16 +40,6 @@ fn handle_character_movement(
             &mut forces,
         );
     }
-}
-
-fn setup(mut commands: Commands) {
-    commands.spawn((
-        Name::new("Floor"),
-        FloorPhysicsBundle::default(),
-        FloorMarker,
-        Position::new(Vec3::ZERO),
-        Replicate::to_clients(NetworkTarget::All),
-    ));
 }
 
 fn handle_connected(

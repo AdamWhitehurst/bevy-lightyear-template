@@ -54,7 +54,7 @@ fn setup_lighting(mut commands: Commands) {
 
 fn add_visual_interpolation_components(
     trigger: On<Add, Position>,
-    query: Query<Entity, (With<Predicted>, Without<FloorMarker>)>,
+    query: Query<Entity, With<Predicted>>,
     mut commands: Commands,
 ) {
     if !query.contains(trigger.entity) {
