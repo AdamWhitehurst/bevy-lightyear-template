@@ -8,20 +8,8 @@ pub struct ClientGameplayPlugin;
 
 impl Plugin for ClientGameplayPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (handle_new_floor, handle_new_character));
+        app.add_systems(Update, handle_new_character);
         app.add_systems(FixedUpdate, handle_character_movement);
-    }
-}
-
-fn handle_new_floor(
-    mut commands: Commands,
-    floor_query: Query<Entity, (Added<Replicated>, With<FloorMarker>)>,
-) {
-    for entity in &floor_query {
-        info!(?entity, "Adding physics to floor");
-        commands
-            .entity(entity)
-            .insert(FloorPhysicsBundle::default());
     }
 }
 

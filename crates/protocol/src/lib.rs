@@ -16,8 +16,6 @@ pub const PROTOCOL_ID: u64 = 0;
 pub const PRIVATE_KEY: [u8; 32] = [0; 32];
 pub const FIXED_TIMESTEP_HZ: f64 = 64.0;
 
-pub const FLOOR_WIDTH: f32 = 100.0;
-pub const FLOOR_HEIGHT: f32 = 1.0;
 pub const CHARACTER_CAPSULE_RADIUS: f32 = 0.5;
 pub const CHARACTER_CAPSULE_HEIGHT: f32 = 0.5;
 
@@ -42,9 +40,6 @@ impl Actionlike for PlayerActions {
 pub struct CharacterMarker;
 
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct FloorMarker;
-
-#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ColorComponent(pub Color);
 
 #[derive(Bundle)]
@@ -62,21 +57,6 @@ impl Default for CharacterPhysicsBundle {
             rigid_body: RigidBody::Dynamic,
             locked_axes: LockedAxes::ROTATION_LOCKED,
             friction: Friction::new(0.0).with_combine_rule(CoefficientCombine::Min),
-        }
-    }
-}
-
-#[derive(Bundle)]
-pub struct FloorPhysicsBundle {
-    pub collider: Collider,
-    pub rigid_body: RigidBody,
-}
-
-impl Default for FloorPhysicsBundle {
-    fn default() -> Self {
-        Self {
-            collider: Collider::cuboid(FLOOR_WIDTH, FLOOR_HEIGHT, FLOOR_WIDTH),
-            rigid_body: RigidBody::Static,
         }
     }
 }
@@ -121,7 +101,6 @@ impl Plugin for ProtocolPlugin {
         app.register_component::<ColorComponent>();
         app.register_component::<Name>();
         app.register_component::<CharacterMarker>();
-        app.register_component::<FloorMarker>();
 
         // Velocity prediction without visual correction
         app.register_component::<LinearVelocity>()
@@ -202,21 +181,12 @@ pub fn apply_movement(
 
     // Jump with raycast ground detection
     if action_state.just_pressed(&PlayerActions::Jump) {
-        let ray_cast_origin = position.0
-            + Vec3::new(
-                0.0,
-                -CHARACTER_CAPSULE_HEIGHT / 2.0 - CHARACTER_CAPSULE_RADIUS,
-                0.0,
-            );
+        let ray_cast_origin = position.0;
+
+        let filter = &SpatialQueryFilter::from_excluded_entities([entity]);
 
         if spatial_query
-            .cast_ray(
-                ray_cast_origin,
-                Dir3::NEG_Y,
-                0.01,
-                true,
-                &SpatialQueryFilter::from_excluded_entities([entity]),
-            )
+            .cast_ray(ray_cast_origin, Dir3::NEG_Y, 1.0, false, filter)
             .is_some()
         {
             forces.apply_linear_impulse(Vec3::new(0.0, 5.0, 0.0));
