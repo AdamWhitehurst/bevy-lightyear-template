@@ -12,7 +12,7 @@ pub struct ClientMapPlugin;
 
 impl Plugin for ClientMapPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(VoxelWorldPlugin::<MapWorld>::with_config(MapWorld))
+        app.add_plugins(VoxelWorldPlugin::<MapWorld>::with_config(MapWorld::default()))
             .add_systems(
                 Update,
                 (
@@ -62,14 +62,15 @@ pub fn send_voxel_edit(
 fn handle_voxel_input(
     voxel_world: VoxelWorld<MapWorld>,
     action_state: Query<&ActionState<PlayerActions>, With<Controlled>>,
-    camera: Query<(&Camera, &GlobalTransform), With<VoxelWorldCamera<MapWorld>>>,
+    camera: Query<(&Camera, &GlobalTransform)>,
     windows: Query<&Window>,
     mut sender: Query<&mut MessageSender<VoxelEditRequest>>,
 ) {
     let Ok(action) = action_state.single() else {
         return;
     };
-    let Ok((camera, transform)) = camera.single() else {
+    // Use first camera for input (gracefully handles multiple cameras)
+    let Some((camera, transform)) = camera.iter().next() else {
         return;
     };
     let Ok(window) = windows.single() else {

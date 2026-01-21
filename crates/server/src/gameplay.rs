@@ -1,6 +1,7 @@
 use avian3d::prelude::*;
 use bevy::color::palettes::css;
 use bevy::prelude::*;
+use bevy_voxel_world::prelude::ChunkRenderTarget;
 use leafwing_input_manager::prelude::*;
 use lightyear::connection::client::Connected;
 use lightyear::prelude::*;
@@ -67,7 +68,8 @@ fn handle_connected(
 
     commands.spawn((
         Name::new("Character"),
-        Position(Vec3::new(x, 3.0, z)),
+        Position(Vec3::new(x, 30.0, z)),
+        Rotation::default(),
         ActionState::<PlayerActions>::default(),
         Replicate::to_clients(NetworkTarget::All),
         PredictionTarget::to_clients(NetworkTarget::All),
@@ -78,5 +80,6 @@ fn handle_connected(
         CharacterPhysicsBundle::default(),
         ColorComponent(color.into()),
         CharacterMarker,
+        ChunkRenderTarget::<MapWorld>::default(),
     ));
 }

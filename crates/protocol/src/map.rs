@@ -7,20 +7,32 @@ use serde::{Deserialize, Serialize};
 pub struct VoxelChannel;
 
 /// Shared voxel world configuration for server and client
-#[derive(Resource, Clone, Default)]
-pub struct MapWorld;
+#[derive(Resource, Clone, Serialize, Deserialize, Eq, PartialEq)]
+pub struct MapWorld {
+    pub seed: u64,
+    pub generation_version: u32,
+}
+
+impl Default for MapWorld {
+    fn default() -> Self {
+        Self {
+            seed: 999,
+            generation_version: 0, // Generation algorithm version
+        }
+    }
+}
 
 impl VoxelWorldConfig for MapWorld {
     type MaterialIndex = u8;
     type ChunkUserBundle = ();
 
     fn spawning_distance(&self) -> u32 {
-        10
+        2
     }
 
     fn voxel_lookup_delegate(&self) -> VoxelLookupDelegate<Self::MaterialIndex> {
-        Box::new(|_chunk_pos| {
-            Box::new(move |pos: IVec3| {
+        Box::new(|_chunk_pos, _lod_level, _chunk_data| {
+            Box::new(move |pos: IVec3, _previous| {
                 // Flat terrain: solid below y=0
                 if pos.y < 0 {
                     WorldVoxel::Solid(0)

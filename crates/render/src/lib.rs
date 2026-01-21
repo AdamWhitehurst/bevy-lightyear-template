@@ -1,6 +1,5 @@
 use avian3d::prelude::Position;
 use bevy::prelude::*;
-use bevy_voxel_world::prelude::*;
 use lightyear::frame_interpolation::{FrameInterpolate, FrameInterpolationPlugin};
 use lightyear::prelude::*;
 use protocol::*;
@@ -38,7 +37,6 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, 4.5, -9.0).looking_at(Vec3::ZERO, Dir3::Y),
-        VoxelWorldCamera::<MapWorld>::default(),
     ));
 }
 

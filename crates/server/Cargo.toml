@@ -19,6 +19,8 @@ lightyear_crossbeam = "0.25.5"
 protocol = { workspace = true }
 anyhow = "1.0"
 avian3d = { workspace = true }
+bincode = "1.3"
+serde = { workspace = true }
 
 [dev-dependencies]
 approx = { workspace = true }

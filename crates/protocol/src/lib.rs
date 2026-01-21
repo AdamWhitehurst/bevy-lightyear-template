@@ -1,5 +1,6 @@
 use avian3d::prelude::{forces::ForcesItem, *};
 use bevy::prelude::*;
+use bevy_voxel_world::prelude::ChunkRenderTarget;
 use leafwing_input_manager::prelude::*;
 use lightyear::input::config::InputConfig;
 use lightyear::prelude::input::leafwing::InputPlugin;
@@ -97,6 +98,7 @@ impl Plugin for ProtocolPlugin {
         app.register_event::<TestTrigger>()
             .add_direction(NetworkDirection::Bidirectional);
 
+        app.register_component::<ChunkRenderTarget<MapWorld>>();
         // Marker components
         app.register_component::<ColorComponent>();
         app.register_component::<Name>();
@@ -189,7 +191,10 @@ pub fn apply_movement(
             .cast_ray(ray_cast_origin, Dir3::NEG_Y, 1.0, false, filter)
             .is_some()
         {
+            println!("Jump!");
             forces.apply_linear_impulse(Vec3::new(0.0, 5.0, 0.0));
+        } else {
+            println!("No jumper");
         }
     }
 
