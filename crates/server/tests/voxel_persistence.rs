@@ -1,14 +1,15 @@
 use bevy::app::AppExit;
 use bevy::prelude::*;
 use protocol::{MapWorld, VoxelType};
-use server::map::{save_voxel_world_to_disk_at, load_voxel_world_from_disk_at,
-                   VoxelModifications, VoxelDirtyState};
+use server::map::{
+    load_voxel_world_from_disk_at, save_voxel_world_to_disk_at, VoxelDirtyState, VoxelModifications,
+};
 use std::fs;
 use std::path::Path;
 
 // Helper: Get unique test directory for each test
 fn get_test_dir(test_name: &str) -> String {
-    format!("world_save_test/{}", test_name)
+    format!("tests/world_save_test/{}", test_name)
 }
 
 // Helper: Get save path for a specific test
@@ -39,10 +40,7 @@ fn create_test_app_for_shutdown() -> App {
 }
 
 // Helper system to add voxels directly to VoxelModifications (for shutdown test)
-fn add_test_modifications(
-    mut modifications: ResMut<VoxelModifications>,
-    voxels: Res<TestVoxels>,
-) {
+fn add_test_modifications(mut modifications: ResMut<VoxelModifications>, voxels: Res<TestVoxels>) {
     modifications.modifications = voxels.0.clone();
 }
 
@@ -80,9 +78,12 @@ fn test_save_load_cycle() {
 
     // Verify specific positions and materials match
     for (pos, voxel_type) in &test_voxels {
-        let found = loaded_mods.iter()
-            .any(|(p, v)| p == pos && v == voxel_type);
-        assert!(found, "Should find voxel at {:?} with type {:?}", pos, voxel_type);
+        let found = loaded_mods.iter().any(|(p, v)| p == pos && v == voxel_type);
+        assert!(
+            found,
+            "Should find voxel at {:?} with type {:?}",
+            pos, voxel_type
+        );
     }
 
     cleanup_test_files(test_name);
@@ -105,10 +106,17 @@ fn test_corrupt_file_recovery() {
     let loaded_mods = load_voxel_world_from_disk_at(&map_world, &save_path);
 
     // Verify backup file created
-    assert!(Path::new(&corrupt_backup_path).exists(), "Corrupt backup file should exist");
+    assert!(
+        Path::new(&corrupt_backup_path).exists(),
+        "Corrupt backup file should exist"
+    );
 
     // Verify loaded data is empty (clean start)
-    assert_eq!(loaded_mods.len(), 0, "Should start with empty world after corrupt file");
+    assert_eq!(
+        loaded_mods.len(),
+        0,
+        "Should start with empty world after corrupt file"
+    );
 
     cleanup_test_files(test_name);
 }
@@ -126,22 +134,39 @@ fn test_generation_metadata_mismatch() {
         (IVec3::new(4, 5, 6), VoxelType::Solid(2)),
     ];
 
-    let map_world = MapWorld { seed: 0, generation_version: 1 };
+    let map_world = MapWorld {
+        seed: 0,
+        generation_version: 1,
+    };
     save_voxel_world_to_disk_at(&test_voxels, &map_world, &save_path).unwrap();
 
     // Phase 2: Try to load with mismatched seed (999)
-    let mismatched_seed = MapWorld { seed: 999, generation_version: 1 };
+    let mismatched_seed = MapWorld {
+        seed: 999,
+        generation_version: 1,
+    };
     let loaded_mods = load_voxel_world_from_disk_at(&mismatched_seed, &save_path);
 
     // Verify rejected due to seed mismatch
-    assert_eq!(loaded_mods.len(), 0, "Should reject save due to seed mismatch");
+    assert_eq!(
+        loaded_mods.len(),
+        0,
+        "Should reject save due to seed mismatch"
+    );
 
     // Phase 3: Try to load with mismatched generation_version
-    let mismatched_version = MapWorld { seed: 0, generation_version: 999 };
+    let mismatched_version = MapWorld {
+        seed: 0,
+        generation_version: 999,
+    };
     let loaded_mods = load_voxel_world_from_disk_at(&mismatched_version, &save_path);
 
     // Verify rejected due to version mismatch
-    assert_eq!(loaded_mods.len(), 0, "Should reject save due to generation_version mismatch");
+    assert_eq!(
+        loaded_mods.len(),
+        0,
+        "Should reject save due to generation_version mismatch"
+    );
 
     cleanup_test_files(test_name);
 }
@@ -150,9 +175,9 @@ fn test_generation_metadata_mismatch() {
 fn test_shutdown_save() {
     // Use default path for this test since the shutdown system uses hardcoded path
     // Clean up the default production path
-    let _ = fs::remove_file("world_save/voxel_world.bin");
-    let _ = fs::remove_file("world_save/voxel_world.bin.tmp");
-    let _ = fs::remove_dir("world_save");
+    let _ = fs::remove_file("tests/world_save/voxel_world.bin");
+    let _ = fs::remove_file("tests/world_save/voxel_world.bin.tmp");
+    let _ = fs::remove_dir("tests/world_save");
 
     // Create app with minimal setup for shutdown save system
     let mut app = create_test_app_for_shutdown();
@@ -182,15 +207,18 @@ fn test_shutdown_save() {
     app.update(); // This runs all schedules including Last
 
     // Verify save file created (uses default production path)
-    assert!(Path::new("world_save/voxel_world.bin").exists(), "Save file should be created on shutdown");
+    assert!(
+        Path::new("tests/world_save/voxel_world.bin").exists(),
+        "Save file should be created on shutdown"
+    );
 
     // Verify file contains voxels using the _at function
     let map_world = MapWorld::default();
-    let loaded_mods = load_voxel_world_from_disk_at(&map_world, "world_save/voxel_world.bin");
+    let loaded_mods = load_voxel_world_from_disk_at(&map_world, "tests/world_save/voxel_world.bin");
     assert_eq!(loaded_mods.len(), 2, "Should save 2 voxels on shutdown");
 
     // Cleanup the default production path
-    let _ = fs::remove_file("world_save/voxel_world.bin");
-    let _ = fs::remove_file("world_save/voxel_world.bin.tmp");
-    let _ = fs::remove_dir("world_save");
+    let _ = fs::remove_file("tests/world_save/voxel_world.bin");
+    let _ = fs::remove_file("tests/world_save/voxel_world.bin.tmp");
+    let _ = fs::remove_dir("tests/world_save");
 }
