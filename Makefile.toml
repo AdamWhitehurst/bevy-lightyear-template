@@ -2,6 +2,7 @@
 skip_core_tasks = true
 
 [tasks.setup]
+workspace = false
 description = "Install dependencies and generate certificates"
 script = '''
 #!/bin/bash
@@ -34,6 +35,7 @@ echo "  Web:     cargo web"
 '''
 
 [tasks.generate-certs]
+workspace = false
 description = "Generate self-signed certificates for WebTransport/WebSocket"
 script = '''
 #!/bin/bash
@@ -67,6 +69,7 @@ echo "Digest: $FINGERPRINT"
 
 [tasks.web]
 description = "Run WASM client with automatic certificate generation"
+workspace = false
 dependencies = ["ensure-certs"]
 script = '''
 #!/bin/bash
@@ -79,6 +82,7 @@ bevy run web "$@"
 
 [tasks.ensure-certs]
 description = "Ensure certificates exist, generate if missing"
+workspace = false
 script = '''
 #!/bin/bash
 set -e
