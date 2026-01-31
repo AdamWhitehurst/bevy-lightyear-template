@@ -57,54 +57,16 @@ Then wait for the user's input.
 
    **WHEN TO ADD SPECIALIZED DOMAIN AGENTS FOR PLANNING:**
 
-   During planning, you may need domain specialists to understand implementation patterns and make informed decisions. Add these agents when the task explicitly involves their domain:
-
-   **Language & Framework Specialists** (Categories 01-02):
-   - **rust-engineer**: Understanding Rust patterns, ownership, traits for implementation decisions
-   - **game-developer**: Game engine patterns, ECS architecture, multiplayer networking (CRITICAL FOR BEVY)
-   - Framework specialists: When planning framework-specific features
-
-   **Infrastructure & DevOps** (Category 03):
-   - **devops-engineer**: Planning CI/CD changes, deployment strategies
-   - **kubernetes-specialist**: Container orchestration planning
-   - **terraform-engineer**: Infrastructure-as-code changes
-
-   **Quality & Security** (Category 04):
-   - **code-reviewer**: Understanding code standards to follow during implementation
-   - **security-auditor**: Planning security measures, authentication flows
-   - **performance-engineer**: Performance implications of planned changes
-   - **test-automator**: Planning testing strategies
-
-   **Data & AI** (Category 05):
-   - **data-engineer**: Planning data pipeline changes
-   - **database-optimizer**: Database schema and query optimization planning
-
-   **Developer Experience** (Category 06):
-   - **build-engineer**: Planning build system changes
-   - **documentation-engineer**: Planning documentation updates
-   - **refactoring-specialist**: Planning refactoring strategies
-
-   **Specialized Domains** (Category 07):
-   - **game-developer**: Game mechanics, multiplayer, ECS patterns
-   - **payment-integration**: Payment flow planning
-   - **iot-engineer**: Device communication planning
-
-   **Meta & Orchestration** (Category 09):
-   - **workflow-orchestrator**: Planning complex multi-system workflows
-   - **knowledge-synthesizer**: Synthesizing complex planning research
-
-   **Research & Analysis** (Category 10):
-   - **research-analyst**: Deep analysis for complex planning decisions
-   - **competitive-analyst**: Comparing alternative implementation approaches
+   During planning, you may need domain specialists to understand implementation patterns and make informed decisions. Add these agents when the task explicitly involves their domain.
 
    **CRITICAL PLANNING GUIDELINES:**
 
    1. **Always start with primary research agents**: codebase-locator, codebase-analyzer, codebase-pattern-finder
 
    2. **Add domain specialists when planning requires**:
-      - Understanding domain-specific patterns (e.g., Bevy ECS patterns → game-developer)
-      - Language-specific implementation decisions (e.g., Rust trait design → rust-engineer)
-      - Domain expertise for design choices (e.g., multiplayer architecture → game-developer)
+      - Understanding domain-specific patterns 
+      - Language-specific implementation decisions 
+      - Domain expertise for design choices 
 
    3. **Domain specialists in planning mode should**:
       - Identify patterns to follow in the existing codebase
@@ -117,23 +79,6 @@ Then wait for the user's input.
       - Example: codebase-analyzer (current code) + rust-engineer (Rust best practices)
 
    5. **Planning is decision-making**: Unlike research (which is pure documentation), planning uses domain expertise to make informed implementation choices
-
-   **PLANNING AGENT SELECTION EXAMPLES:**
-
-   - "Plan authentication system"
-     → codebase-locator + codebase-analyzer + security-auditor + rust-engineer
-
-   - "Plan multiplayer networking for Bevy game"
-     → codebase-locator + game-developer + rust-engineer + performance-engineer
-
-   - "Plan database schema changes"
-     → codebase-analyzer + database-optimizer + data-engineer
-
-   - "Plan build system improvements"
-     → codebase-locator + build-engineer + devops-engineer
-
-   - "Plan React state refactoring"
-     → codebase-pattern-finder + react-specialist + typescript-pro + refactoring-specialist
 
 3. **Read all files identified by research tasks**:
    - After research tasks complete, read ALL files they identified as relevant
@@ -179,7 +124,7 @@ After getting initial clarifications:
    - Create multiple Task agents to research different aspects concurrently
    - Use the right agent for each type of research:
 
-   **For deeper investigation (PRIMARY):**
+   **For deeper investigation:**
    - **codebase-locator** - To find more specific files (e.g., "find all files that handle [specific component]")
    - **codebase-analyzer** - To understand implementation details (e.g., "analyze how [system] works")
    - **codebase-pattern-finder** - To find similar features we can model after
@@ -189,39 +134,7 @@ After getting initial clarifications:
    - **doc-analyzer** - To extract key insights from the most relevant documents
 
    **For domain-specific planning (when needed):**
-
-   Add domain specialists based on the task requirements:
-
-   - **Language specialists** (rust-engineer, typescript-pro, etc.):
-     - When you need language-specific implementation patterns
-     - For understanding language idioms and best practices
-     - When making decisions about type design, trait usage, etc.
-
-   - **game-developer** (CRITICAL FOR BEVY):
-     - For ECS architecture decisions
-     - Multiplayer networking patterns
-     - Game loop and update system design
-     - Component and resource organization
-
-   - **Infrastructure specialists** (devops-engineer, kubernetes-specialist):
-     - For deployment and CI/CD planning
-     - Container orchestration changes
-     - Build system modifications
-
-   - **Quality specialists** (security-auditor, performance-engineer, test-automator):
-     - For security architecture decisions
-     - Performance optimization strategies
-     - Test coverage and automation planning
-
-   - **Data specialists** (database-optimizer, data-engineer):
-     - For database schema design
-     - Query optimization strategies
-     - Data pipeline architecture
-
-   - **Refactoring/DX specialists** (refactoring-specialist, build-engineer):
-     - For large refactoring efforts
-     - Build system improvements
-     - Developer workflow enhancements
+   - Add domain specialists based on the task requirements
 
    **Agent capabilities:**
    - Find the right files and code patterns

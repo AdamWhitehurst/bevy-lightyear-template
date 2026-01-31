@@ -65,102 +65,21 @@ Then wait for the user's research query.
 
    **WHEN TO USE SPECIALIZED DOMAIN AGENTS:**
 
-   The codebase research agents above are your PRIMARY tools for documentation. However, when research reveals specific implementation needs OR when the user's question explicitly relates to a specialized domain, you may ALSO use domain specialists to provide additional context:
-
-   **Research & Analysis Specialists** (Category 10) - Use for meta-research tasks:
-   - **research-analyst**: Synthesizing complex multi-source research into comprehensive reports
-   - **search-specialist**: Finding hard-to-locate information using advanced search techniques
-   - **trend-analyst**: Identifying patterns and trends across the codebase over time
-   - **competitive-analyst**: Comparing implementation approaches or analyzing alternative solutions
-   - **market-researcher**: Understanding ecosystem context (e.g., "how do other Bevy games handle this?")
-   - **data-researcher**: Analyzing data patterns, performance metrics, or usage statistics
-
-   **Language & Framework Specialists** (Categories 01-02) - Use when researching language-specific patterns:
-   - **rust-engineer**: Understanding Rust-specific ownership patterns, trait implementations, or language idioms
-   - **typescript-pro**, **python-pro**, etc.: When codebase includes multiple languages
-   - Framework specialists (react-specialist, nextjs-developer, etc.): For framework-specific architecture
-
-   **Infrastructure & DevOps** (Category 03) - Use when researching deployment/operations:
-   - **devops-engineer**: Understanding CI/CD pipelines, build processes
-   - **kubernetes-specialist**: Analyzing container orchestration setup
-   - **terraform-engineer**: Documenting infrastructure-as-code
-   - **cloud-architect**: Understanding cloud architecture patterns
-
-   **Quality & Security** (Category 04) - Use for quality/security documentation:
-   - **code-reviewer**: Analyzing code patterns and conventions (as documentarian, not critic)
-   - **security-auditor**: Documenting security measures and authentication flows
-   - **performance-engineer**: Understanding performance optimization patterns
-   - **test-automator**: Analyzing testing strategies and frameworks
-
-   **Data & AI** (Category 05) - Use when researching data/ML systems:
-   - **data-engineer**: Understanding data pipeline architectures
-   - **ml-engineer**: Documenting machine learning model implementations
-   - **database-optimizer**: Analyzing database schema and query patterns
-
-   **Developer Experience** (Category 06) - Use for tooling/workflow research:
-   - **documentation-engineer**: Understanding existing documentation systems
-   - **build-engineer**: Analyzing build system configurations
-   - **mcp-developer**: Researching Model Context Protocol implementations
-
-   **Specialized Domains** (Category 07) - Use for domain-specific research:
-   - **game-developer**: For game engines, ECS patterns, multiplayer networking (HIGHLY RELEVANT FOR BEVY)
-   - **blockchain-developer**: For Web3/crypto implementations
-   - **iot-engineer**: For device communication and edge computing
-   - **payment-integration**: For payment processing systems
-
-   **Business & Product** (Category 08) - Use for product/process research:
-   - **technical-writer**: Understanding documentation standards and style guides
-   - **ux-researcher**: Analyzing user interaction patterns
-
-   **Meta & Orchestration** (Category 09) - Use for system coordination research:
-   - **workflow-orchestrator**: Understanding complex multi-system workflows
-   - **knowledge-synthesizer**: Combining findings from multiple research threads
+   The codebase research agents above are your PRIMARY tools for documentation. However, when research reveals specific implementation needs OR when the user's question explicitly relates to a specialized domain, you may ALSO use domain specialists to provide additional context.
 
    **CRITICAL GUIDELINES FOR USING DOMAIN SPECIALISTS:**
-
    1. **Default to codebase research agents first**: Always start with codebase-locator, codebase-analyzer, and codebase-pattern-finder
-
    2. **Add domain specialists when**:
-      - The research question EXPLICITLY relates to their domain (e.g., "how does networking work in this Bevy game?" → game-developer)
-      - You're researching implementation patterns specific to a technology stack
-
+      - The research question relates to their domain 
    3. **Domain specialists search and report in research mode**:
       - Remind them they are FINDING and REPORTING on EXISTING implementations
       - They should NOT suggest improvements or identify issues
       - They should NOT create any files - only return findings in their response
       - They should focus on "what exists" and "how it works"
-
    4. **Run agents in parallel when they research different aspects**:
       - Example: codebase-locator (find files) + game-developer (understand game patterns)
       - Example: codebase-analyzer (code details) + rust-engineer (Rust idioms)
-
    5. **Synthesize findings from all agents** into coherent research document
-
-   **EXAMPLES OF AGENT SELECTION:**
-
-   - "How does authentication work in this app?"
-     → codebase-locator + codebase-analyzer + security-auditor (for auth pattern documentation)
-
-   - "What's the networking architecture in this Bevy game?"
-     → codebase-locator + game-developer + rust-engineer
-
-   - "How are database queries optimized?"
-     → codebase-pattern-finder + database-optimizer + data-engineer
-
-   - "What's the CI/CD pipeline doing?"
-     → codebase-locator + devops-engineer
-
-   - "How does this React component state management work?"
-     → codebase-analyzer + react-specialist + typescript-pro
-
-   The key is to use these agents intelligently:
-   - Start with locator agents to find what exists
-   - Then use analyzer agents on the most promising findings to describe how they work
-   - Add domain specialists when their expertise adds value to the research
-   - Run multiple agents in parallel when they're searching for different things
-   - Each agent knows its job - just tell it what you're looking for
-   - Don't write detailed prompts about HOW to search - the agents already know
-   - Remind agents they are finding and reporting, not evaluating or improving
 
 4. **Wait for all sub-agents to complete and synthesize findings:**
    - IMPORTANT: Wait for ALL sub-agent tasks to complete before proceeding
@@ -288,14 +207,6 @@ Then wait for the user's research query.
   - ALWAYS wait for all sub-agents to complete before synthesizing (step 4)
   - ALWAYS gather metadata before writing the document (step 5 before step 6)
   - NEVER write the research document with placeholder values
-- **Path handling**: The doc/searchable/ directory contains hard links for searching
-  - Always document paths by removing ONLY "searchable/" - preserve all other subdirectories
-  - Examples of correct transformations:
-    - `doc/searchable/allison/old_stuff/notes.md` → `doc/allison/old_stuff/notes.md`
-    - `doc/searchable/shared/prs/123.md` → `doc/prs/123.md`
-    - `doc/searchable/global/shared/templates.md` → `doc/global/shared/templates.md`
-  - NEVER change allison/ to shared/ or vice versa - preserve the exact directory structure
-  - This ensures paths are correct for editing and navigation
 - **Frontmatter consistency**:
   - Always include frontmatter at the beginning of research documents
   - Keep frontmatter fields consistent across all research documents
