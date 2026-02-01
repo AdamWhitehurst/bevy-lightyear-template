@@ -17,6 +17,7 @@ fn test_client_network_plugin_spawns_entity() {
     let config = ClientNetworkConfig {
         client_addr: SocketAddr::from(([0, 0, 0, 0], 0)),
         server_addr: SocketAddr::from(([127, 0, 0, 1], 5000)),
+        transport: ::client::network::ClientTransport::Udp,
         ..Default::default()
     };
     app.add_plugins(ClientNetworkPlugin {

@@ -7,6 +7,9 @@ use lightyear::webtransport::client::WebTransportClientIo;
 use protocol::*;
 use std::net::SocketAddr;
 
+/// Certificate digest loaded at compile time
+const CERTIFICATE_DIGEST: &str = include_str!("../../../certificates/digest.txt");
+
 /// Transport type for client
 #[derive(Clone)]
 pub enum ClientTransport {
@@ -20,7 +23,9 @@ pub enum ClientTransport {
 
 impl Default for ClientTransport {
     fn default() -> Self {
-        Self::Udp
+        Self::WebTransport {
+            certificate_digest: CERTIFICATE_DIGEST.trim().to_string(),
+        }
     }
 }
 
@@ -41,7 +46,7 @@ impl Default for ClientNetworkConfig {
     fn default() -> Self {
         Self {
             client_addr: SocketAddr::from(([0, 0, 0, 0], 0)),
-            server_addr: SocketAddr::from(([127, 0, 0, 1], 5000)),
+            server_addr: SocketAddr::from(([127, 0, 0, 1], 5001)),
             client_id: 0,
             protocol_id: PROTOCOL_ID,
             private_key: PRIVATE_KEY,

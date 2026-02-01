@@ -1,10 +1,15 @@
+use async_compat::Compat;
 use bevy::prelude::*;
+use bevy::tasks::IoTaskPool;
 use lightyear::netcode::{Key, NetcodeServer};
 use lightyear::prelude::server::*;
 use lightyear::prelude::*;
 use protocol::*;
 use std::net::SocketAddr;
 use std::time::Duration;
+
+const CERT_PEM: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../certificates/cert.pem");
+const KEY_PEM: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../certificates/key.pem");
 
 /// Transport configuration for a server
 #[derive(Clone)]
@@ -34,9 +39,7 @@ pub struct ServerNetworkConfig {
 impl Default for ServerNetworkConfig {
     fn default() -> Self {
         Self {
-            // TODO: add WebTransport and WebSocket transports
-            // Use only UDP for now - multiple Server entities may confuse replication
-            transports: vec![ServerTransport::Udp { port: 5000 }],
+            transports: vec![ServerTransport::WebTransport { port: 5001 }],
             bind_addr: [0, 0, 0, 0],
             protocol_id: PROTOCOL_ID,
             private_key: PRIVATE_KEY,
@@ -67,6 +70,19 @@ impl Plugin for ServerNetworkPlugin {
         });
         app.add_observer(handle_new_client);
     }
+}
+
+fn load_webtransport_identity() -> lightyear::webtransport::prelude::Identity {
+    IoTaskPool::get()
+        .scope(|s| {
+            s.spawn(Compat::new(async {
+                lightyear::webtransport::prelude::Identity::load_pemfiles(CERT_PEM, KEY_PEM)
+                    .await
+                    .expect("Failed to load WebTransport certificates")
+            }));
+        })
+        .pop()
+        .unwrap()
 }
 
 fn start_server(mut commands: Commands, config: ServerNetworkConfig) {
@@ -102,14 +118,10 @@ fn start_server(mut commands: Commands, config: ServerNetworkConfig) {
                 );
             }
             ServerTransport::WebTransport { port } => {
-                let wt_sans = vec![
-                    "localhost".to_string(),
-                    "127.0.0.1".to_string(),
-                    "::1".to_string(),
-                ];
-                let wt_certificate =
-                    lightyear::webtransport::prelude::Identity::self_signed(wt_sans)
-                        .expect("Failed to generate WebTransport certificate");
+                let wt_certificate = load_webtransport_identity();
+                let digest = wt_certificate.certificate_chain().as_slice()[0].hash();
+                info!("WebTransport certificate digest: {}", digest);
+
                 let server = commands
                     .spawn((
                         Name::new("WebTransport Server"),
