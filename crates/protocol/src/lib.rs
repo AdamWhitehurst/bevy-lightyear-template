@@ -17,8 +17,8 @@ pub const PROTOCOL_ID: u64 = 0;
 pub const PRIVATE_KEY: [u8; 32] = [0; 32];
 pub const FIXED_TIMESTEP_HZ: f64 = 64.0;
 
-pub const CHARACTER_CAPSULE_RADIUS: f32 = 0.5;
-pub const CHARACTER_CAPSULE_HEIGHT: f32 = 0.5;
+pub const CHARACTER_CAPSULE_RADIUS: f32 = 1.0;
+pub const CHARACTER_CAPSULE_HEIGHT: f32 = 1.0;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, Hash, Reflect)]
 pub enum PlayerActions {
@@ -188,13 +188,10 @@ pub fn apply_movement(
         let filter = &SpatialQueryFilter::from_excluded_entities([entity]);
 
         if spatial_query
-            .cast_ray(ray_cast_origin, Dir3::NEG_Y, 1.0, false, filter)
+            .cast_ray(ray_cast_origin, Dir3::NEG_Y, 2.0, false, filter)
             .is_some()
         {
-            println!("Jump!");
-            forces.apply_linear_impulse(Vec3::new(0.0, 5.0, 0.0));
-        } else {
-            println!("No jumper");
+            forces.apply_linear_impulse(Vec3::new(0.0, 50.0, 0.0));
         }
     }
 

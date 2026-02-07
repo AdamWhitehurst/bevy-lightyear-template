@@ -36,7 +36,7 @@ impl Plugin for RenderPlugin {
 fn setup_camera(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 4.5, -9.0).looking_at(Vec3::ZERO, Dir3::Y),
+        Transform::from_xyz(0.0, 9.0, -18.0).looking_at(Vec3::ZERO, Dir3::Y),
     ));
 }
 
@@ -106,7 +106,7 @@ fn follow_player(
         return;
     };
 
-    let offset = Vec3::new(0.0, 4.5, -9.0);
+    let offset = Vec3::new(0.0, 9.0, -18.0);
     camera_transform.translation = **player_pos + offset;
     camera_transform.look_at(**player_pos, Dir3::Y);
 }
