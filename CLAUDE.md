@@ -36,7 +36,6 @@ After making code changes, MUST review README.md and update it if the changes af
 
 <document_index description="Where to find more context-specific rules and documents">
 <rule priority="high">Read and follow any documents that are relevant to your task. CRITICAL: Follow any rules that they stipulate</rule>
-<document location="VISION.md" purpose="High-level outline of the game, provides guidance, expectations for features and how they integrate" />
-<document location="doc/subagent-overview.md" purpose="How and when to use various subagents" />
+<document location="VISION.md" purpose="High-level outline of the game. Provides guidance, expectations for features and how they integrate" />
 <document location="doc/dependency-search.md" purpose="How to search dependencies" />
 <document_index>

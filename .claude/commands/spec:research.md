@@ -36,6 +36,7 @@ Then wait for the user's research query.
    - Consider which directories, files, or architectural patterns are relevant
 
 3. **Spawn parallel sub-agent tasks for comprehensive research:**
+   - CRITICAL: After understanding the research question, you do NOT do the research yourself. You MUST spawn sub-agents to research different aspects of the question
    - Create multiple Task agents to research different aspects concurrently
    - We now have specialized agents that know how to do specific research tasks:
 
