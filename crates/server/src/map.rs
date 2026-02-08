@@ -18,8 +18,9 @@ fn load_voxel_world(
     mut voxel_world: VoxelWorld<MapWorld>,
     mut modifications: ResMut<VoxelModifications>,
     map_world: Res<MapWorld>,
+    save_path: Res<VoxelSavePath>,
 ) {
-    let loaded_mods = load_voxel_world_from_disk(&map_world);
+    let loaded_mods = load_voxel_world_from_disk_at(&map_world, &save_path.0);
 
     if loaded_mods.is_empty() {
         return;
@@ -40,6 +41,7 @@ fn save_voxel_world_debounced(
     modifications: Res<VoxelModifications>,
     map_world: Res<MapWorld>,
     mut dirty_state: ResMut<VoxelDirtyState>,
+    save_path: Res<VoxelSavePath>,
     time: Res<Time>,
 ) {
     if !dirty_state.is_dirty {
@@ -56,7 +58,7 @@ fn save_voxel_world_debounced(
         || time_since_first_dirty >= MAX_DIRTY_SECONDS;
 
     if should_save {
-        if let Err(e) = save_voxel_world_to_disk(&modifications.modifications, &map_world) {
+        if let Err(e) = save_voxel_world_to_disk_at(&modifications.modifications, &map_world, &save_path.0) {
             error!("Failed to save voxel world: {}", e);
         }
 
@@ -69,6 +71,7 @@ pub fn save_voxel_world_on_shutdown(
     mut exit_reader: MessageReader<AppExit>,
     modifications: Res<VoxelModifications>,
     map_world: Res<MapWorld>,
+    save_path: Res<VoxelSavePath>,
     dirty_state: Res<VoxelDirtyState>,
 ) {
     if exit_reader.is_empty() {
@@ -78,7 +81,7 @@ pub fn save_voxel_world_on_shutdown(
 
     if dirty_state.is_dirty {
         info!("Saving voxel world on shutdown...");
-        if let Err(e) = save_voxel_world_to_disk(&modifications.modifications, &map_world) {
+        if let Err(e) = save_voxel_world_to_disk_at(&modifications.modifications, &map_world, &save_path.0) {
             error!("Failed to save voxel world on shutdown: {}", e);
         }
     }
@@ -89,6 +92,7 @@ impl Plugin for ServerMapPlugin {
         app.add_plugins(VoxelWorldPlugin::<MapWorld>::with_config(MapWorld::default()))
             .init_resource::<VoxelModifications>()
             .init_resource::<VoxelDirtyState>()
+            .init_resource::<VoxelSavePath>()
             .add_systems(Startup, load_voxel_world)
             .add_systems(
                 Update,
@@ -139,13 +143,15 @@ struct VoxelWorldSave {
 }
 
 const SAVE_VERSION: u32 = 1;
-const SAVE_PATH: &str = "world_save/voxel_world.bin";
+const DEFAULT_SAVE_PATH: &str = "world_save/voxel_world.bin";
 
-pub fn save_voxel_world_to_disk(
-    modifications: &[(IVec3, VoxelType)],
-    map_world: &MapWorld,
-) -> std::io::Result<()> {
-    save_voxel_world_to_disk_at(modifications, map_world, SAVE_PATH)
+#[derive(Resource)]
+pub struct VoxelSavePath(pub String);
+
+impl Default for VoxelSavePath {
+    fn default() -> Self {
+        Self(DEFAULT_SAVE_PATH.to_string())
+    }
 }
 
 pub fn save_voxel_world_to_disk_at(
@@ -179,12 +185,6 @@ pub fn save_voxel_world_to_disk_at(
 
     info!("Saved {} voxel modifications to {}", modifications.len(), path);
     Ok(())
-}
-
-pub fn load_voxel_world_from_disk(
-    map_world: &MapWorld,
-) -> Vec<(IVec3, VoxelType)> {
-    load_voxel_world_from_disk_at(map_world, SAVE_PATH)
 }
 
 pub fn load_voxel_world_from_disk_at(

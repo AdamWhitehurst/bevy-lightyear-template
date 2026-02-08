@@ -2,7 +2,8 @@ use bevy::app::AppExit;
 use bevy::prelude::*;
 use protocol::{MapWorld, VoxelType};
 use server::map::{
-    load_voxel_world_from_disk_at, save_voxel_world_to_disk_at, VoxelDirtyState, VoxelModifications,
+    load_voxel_world_from_disk_at, save_voxel_world_to_disk_at, VoxelDirtyState,
+    VoxelModifications, VoxelSavePath,
 };
 use std::fs;
 use std::path::Path;
@@ -28,13 +29,13 @@ fn cleanup_test_files(test_name: &str) {
 }
 
 // Helper: Create test app with ServerMapPlugin for shutdown test
-fn create_test_app_for_shutdown() -> App {
+fn create_test_app_for_shutdown(save_path: &str) -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.init_resource::<VoxelModifications>();
     app.init_resource::<VoxelDirtyState>();
     app.insert_resource(MapWorld::default());
-    // Add just the shutdown save system
+    app.insert_resource(VoxelSavePath(save_path.to_string()));
     app.add_systems(Last, server::map::save_voxel_world_on_shutdown);
     app
 }
@@ -173,14 +174,11 @@ fn test_generation_metadata_mismatch() {
 
 #[test]
 fn test_shutdown_save() {
-    // Use default path for this test since the shutdown system uses hardcoded path
-    // Clean up the default production path
-    let _ = fs::remove_file("tests/world_save/voxel_world.bin");
-    let _ = fs::remove_file("tests/world_save/voxel_world.bin.tmp");
-    let _ = fs::remove_dir("tests/world_save");
+    let test_name = "shutdown_save";
+    cleanup_test_files(test_name);
+    let save_path = get_save_path(test_name);
 
-    // Create app with minimal setup for shutdown save system
-    let mut app = create_test_app_for_shutdown();
+    let mut app = create_test_app_for_shutdown(&save_path);
 
     // Add voxels to VoxelModifications
     let test_voxels = vec![
@@ -204,21 +202,16 @@ fn test_shutdown_save() {
     app.world_mut().write_message(AppExit::Success);
 
     // Run Last schedule (triggers save system)
-    app.update(); // This runs all schedules including Last
+    app.update();
 
-    // Verify save file created (uses default production path)
     assert!(
-        Path::new("tests/world_save/voxel_world.bin").exists(),
+        Path::new(&save_path).exists(),
         "Save file should be created on shutdown"
     );
 
-    // Verify file contains voxels using the _at function
     let map_world = MapWorld::default();
-    let loaded_mods = load_voxel_world_from_disk_at(&map_world, "tests/world_save/voxel_world.bin");
+    let loaded_mods = load_voxel_world_from_disk_at(&map_world, &save_path);
     assert_eq!(loaded_mods.len(), 2, "Should save 2 voxels on shutdown");
 
-    // Cleanup the default production path
-    let _ = fs::remove_file("tests/world_save/voxel_world.bin");
-    let _ = fs::remove_file("tests/world_save/voxel_world.bin.tmp");
-    let _ = fs::remove_dir("tests/world_save");
+    cleanup_test_files(test_name);
 }
