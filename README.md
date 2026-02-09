@@ -10,6 +10,7 @@ Multi-transport networked game template using Bevy and Lightyear.
 - **Native Client**: Desktop client connecting via UDP
 - **WASM Client**: Browser client connecting via WebTransport/WebSocket
 - **Voxel Map System**: Networked voxel terrain with bevy_voxel_world integration
+- **Ability System**: Data-driven abilities loaded from RON assets with networked replication
 
 ## Quick Start
 
@@ -55,12 +56,13 @@ Opens browser to HTTPS dev server. Client connects via WebTransport on `127.0.0.
 ```
 bevy-lightyear-template/
 ├── crates/
-│   ├── protocol/       # Shared network protocol and voxel map types
+│   ├── protocol/       # Shared network protocol, voxel map, and ability types
 │   ├── server/         # Authoritative server with voxel world
 │   ├── client/         # Native client with voxel rendering
 │   ├── web/            # WASM client
 │   ├── render/         # 3D rendering systems
 │   └── ui/             # UI components
+├── assets/             # Game assets (ability definitions, etc.)
 ├── certificates/       # TLS certificates (generated)
 ├── scripts/            # Build and run scripts
 ├── doc/                # Documentation and plans
@@ -96,3 +98,22 @@ bevy run --bin web
 # Or with auto-open in browser:
 bevy run --bin web --open
 ```
+
+## Ability System
+
+Abilities are defined in `assets/abilities.ron` and loaded at startup. Each character has 4 ability slots mapped to keys 1-4.
+
+### Hotkeys
+
+- `1` - Ability slot 1
+- `2` - Ability slot 2
+- `3` - Ability slot 3
+- `4` - Ability slot 4
+
+### Defining Abilities
+
+Edit `assets/abilities.ron` to add or modify abilities. Each ability has:
+- Phase durations (startup, active, recovery) in ticks (64 ticks = 1 second)
+- Cooldown in ticks
+- Combo steps and chain window
+- Effect type: `Melee`, `Dash`, or `Projectile`

@@ -7,7 +7,14 @@ use lightyear::prelude::input::leafwing::InputPlugin;
 use lightyear::prelude::*;
 use serde::{Deserialize, Serialize};
 
+pub mod ability;
 pub mod map;
+
+pub use ability::{
+    AbilityBulletOf, AbilityBullets, AbilityCooldowns, AbilityDef, AbilityDefs, AbilityDefsAsset,
+    AbilityEffect, AbilityId, AbilityPhase, AbilityPlugin, AbilityProjectileSpawn, AbilitySlots,
+    ActiveAbility, ability_action_to_slot,
+};
 pub use map::{
     attach_chunk_colliders, MapWorld, VoxelChannel, VoxelEditBroadcast, VoxelEditRequest,
     VoxelStateSync, VoxelType,
@@ -26,13 +33,17 @@ pub enum PlayerActions {
     Jump,
     PlaceVoxel,
     RemoveVoxel,
+    Ability1,
+    Ability2,
+    Ability3,
+    Ability4,
 }
 
 impl Actionlike for PlayerActions {
     fn input_control_kind(&self) -> InputControlKind {
         match self {
             Self::Move => InputControlKind::DualAxis,
-            Self::Jump | Self::PlaceVoxel | Self::RemoveVoxel => InputControlKind::Button,
+            _ => InputControlKind::Button,
         }
     }
 }
@@ -113,6 +124,14 @@ impl Plugin for ProtocolPlugin {
             .add_prediction()
             .add_should_rollback(angular_velocity_should_rollback);
 
+        // Ability components
+        app.register_component::<AbilitySlots>();
+        app.register_component::<ActiveAbility>()
+            .add_prediction();
+        app.register_component::<AbilityCooldowns>()
+            .add_prediction();
+        app.register_component::<AbilityProjectileSpawn>();
+
         // Position/Rotation with prediction + visual correction + interpolation
         app.register_component::<Position>()
             .add_prediction()
@@ -149,6 +168,7 @@ pub struct SharedGameplayPlugin;
 impl Plugin for SharedGameplayPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(ProtocolPlugin);
+        app.add_plugins(AbilityPlugin);
 
         app.add_plugins(lightyear::avian3d::plugin::LightyearAvianPlugin {
             replication_mode: lightyear::avian3d::plugin::AvianReplicationMode::Position,
@@ -162,6 +182,21 @@ impl Plugin for SharedGameplayPlugin {
                 .disable::<PhysicsInterpolationPlugin>()
                 .disable::<IslandSleepingPlugin>(),
         );
+
+        app.add_systems(
+            FixedUpdate,
+            (
+                ability::ability_activation,
+                ability::ability_phase_advance,
+                ability::ability_projectile_spawn,
+                ability::ability_dash_effect,
+            )
+                .chain(),
+        );
+
+        app.add_systems(PreUpdate, ability::handle_ability_projectile_spawn);
+        app.add_systems(FixedUpdate, ability::ability_bullet_lifetime);
+        app.add_observer(ability::despawn_ability_projectile_spawn);
     }
 }
 

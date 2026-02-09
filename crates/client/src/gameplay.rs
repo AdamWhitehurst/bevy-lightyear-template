@@ -33,7 +33,11 @@ fn handle_new_character(
                     .with_dual_axis(PlayerActions::Move, GamepadStick::LEFT)
                     .with_dual_axis(PlayerActions::Move, VirtualDPad::wasd())
                     .with(PlayerActions::PlaceVoxel, MouseButton::Left)
-                    .with(PlayerActions::RemoveVoxel, MouseButton::Right),
+                    .with(PlayerActions::RemoveVoxel, MouseButton::Right)
+                    .with(PlayerActions::Ability1, KeyCode::Digit1)
+                    .with(PlayerActions::Ability2, KeyCode::Digit2)
+                    .with(PlayerActions::Ability3, KeyCode::Digit3)
+                    .with(PlayerActions::Ability4, KeyCode::Digit4),
             );
         } else {
             info!("Remote character predicted for us: {entity:?}");
@@ -59,7 +63,7 @@ fn handle_character_movement(
             &Position,
             Forces,
         ),
-        (With<Predicted>, With<CharacterMarker>),
+        (With<Predicted>, With<CharacterMarker>, Without<ActiveAbility>),
     >,
 ) {
     for (entity, action_state, mass, position, mut forces) in &mut query {

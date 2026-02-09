@@ -16,6 +16,8 @@ bevy_voxel_world = { path = "git/bevy_voxel_world", features = ["serde"]}
 leafwing-input-manager = "0.19"
 lightyear = { version = "0.25.5", features = ["leafwing", "raw_connection"] }
 protocol = { path = "crates/protocol" }
+ron = "0.9"
+bevy_common_assets = { version = "0.14", features = ["ron"] }
 serde = "1.0"
 
 # WASM-specific dependencies

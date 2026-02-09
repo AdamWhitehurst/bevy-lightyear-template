@@ -1,6 +1,5 @@
 use bevy::app::AppExit;
 use bevy::prelude::*;
-use bevy::time::common_conditions::on_timer;
 use bevy_voxel_world::prelude::*;
 use lightyear::prelude::{
     Connected, MessageReceiver, MessageSender, NetworkTarget, Server, ServerMultiMessageSender,
@@ -9,7 +8,6 @@ use protocol::{
     MapWorld, VoxelChannel, VoxelEditBroadcast, VoxelEditRequest, VoxelStateSync, VoxelType,
 };
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
 
 /// Plugin managing server-side voxel map functionality
 pub struct ServerMapPlugin;
@@ -34,7 +32,10 @@ fn load_voxel_world(
         voxel_world.set_voxel(*pos, (*voxel_type).into());
     }
 
-    info!("Applied {} loaded modifications to voxel world", loaded_mods.len());
+    info!(
+        "Applied {} loaded modifications to voxel world",
+        loaded_mods.len()
+    );
 }
 
 fn save_voxel_world_debounced(
@@ -50,15 +51,15 @@ fn save_voxel_world_debounced(
 
     let now = time.elapsed_secs_f64();
     let time_since_edit = now - dirty_state.last_edit_time;
-    let time_since_first_dirty = dirty_state.first_dirty_time
-        .map(|t| now - t)
-        .unwrap_or(0.0);
+    let time_since_first_dirty = dirty_state.first_dirty_time.map(|t| now - t).unwrap_or(0.0);
 
-    let should_save = time_since_edit >= SAVE_DEBOUNCE_SECONDS
-        || time_since_first_dirty >= MAX_DIRTY_SECONDS;
+    let should_save =
+        time_since_edit >= SAVE_DEBOUNCE_SECONDS || time_since_first_dirty >= MAX_DIRTY_SECONDS;
 
     if should_save {
-        if let Err(e) = save_voxel_world_to_disk_at(&modifications.modifications, &map_world, &save_path.0) {
+        if let Err(e) =
+            save_voxel_world_to_disk_at(&modifications.modifications, &map_world, &save_path.0)
+        {
             error!("Failed to save voxel world: {}", e);
         }
 
@@ -81,7 +82,9 @@ pub fn save_voxel_world_on_shutdown(
 
     if dirty_state.is_dirty {
         info!("Saving voxel world on shutdown...");
-        if let Err(e) = save_voxel_world_to_disk_at(&modifications.modifications, &map_world, &save_path.0) {
+        if let Err(e) =
+            save_voxel_world_to_disk_at(&modifications.modifications, &map_world, &save_path.0)
+        {
             error!("Failed to save voxel world on shutdown: {}", e);
         }
     }
@@ -89,22 +92,20 @@ pub fn save_voxel_world_on_shutdown(
 
 impl Plugin for ServerMapPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(VoxelWorldPlugin::<MapWorld>::with_config(MapWorld::default()))
-            .init_resource::<VoxelModifications>()
-            .init_resource::<VoxelDirtyState>()
-            .init_resource::<VoxelSavePath>()
-            .add_systems(Startup, load_voxel_world)
-            .add_systems(
-                Update,
-                (
-                    handle_voxel_edit_requests,
-                    protocol::attach_chunk_colliders,
-                    debug_server_chunks.run_if(on_timer(Duration::from_secs(5))),
-                ),
-            )
-            .add_systems(Update, save_voxel_world_debounced)
-            .add_systems(Last, save_voxel_world_on_shutdown)
-            .add_observer(send_initial_voxel_state);
+        app.add_plugins(VoxelWorldPlugin::<MapWorld>::with_config(
+            MapWorld::default(),
+        ))
+        .init_resource::<VoxelModifications>()
+        .init_resource::<VoxelDirtyState>()
+        .init_resource::<VoxelSavePath>()
+        .add_systems(Startup, load_voxel_world)
+        .add_systems(
+            Update,
+            (handle_voxel_edit_requests, protocol::attach_chunk_colliders),
+        )
+        .add_systems(Update, save_voxel_world_debounced)
+        .add_systems(Last, save_voxel_world_on_shutdown)
+        .add_observer(send_initial_voxel_state);
     }
 }
 
@@ -183,7 +184,11 @@ pub fn save_voxel_world_to_disk_at(
     fs::write(&temp_path, bytes)?;
     fs::rename(temp_path, path)?;
 
-    info!("Saved {} voxel modifications to {}", modifications.len(), path);
+    info!(
+        "Saved {} voxel modifications to {}",
+        modifications.len(),
+        path
+    );
     Ok(())
 }
 
@@ -198,7 +203,10 @@ pub fn load_voxel_world_from_disk_at(
 
     // File doesn't exist - normal for first run
     if !path.exists() {
-        info!("No save file found at {}, starting with empty world", save_path);
+        info!(
+            "No save file found at {}, starting with empty world",
+            save_path
+        );
         return Vec::new();
     }
 
@@ -258,7 +266,11 @@ pub fn load_voxel_world_from_disk_at(
         return Vec::new();
     }
 
-    info!("Loaded {} voxel modifications from {}", save_data.modifications.len(), save_path);
+    info!(
+        "Loaded {} voxel modifications from {}",
+        save_data.modifications.len(),
+        save_path
+    );
     save_data.modifications
 }
 
@@ -353,19 +365,4 @@ fn send_initial_voxel_state(
     message_sender.send::<VoxelChannel>(VoxelStateSync {
         modifications: modifications.modifications.clone(),
     });
-}
-
-/// Debug system to monitor server chunk spawning
-fn debug_server_chunks(chunks: Query<(&Chunk<MapWorld>, &Transform, Option<&Mesh3d>)>) {
-    let total = chunks.iter().count();
-    let with_mesh = chunks.iter().filter(|(_, _, m)| m.is_some()).count();
-    let above_ground = chunks
-        .iter()
-        .filter(|(_, t, _)| t.translation.y > 0.0)
-        .count();
-
-    eprintln!(
-        "Server chunks: total={}, with_mesh={}, above_ground={}",
-        total, with_mesh, above_ground
-    );
 }

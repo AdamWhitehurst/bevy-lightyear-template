@@ -34,6 +34,12 @@ After making code changes, MUST review README.md and update it if the changes af
 </rule>
 </project_rules>
 
+<verification_rules description="Rules for verifying implementation work">
+<rule priority="high">
+After implementing asset loading or any runtime feature, MUST verify it actually works at runtime (e.g. `cargo server` or `cargo client`) — compilation alone is insufficient.
+</rule>
+</verification_rules>
+
 <document_index description="Where to find more context-specific rules and documents">
 <rule priority="high">Read and follow any documents that are relevant to your task. CRITICAL: Follow any rules that they stipulate</rule>
 <document location="VISION.md" purpose="High-level outline of the game. Provides guidance, expectations for features and how they integrate" />

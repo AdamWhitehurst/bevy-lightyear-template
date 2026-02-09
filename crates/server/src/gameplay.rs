@@ -27,7 +27,7 @@ fn handle_character_movement(
             &Position,
             Forces,
         ),
-        With<CharacterMarker>,
+        (With<CharacterMarker>, Without<ActiveAbility>),
     >,
 ) {
     for (entity, action_state, mass, position, mut forces) in &mut query {
@@ -81,5 +81,12 @@ fn handle_connected(
         ColorComponent(color.into()),
         CharacterMarker,
         ChunkRenderTarget::<MapWorld>::default(),
+        AbilitySlots([
+            Some(AbilityId("punch".into())),
+            Some(AbilityId("dash".into())),
+            Some(AbilityId("fireball".into())),
+            None,
+        ]),
+        AbilityCooldowns::default(),
     ));
 }
