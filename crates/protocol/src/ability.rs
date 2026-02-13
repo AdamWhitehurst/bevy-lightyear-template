@@ -139,6 +139,19 @@ impl AbilityCooldowns {
     }
 }
 
+/// Present during Active phase of a Dash ability. Removed on phase exit.
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct DashAbilityEffect {
+    pub speed: f32,
+}
+
+/// One-shot: inserted when Projectile enters Active. Consumed by spawn system.
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct ProjectileSpawnAbilityEffect {
+    pub speed: f32,
+    pub lifetime_ticks: u16,
+}
+
 /// Marker on a ProjectileSpawn entity — stores spawn parameters.
 #[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
 pub struct AbilityProjectileSpawn {
@@ -352,38 +365,97 @@ pub fn update_active_abilities(
     }
 }
 
-/// Spawn a `AbilityProjectileSpawn` entity with `PreSpawned` when a projectile ability enters Active phase.
-pub fn ability_projectile_spawn(
+/// Insert/remove effect marker components based on `ActiveAbility` phase.
+/// Centralizes the `AbilityDefs` lookup so effect systems query markers directly.
+pub fn dispatch_effect_markers(
     mut commands: Commands,
     ability_defs: Res<AbilityDefs>,
     timeline: Single<&LocalTimeline, Without<ClientOf>>,
-    query: Query<(Entity, &ActiveAbility, &Position, &Rotation), With<CharacterMarker>>,
+    query: Query<(Entity, &ActiveAbility)>,
+) {
+    let tick = timeline.tick();
+
+    for (entity, active) in &query {
+        let Some(def) = ability_defs.get(&active.ability_id) else {
+            warn!("dispatch_effect_markers: ability {:?} not found", active.ability_id);
+            continue;
+        };
+
+        if active.phase == AbilityPhase::Active {
+            dispatch_while_active_markers(&mut commands, entity, def);
+            if active.phase_start_tick == tick {
+                dispatch_on_cast_markers(&mut commands, entity, def);
+            }
+        } else {
+            remove_while_active_markers(&mut commands, entity);
+        }
+    }
+}
+
+fn dispatch_while_active_markers(commands: &mut Commands, entity: Entity, def: &AbilityDef) {
+    if let AbilityEffect::Dash { speed } = &def.effect {
+        commands
+            .entity(entity)
+            .insert(DashAbilityEffect { speed: *speed });
+    }
+}
+
+fn dispatch_on_cast_markers(commands: &mut Commands, entity: Entity, def: &AbilityDef) {
+    if let AbilityEffect::Projectile {
+        speed,
+        lifetime_ticks,
+    } = &def.effect
+    {
+        commands
+            .entity(entity)
+            .insert(ProjectileSpawnAbilityEffect {
+                speed: *speed,
+                lifetime_ticks: *lifetime_ticks,
+            });
+    }
+}
+
+fn remove_while_active_markers(commands: &mut Commands, entity: Entity) {
+    commands.entity(entity).remove::<DashAbilityEffect>();
+}
+
+/// Safety net: remove all effect markers when `ActiveAbility` is removed.
+pub fn cleanup_effect_markers_on_removal(
+    trigger: On<Remove, ActiveAbility>,
+    mut commands: Commands,
+) {
+    if let Ok(mut cmd) = commands.get_entity(trigger.entity) {
+        cmd.remove::<DashAbilityEffect>();
+        cmd.remove::<ProjectileSpawnAbilityEffect>();
+    }
+}
+
+/// Spawn a `AbilityProjectileSpawn` entity from `ProjectileSpawnAbilityEffect` markers.
+pub fn ability_projectile_spawn(
+    mut commands: Commands,
+    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    query: Query<
+        (
+            Entity,
+            &ProjectileSpawnAbilityEffect,
+            &ActiveAbility,
+            &Position,
+            &Rotation,
+        ),
+        With<CharacterMarker>,
+    >,
     server_query: Query<&ControlledBy>,
 ) {
     let tick = timeline.tick();
 
-    for (entity, active, position, rotation) in &query {
-        if active.phase != AbilityPhase::Active || active.phase_start_tick != tick {
-            continue;
-        }
-        let Some(def) = ability_defs.get(&active.ability_id) else {
-            continue;
-        };
-        let AbilityEffect::Projectile {
-            speed,
-            lifetime_ticks,
-        } = &def.effect
-        else {
-            continue;
-        };
-
+    for (entity, request, active, position, rotation) in &query {
         let direction = facing_direction(rotation);
         let spawn_info = AbilityProjectileSpawn {
             spawn_tick: tick,
             position: position.0 + direction * PROJECTILE_SPAWN_OFFSET,
             direction,
-            speed: *speed,
-            lifetime_ticks: *lifetime_ticks,
+            speed: request.speed,
+            lifetime_ticks: request.lifetime_ticks,
             ability_id: active.ability_id.clone(),
             shooter: entity,
         };
@@ -401,6 +473,10 @@ pub fn ability_projectile_spawn(
                 *controlled_by,
             ));
         }
+
+        commands
+            .entity(entity)
+            .remove::<ProjectileSpawnAbilityEffect>();
     }
 }
 
@@ -455,24 +531,13 @@ pub fn ability_bullet_lifetime(
     }
 }
 
-/// Apply dash velocity while a dash ability is in Active phase.
+/// Apply dash velocity while `DashAbilityEffect` marker is present.
 pub fn ability_dash_effect(
-    ability_defs: Res<AbilityDefs>,
-    mut query: Query<(&ActiveAbility, &Rotation, &mut LinearVelocity), With<CharacterMarker>>,
+    mut query: Query<(&DashAbilityEffect, &Rotation, &mut LinearVelocity), With<CharacterMarker>>,
 ) {
-    for (active, rotation, mut velocity) in &mut query {
-        if active.phase != AbilityPhase::Active {
-            continue;
-        }
-        let Some(def) = ability_defs.get(&active.ability_id) else {
-            continue;
-        };
-        let AbilityEffect::Dash { speed } = &def.effect else {
-            continue;
-        };
-
+    for (dash, rotation, mut velocity) in &mut query {
         let direction = facing_direction(rotation);
-        velocity.x = direction.x * *speed;
-        velocity.z = direction.z * *speed;
+        velocity.x = direction.x * dash.speed;
+        velocity.z = direction.z * dash.speed;
     }
 }

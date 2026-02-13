@@ -60,6 +60,7 @@ fn test_app() -> App {
         (
             ability::ability_activation,
             ability::update_active_abilities,
+            ability::dispatch_effect_markers,
             ability::ability_dash_effect,
         )
             .chain(),

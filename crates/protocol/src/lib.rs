@@ -13,7 +13,8 @@ pub mod map;
 pub use ability::{
     ability_action_to_slot, AbilityBulletOf, AbilityBullets, AbilityCooldowns, AbilityDef,
     AbilityDefs, AbilityDefsAsset, AbilityEffect, AbilityId, AbilityPhase, AbilityPlugin,
-    AbilityProjectileSpawn, AbilitySlots, ActiveAbility,
+    AbilityProjectileSpawn, AbilitySlots, ActiveAbility, DashAbilityEffect,
+    ProjectileSpawnAbilityEffect,
 };
 pub use map::{
     attach_chunk_colliders, MapWorld, VoxelChannel, VoxelEditBroadcast, VoxelEditRequest,
@@ -187,6 +188,7 @@ impl Plugin for SharedGameplayPlugin {
             (
                 ability::ability_activation,
                 ability::update_active_abilities,
+                ability::dispatch_effect_markers,
                 ability::ability_projectile_spawn,
                 ability::ability_dash_effect,
             )
@@ -197,6 +199,7 @@ impl Plugin for SharedGameplayPlugin {
         app.add_systems(PreUpdate, ability::handle_ability_projectile_spawn);
         app.add_systems(FixedUpdate, ability::ability_bullet_lifetime);
         app.add_observer(ability::despawn_ability_projectile_spawn);
+        app.add_observer(ability::cleanup_effect_markers_on_removal);
     }
 }
 
