@@ -34,6 +34,17 @@ After making code changes, MUST review README.md and update it if the changes af
 </rule>
 </project_rules>
 
+<code_style description="How code should look">
+<rule>
+When comments would be used, try to split code into self-desciptive functions instead
+</rule>
+<rule>
+Use doc-comments that describe types and functions. Use regular comments sparingly
+</rule>
+<rule>
+Do not use regional-seperation comments
+</rule>
+</code_style>
 <verification_rules description="Rules for verifying implementation work">
 <rule priority="high">
 After implementing asset loading or any runtime feature, MUST verify it actually works at runtime (e.g. `cargo server` or `cargo client`) — compilation alone is insufficient.
