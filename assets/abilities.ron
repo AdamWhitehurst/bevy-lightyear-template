@@ -13,7 +13,7 @@
             startup_ticks: 2,
             active_ticks: 8,
             recovery_ticks: 4,
-            cooldown_ticks: 64,
+            cooldown_ticks: 32,
             steps: 1,
             step_window_ticks: 0,
             effect: Dash(
@@ -24,7 +24,7 @@
             startup_ticks: 6,
             active_ticks: 2,
             recovery_ticks: 8,
-            cooldown_ticks: 96,
+            cooldown_ticks: 42,
             steps: 1,
             step_window_ticks: 0,
             effect: Projectile(

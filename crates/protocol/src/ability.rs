@@ -12,6 +12,20 @@ use std::collections::HashMap;
 
 use crate::{CharacterMarker, PlayerActions};
 
+const PROJECTILE_SPAWN_OFFSET: f32 = 1.5;
+const BULLET_COLLIDER_RADIUS: f32 = 0.25;
+
+const ABILITY_ACTIONS: [PlayerActions; 4] = [
+    PlayerActions::Ability1,
+    PlayerActions::Ability2,
+    PlayerActions::Ability3,
+    PlayerActions::Ability4,
+];
+
+pub fn facing_direction(rotation: &Rotation) -> Vec3 {
+    (rotation.0 * Vec3::NEG_Z).normalize()
+}
+
 /// String-based ability identifier.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect)]
 pub struct AbilityId(pub String);
@@ -34,6 +48,16 @@ pub struct AbilityDef {
     pub steps: u8,
     pub step_window_ticks: u16,
     pub effect: AbilityEffect,
+}
+
+impl AbilityDef {
+    pub fn phase_duration(&self, phase: &AbilityPhase) -> u16 {
+        match phase {
+            AbilityPhase::Startup => self.startup_ticks,
+            AbilityPhase::Active => self.active_ticks,
+            AbilityPhase::Recovery => self.recovery_ticks,
+        }
+    }
 }
 
 /// Asset file containing all ability definitions.
@@ -87,6 +111,12 @@ pub struct ActiveAbility {
     pub chain_input_received: bool,
 }
 
+impl ActiveAbility {
+    pub fn has_more_steps(&self) -> bool {
+        self.step + 1 < self.total_steps
+    }
+}
+
 /// Per-slot cooldown tracking.
 #[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AbilityCooldowns {
@@ -98,6 +128,14 @@ impl Default for AbilityCooldowns {
         Self {
             last_used: [None; 4],
         }
+    }
+}
+
+impl AbilityCooldowns {
+    pub fn is_on_cooldown(&self, slot: usize, current_tick: Tick, cooldown_ticks: u16) -> bool {
+        self.last_used[slot]
+            .map(|last| (current_tick - last).unsigned_abs() <= cooldown_ticks)
+            .unwrap_or(false)
     }
 }
 
@@ -167,13 +205,12 @@ fn insert_ability_defs(
 
 /// Maps a `PlayerActions` ability variant to a slot index (0-3).
 pub fn ability_action_to_slot(action: &PlayerActions) -> Option<usize> {
-    match action {
-        PlayerActions::Ability1 => Some(0),
-        PlayerActions::Ability2 => Some(1),
-        PlayerActions::Ability3 => Some(2),
-        PlayerActions::Ability4 => Some(3),
-        _ => None,
-    }
+    ABILITY_ACTIONS.iter().position(|a| a == action)
+}
+
+/// Maps a slot index (0-3) to its corresponding `PlayerActions` variant.
+pub fn slot_to_ability_action(slot: usize) -> Option<PlayerActions> {
+    ABILITY_ACTIONS.get(slot).copied()
 }
 
 /// Activate an ability when a hotkey is pressed and no ability is currently active.
@@ -194,34 +231,20 @@ pub fn ability_activation(
     let tick = timeline.tick();
 
     for (entity, action_state, slots, mut cooldowns) in &mut query {
-        for action in [
-            PlayerActions::Ability1,
-            PlayerActions::Ability2,
-            PlayerActions::Ability3,
-            PlayerActions::Ability4,
-        ] {
-            if !action_state.just_pressed(&action) {
+        for (slot_idx, action) in ABILITY_ACTIONS.iter().enumerate() {
+            if !action_state.just_pressed(action) {
                 continue;
             }
-            let Some(slot_idx) = ability_action_to_slot(&action) else {
-                continue;
-            };
             let Some(ref ability_id) = slots.0[slot_idx] else {
                 continue;
             };
             let Some(def) = ability_defs.get(ability_id) else {
                 continue;
             };
-
-            // Check cooldown
-            if let Some(last_used) = cooldowns.last_used[slot_idx] {
-                let elapsed = tick - last_used;
-                if elapsed.unsigned_abs() <= def.cooldown_ticks {
-                    continue;
-                }
+            if cooldowns.is_on_cooldown(slot_idx, tick, def.cooldown_ticks) {
+                continue;
             }
 
-            // Activate
             cooldowns.last_used[slot_idx] = Some(tick);
             commands.entity(entity).insert(ActiveAbility {
                 ability_id: ability_id.clone(),
@@ -231,14 +254,80 @@ pub fn ability_activation(
                 total_steps: def.steps,
                 chain_input_received: false,
             });
-            info!("Ability activated: {:?} (slot {})", ability_id, slot_idx);
             break; // only one ability at a time
         }
     }
 }
 
+/// Set `chain_input_received` to true if the player re-pressed the ability key for combo chaining.
+fn set_chain_input_received(
+    active: &mut ActiveAbility,
+    action_state: &ActionState<PlayerActions>,
+    slots: &AbilitySlots,
+) {
+    if active.chain_input_received || !active.has_more_steps() {
+        return;
+    }
+    let Some((slot_idx, _)) = slots
+        .0
+        .iter()
+        .enumerate()
+        .find(|(_, slot)| slot.as_ref() == Some(&active.ability_id))
+    else {
+        return;
+    };
+    let Some(action) = slot_to_ability_action(slot_idx) else {
+        return;
+    };
+    if action_state.just_pressed(&action) {
+        active.chain_input_received = true;
+    }
+}
+
+/// Advance the ability phase
+fn advance_ability_phase(
+    commands: &mut Commands,
+    entity: Entity,
+    active: &mut ActiveAbility,
+    def: &AbilityDef,
+    tick: Tick,
+) {
+    let elapsed = tick - active.phase_start_tick;
+    let phase_complete = elapsed >= def.phase_duration(&active.phase) as i16;
+
+    match active.phase {
+        AbilityPhase::Startup if phase_complete => {
+            active.phase = AbilityPhase::Active;
+            active.phase_start_tick = tick;
+        }
+        AbilityPhase::Active if phase_complete => {
+            active.phase = AbilityPhase::Recovery;
+            active.phase_start_tick = tick;
+        }
+        AbilityPhase::Recovery if phase_complete => {
+            if active.chain_input_received && active.has_more_steps() {
+                active.step += 1;
+                active.phase = AbilityPhase::Startup;
+                active.phase_start_tick = tick;
+                active.chain_input_received = false;
+            } else {
+                commands.entity(entity).remove::<ActiveAbility>();
+            }
+        }
+        AbilityPhase::Recovery => {
+            let chain_window_expired = !active.chain_input_received
+                && active.has_more_steps()
+                && elapsed >= def.step_window_ticks as i16;
+            if chain_window_expired {
+                commands.entity(entity).remove::<ActiveAbility>();
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Advance ability phases based on tick counts. Handle multi-step combo chaining.
-pub fn ability_phase_advance(
+pub fn update_active_abilities(
     mut commands: Commands,
     ability_defs: Res<AbilityDefs>,
     timeline: Single<&LocalTimeline, Without<ClientOf>>,
@@ -258,71 +347,8 @@ pub fn ability_phase_advance(
             continue;
         };
 
-        let elapsed = tick - active.phase_start_tick;
-
-        // Check for combo chain input (re-pressing the same ability key)
-        if !active.chain_input_received && active.step + 1 < active.total_steps {
-            for (slot_idx, slot) in slots.0.iter().enumerate() {
-                if slot.as_ref() == Some(&active.ability_id) {
-                    let action = match slot_idx {
-                        0 => PlayerActions::Ability1,
-                        1 => PlayerActions::Ability2,
-                        2 => PlayerActions::Ability3,
-                        3 => PlayerActions::Ability4,
-                        _ => continue,
-                    };
-                    if action_state.just_pressed(&action) {
-                        active.chain_input_received = true;
-                    }
-                    break;
-                }
-            }
-        }
-
-        match active.phase {
-            AbilityPhase::Startup => {
-                if elapsed >= def.startup_ticks as i16 {
-                    active.phase = AbilityPhase::Active;
-                    active.phase_start_tick = tick;
-                    info!(
-                        "Ability {:?} step {} -> Active",
-                        active.ability_id, active.step
-                    );
-                }
-            }
-            AbilityPhase::Active => {
-                if elapsed >= def.active_ticks as i16 {
-                    active.phase = AbilityPhase::Recovery;
-                    active.phase_start_tick = tick;
-                    info!(
-                        "Ability {:?} step {} -> Recovery",
-                        active.ability_id, active.step
-                    );
-                }
-            }
-            AbilityPhase::Recovery => {
-                if elapsed >= def.recovery_ticks as i16 {
-                    // Check for combo chain
-                    if active.chain_input_received && active.step + 1 < active.total_steps {
-                        active.step += 1;
-                        active.phase = AbilityPhase::Startup;
-                        active.phase_start_tick = tick;
-                        active.chain_input_received = false;
-                        info!("Ability {:?} -> step {}", active.ability_id, active.step);
-                    } else {
-                        info!("Ability {:?} complete", active.ability_id);
-                        commands.entity(entity).remove::<ActiveAbility>();
-                    }
-                } else if !active.chain_input_received
-                    && active.step + 1 < active.total_steps
-                    && elapsed >= def.step_window_ticks as i16
-                {
-                    // Window expired without chain input — end ability
-                    info!("Ability {:?} chain window expired", active.ability_id);
-                    commands.entity(entity).remove::<ActiveAbility>();
-                }
-            }
-        }
+        set_chain_input_received(&mut active, action_state, slots);
+        advance_ability_phase(&mut commands, entity, &mut active, def, tick);
     }
 }
 
@@ -351,10 +377,10 @@ pub fn ability_projectile_spawn(
             continue;
         };
 
-        let direction = (rotation.0 * Vec3::NEG_Z).normalize();
+        let direction = facing_direction(rotation);
         let spawn_info = AbilityProjectileSpawn {
             spawn_tick: tick,
-            position: position.0 + direction * 1.5,
+            position: position.0 + direction * PROJECTILE_SPAWN_OFFSET,
             direction,
             speed: *speed,
             lifetime_ticks: *lifetime_ticks,
@@ -390,7 +416,7 @@ pub fn handle_ability_projectile_spawn(
             Rotation::default(),
             LinearVelocity(spawn_info.direction * spawn_info.speed),
             RigidBody::Kinematic,
-            Collider::sphere(0.25),
+            Collider::sphere(BULLET_COLLIDER_RADIUS),
             AbilityBulletOf(spawn_entity),
             DisableRollback,
             Name::new("AbilityBullet"),
@@ -445,7 +471,7 @@ pub fn ability_dash_effect(
             continue;
         };
 
-        let direction = (rotation.0 * Vec3::NEG_Z).normalize();
+        let direction = facing_direction(rotation);
         velocity.x = direction.x * *speed;
         velocity.z = direction.z * *speed;
     }

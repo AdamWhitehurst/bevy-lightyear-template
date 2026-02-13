@@ -11,9 +11,9 @@ pub mod ability;
 pub mod map;
 
 pub use ability::{
-    AbilityBulletOf, AbilityBullets, AbilityCooldowns, AbilityDef, AbilityDefs, AbilityDefsAsset,
-    AbilityEffect, AbilityId, AbilityPhase, AbilityPlugin, AbilityProjectileSpawn, AbilitySlots,
-    ActiveAbility, ability_action_to_slot,
+    ability_action_to_slot, AbilityBulletOf, AbilityBullets, AbilityCooldowns, AbilityDef,
+    AbilityDefs, AbilityDefsAsset, AbilityEffect, AbilityId, AbilityPhase, AbilityPlugin,
+    AbilityProjectileSpawn, AbilitySlots, ActiveAbility,
 };
 pub use map::{
     attach_chunk_colliders, MapWorld, VoxelChannel, VoxelEditBroadcast, VoxelEditRequest,
@@ -126,8 +126,7 @@ impl Plugin for ProtocolPlugin {
 
         // Ability components
         app.register_component::<AbilitySlots>();
-        app.register_component::<ActiveAbility>()
-            .add_prediction();
+        app.register_component::<ActiveAbility>().add_prediction();
         app.register_component::<AbilityCooldowns>()
             .add_prediction();
         app.register_component::<AbilityProjectileSpawn>();
@@ -187,13 +186,14 @@ impl Plugin for SharedGameplayPlugin {
             FixedUpdate,
             (
                 ability::ability_activation,
-                ability::ability_phase_advance,
+                ability::update_active_abilities,
                 ability::ability_projectile_spawn,
                 ability::ability_dash_effect,
             )
                 .chain(),
         );
 
+        app.add_systems(FixedUpdate, update_facing);
         app.add_systems(PreUpdate, ability::handle_ability_projectile_spawn);
         app.add_systems(FixedUpdate, ability::ability_bullet_lifetime);
         app.add_observer(ability::despawn_ability_projectile_spawn);
@@ -246,6 +246,22 @@ pub fn apply_movement(
     let required_acceleration = (new_ground_linear_velocity - ground_linear_velocity) / delta_secs;
 
     forces.apply_force(required_acceleration * mass.value());
+}
+
+/// Update character facing direction based on movement input.
+/// Separate from `apply_movement` because `Forces` already accesses `Rotation`.
+pub fn update_facing(
+    mut query: Query<(&ActionState<PlayerActions>, &mut Rotation), With<CharacterMarker>>,
+) {
+    for (action_state, mut rotation) in &mut query {
+        let move_dir = action_state
+            .axis_pair(&PlayerActions::Move)
+            .clamp_length_max(1.0);
+        if move_dir != Vec2::ZERO {
+            info!(?move_dir, ?rotation, "Updating facing direction");
+            *rotation = Rotation(Quat::from_rotation_y(f32::atan2(move_dir.x, -move_dir.y)));
+        }
+    }
 }
 
 #[cfg(feature = "test_utils")]
