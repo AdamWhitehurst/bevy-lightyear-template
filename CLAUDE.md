@@ -44,6 +44,9 @@ Use doc-comments that describe types and functions. Use regular comments sparing
 <rule>
 Do not use regional-seperation comments
 </rule>
+<rule>
+Avoid large functions. Break them into smaller, atomic, self-describing functions.
+</rule>
 </code_style>
 <verification_rules description="Rules for verifying implementation work">
 <rule priority="high">
