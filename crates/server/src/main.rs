@@ -12,8 +12,12 @@ use std::time::Duration;
 fn main() {
     App::new()
         .add_plugins(MinimalPlugins)
+        .add_plugins(bevy::state::app::StatesPlugin)
         .add_plugins(bevy::log::LogPlugin::default())
-        .add_plugins(bevy::asset::AssetPlugin::default())
+        .add_plugins(bevy::asset::AssetPlugin {
+            file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").to_string(),
+            ..default()
+        })
         .add_plugins(bevy::scene::ScenePlugin)
         // Register asset resources for voxel world mesh generation
         .add_message::<bevy::asset::AssetEvent<bevy::prelude::Mesh>>()

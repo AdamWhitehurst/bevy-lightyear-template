@@ -12,12 +12,15 @@ test-all = "make test-all"
 
 [build]
 incremental = true
-# Note: Job limit is applied via environment variable in Makefile.toml for WASM builds only
 
 [target.wasm32-unknown-unknown]
 rustflags = [
     "--cfg", "web_sys_unstable_apis",
     "-C", "target-feature=+reference-types",
-    "-C", "codegen-units=1",        # Reduce parallelism to lower peak RAM usage
+    "-C", "codegen-units=8",        # Reduce parallelism to lower peak RAM usagea
     "-C", "opt-level=z",             # Optimize for size to reduce memory pressure
+]
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"
 ]

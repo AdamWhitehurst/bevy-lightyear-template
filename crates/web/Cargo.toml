@@ -38,6 +38,10 @@ lightyear = { workspace = true, features = [
     "netcode",
     "webtransport",
     "websocket",
+    "leafwing",
+    "prediction",
+    "replication",
+    "interpolation",
 ] }
 protocol = { workspace = true }
 client = { path = "../client" }

@@ -25,7 +25,7 @@ pub struct UiClientConfig {
 impl Default for UiClientConfig {
     fn default() -> Self {
         Self {
-            server_addr: SocketAddr::from(([127, 0, 0, 1], 5000)),
+            server_addr: SocketAddr::from(([127, 0, 0, 1], 5001)),
             client_id: 0,
             protocol_id: PROTOCOL_ID,
             private_key: PRIVATE_KEY,

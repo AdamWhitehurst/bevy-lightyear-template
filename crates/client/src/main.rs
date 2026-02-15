@@ -30,7 +30,10 @@ fn main() {
     };
 
     App::new()
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.set(AssetPlugin {
+            file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").to_string(),
+            ..default()
+        }))
         .add_plugins(ClientPlugins {
             tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
         })

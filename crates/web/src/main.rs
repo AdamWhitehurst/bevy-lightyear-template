@@ -1,3 +1,4 @@
+use avian3d::prelude::PhysicsDebugPlugin;
 use bevy::prelude::*;
 use client::gameplay::ClientGameplayPlugin;
 use client::map::ClientMapPlugin;
@@ -5,7 +6,7 @@ use lightyear::prelude::client::*;
 use protocol::*;
 use render::RenderPlugin;
 use std::time::Duration;
-use ui::UiPlugin;
+use ui::{UiClientConfig, UiPlugin};
 
 pub mod network;
 use network::WebClientPlugin;
@@ -27,9 +28,16 @@ fn main() {
         })
         .add_plugins(SharedGameplayPlugin)
         .add_plugins(WebClientPlugin::default())
+        .insert_resource(UiClientConfig {
+            server_addr: std::net::SocketAddr::from(([127, 0, 0, 1], 5001)),
+            client_id: 0,
+            protocol_id: protocol::PROTOCOL_ID,
+            private_key: protocol::PRIVATE_KEY,
+        })
         .add_plugins(ClientGameplayPlugin)
         .add_plugins(ClientMapPlugin)
         .add_plugins(RenderPlugin)
         .add_plugins(UiPlugin)
+        .add_plugins(PhysicsDebugPlugin::default())
         .run();
 }

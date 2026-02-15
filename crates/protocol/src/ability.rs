@@ -203,8 +203,13 @@ impl Plugin for AbilityPlugin {
     }
 }
 
-fn load_ability_defs(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn load_ability_defs(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut tracked: ResMut<crate::app_state::TrackedAssets>,
+) {
     let handle = asset_server.load::<AbilityDefsAsset>("abilities.ron");
+    tracked.add(handle.clone());
     commands.insert_resource(AbilityDefsHandle(handle));
 }
 

@@ -8,9 +8,11 @@ use lightyear::prelude::*;
 use serde::{Deserialize, Serialize};
 
 pub mod ability;
+pub mod app_state;
 pub mod hit_detection;
 pub mod map;
 
+pub use app_state::{AppState, AppStatePlugin, TrackedAssets};
 pub use ability::{
     ability_action_to_slot, AbilityBulletOf, AbilityBullets, AbilityCooldowns, AbilityDef,
     AbilityDefs, AbilityDefsAsset, AbilityEffect, AbilityId, AbilityPhase, AbilityPlugin,
@@ -178,6 +180,7 @@ pub struct SharedGameplayPlugin;
 
 impl Plugin for SharedGameplayPlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugins(AppStatePlugin);
         app.add_plugins(ProtocolPlugin);
         app.add_plugins(AbilityPlugin);
 
@@ -194,6 +197,8 @@ impl Plugin for SharedGameplayPlugin {
                 .disable::<IslandSleepingPlugin>(),
         );
 
+        let ready = in_state(AppState::Ready);
+
         app.add_systems(
             FixedUpdate,
             (
@@ -203,7 +208,8 @@ impl Plugin for SharedGameplayPlugin {
                 ability::ability_projectile_spawn,
                 ability::ability_dash_effect,
             )
-                .chain(),
+                .chain()
+                .run_if(ready.clone()),
         );
 
         app.add_systems(
@@ -214,12 +220,13 @@ impl Plugin for SharedGameplayPlugin {
                 hit_detection::process_projectile_hits,
             )
                 .chain()
-                .after(ability::dispatch_effect_markers),
+                .after(ability::dispatch_effect_markers)
+                .run_if(ready.clone()),
         );
 
-        app.add_systems(FixedUpdate, update_facing);
+        app.add_systems(FixedUpdate, update_facing.run_if(ready.clone()));
         app.add_systems(PreUpdate, ability::handle_ability_projectile_spawn);
-        app.add_systems(FixedUpdate, ability::ability_bullet_lifetime);
+        app.add_systems(FixedUpdate, ability::ability_bullet_lifetime.run_if(ready));
         app.add_observer(ability::despawn_ability_projectile_spawn);
         app.add_observer(ability::cleanup_effect_markers_on_removal);
     }
