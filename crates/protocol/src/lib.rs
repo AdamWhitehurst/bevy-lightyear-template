@@ -8,6 +8,7 @@ use lightyear::prelude::*;
 use serde::{Deserialize, Serialize};
 
 pub mod ability;
+pub mod hit_detection;
 pub mod map;
 
 pub use ability::{
@@ -15,6 +16,9 @@ pub use ability::{
     AbilityDefs, AbilityDefsAsset, AbilityEffect, AbilityId, AbilityPhase, AbilityPlugin,
     AbilityProjectileSpawn, AbilitySlots, ActiveAbility, DashAbilityEffect,
     ProjectileSpawnAbilityEffect,
+};
+pub use hit_detection::{
+    character_collision_layers, projectile_collision_layers, terrain_collision_layers, GameLayer,
 };
 pub use map::{
     attach_chunk_colliders, MapWorld, VoxelChannel, VoxelEditBroadcast, VoxelEditRequest,
@@ -52,6 +56,10 @@ impl Actionlike for PlayerActions {
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct CharacterMarker;
 
+/// Marker to distinguish dummy targets from player characters.
+#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct DummyTarget;
+
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ColorComponent(pub Color);
 
@@ -61,6 +69,7 @@ pub struct CharacterPhysicsBundle {
     pub rigid_body: RigidBody,
     pub locked_axes: LockedAxes,
     pub friction: Friction,
+    pub collision_layers: CollisionLayers,
 }
 
 impl Default for CharacterPhysicsBundle {
@@ -69,7 +78,8 @@ impl Default for CharacterPhysicsBundle {
             collider: Collider::capsule(CHARACTER_CAPSULE_RADIUS, CHARACTER_CAPSULE_HEIGHT),
             rigid_body: RigidBody::Dynamic,
             locked_axes: LockedAxes::ROTATION_LOCKED,
-            friction: Friction::new(0.0).with_combine_rule(CoefficientCombine::Min),
+            friction: Friction::default(),
+            collision_layers: hit_detection::character_collision_layers(),
         }
     }
 }
@@ -112,9 +122,10 @@ impl Plugin for ProtocolPlugin {
 
         app.register_component::<ChunkRenderTarget<MapWorld>>();
         // Marker components
-        app.register_component::<ColorComponent>();
+        app.register_component::<ColorComponent>().add_prediction();
         app.register_component::<Name>();
-        app.register_component::<CharacterMarker>();
+        app.register_component::<CharacterMarker>().add_prediction();
+        app.register_component::<DummyTarget>().add_prediction();
 
         // Velocity prediction without visual correction
         app.register_component::<LinearVelocity>()
@@ -195,6 +206,17 @@ impl Plugin for SharedGameplayPlugin {
                 .chain(),
         );
 
+        app.add_systems(
+            FixedUpdate,
+            (
+                hit_detection::ensure_melee_hit_targets,
+                hit_detection::process_melee_hits,
+                hit_detection::process_projectile_hits,
+            )
+                .chain()
+                .after(ability::dispatch_effect_markers),
+        );
+
         app.add_systems(FixedUpdate, update_facing);
         app.add_systems(PreUpdate, ability::handle_ability_projectile_spawn);
         app.add_systems(FixedUpdate, ability::ability_bullet_lifetime);
@@ -261,7 +283,6 @@ pub fn update_facing(
             .axis_pair(&PlayerActions::Move)
             .clamp_length_max(1.0);
         if move_dir != Vec2::ZERO {
-            info!(?move_dir, ?rotation, "Updating facing direction");
             *rotation = Rotation(Quat::from_rotation_y(f32::atan2(move_dir.x, -move_dir.y)));
         }
     }

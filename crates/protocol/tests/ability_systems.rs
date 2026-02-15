@@ -16,7 +16,9 @@ fn test_defs() -> HashMap<AbilityId, AbilityDef> {
             cooldown_ticks: 16,
             steps: 3,
             step_window_ticks: 20,
-            effect: AbilityEffect::Melee,
+            effect: AbilityEffect::Melee {
+                knockback_force: 15.0,
+            },
         },
     );
     m.insert(
@@ -43,6 +45,7 @@ fn test_defs() -> HashMap<AbilityId, AbilityDef> {
             effect: AbilityEffect::Projectile {
                 speed: 20.0,
                 lifetime_ticks: 192,
+                knockback_force: 20.0,
             },
         },
     );
@@ -442,6 +445,7 @@ fn bullet_lifetime_despawn() {
             direction: Vec3::NEG_Z,
             speed: 20.0,
             lifetime_ticks: 192,
+            knockback_force: 20.0,
             ability_id: AbilityId("fireball".into()),
             shooter: Entity::PLACEHOLDER,
         })
@@ -470,6 +474,7 @@ fn bullet_lifetime_alive() {
             direction: Vec3::NEG_Z,
             speed: 20.0,
             lifetime_ticks: 192,
+            knockback_force: 20.0,
             ability_id: AbilityId("fireball".into()),
             shooter: Entity::PLACEHOLDER,
         })

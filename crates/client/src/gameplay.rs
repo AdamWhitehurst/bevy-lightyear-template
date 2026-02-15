@@ -63,7 +63,11 @@ fn handle_character_movement(
             &Position,
             Forces,
         ),
-        (With<Predicted>, With<CharacterMarker>, Without<ActiveAbility>),
+        (
+            With<Predicted>,
+            With<CharacterMarker>,
+            Without<ActiveAbility>,
+        ),
     >,
 ) {
     for (entity, action_state, mass, position, mut forces) in &mut query {

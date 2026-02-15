@@ -7,6 +7,7 @@ use lightyear::prelude::{
     ControlledBy, DisableRollback, LocalTimeline, NetworkTarget, NetworkTimeline, PreSpawned,
     PredictionTarget, Replicate, Tick,
 };
+use lightyear::utils::collections::EntityHashSet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -33,8 +34,8 @@ pub struct AbilityId(pub String);
 /// What an ability does when it activates.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
 pub enum AbilityEffect {
-    Melee,
-    Projectile { speed: f32, lifetime_ticks: u16 },
+    Melee { knockback_force: f32 },
+    Projectile { speed: f32, lifetime_ticks: u16, knockback_force: f32 },
     Dash { speed: f32 },
 }
 
@@ -150,7 +151,19 @@ pub struct DashAbilityEffect {
 pub struct ProjectileSpawnAbilityEffect {
     pub speed: f32,
     pub lifetime_ticks: u16,
+    pub knockback_force: f32,
 }
+
+/// Present during Active phase of a Melee ability. Removed on phase exit.
+#[derive(Component, Clone, Debug, PartialEq)]
+pub struct MeleeHitboxActive {
+    pub knockback_force: f32,
+}
+
+/// Tracks entities already hit during this melee active window.
+/// Separate from MeleeHitboxActive to avoid overwrite on re-insert.
+#[derive(Component, Clone, Debug, Default)]
+pub struct MeleeHitTargets(pub EntityHashSet);
 
 /// Marker on a ProjectileSpawn entity — stores spawn parameters.
 #[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
@@ -160,6 +173,7 @@ pub struct AbilityProjectileSpawn {
     pub direction: Vec3,
     pub speed: f32,
     pub lifetime_ticks: u16,
+    pub knockback_force: f32,
     pub ability_id: AbilityId,
     pub shooter: Entity,
 }
@@ -393,10 +407,18 @@ pub fn dispatch_effect_markers(
 }
 
 fn dispatch_while_active_markers(commands: &mut Commands, entity: Entity, def: &AbilityDef) {
-    if let AbilityEffect::Dash { speed } = &def.effect {
-        commands
-            .entity(entity)
-            .insert(DashAbilityEffect { speed: *speed });
+    match &def.effect {
+        AbilityEffect::Dash { speed } => {
+            commands
+                .entity(entity)
+                .insert(DashAbilityEffect { speed: *speed });
+        }
+        AbilityEffect::Melee { knockback_force } => {
+            commands.entity(entity).insert(MeleeHitboxActive {
+                knockback_force: *knockback_force,
+            });
+        }
+        _ => {}
     }
 }
 
@@ -404,6 +426,7 @@ fn dispatch_on_cast_markers(commands: &mut Commands, entity: Entity, def: &Abili
     if let AbilityEffect::Projectile {
         speed,
         lifetime_ticks,
+        knockback_force,
     } = &def.effect
     {
         commands
@@ -411,12 +434,15 @@ fn dispatch_on_cast_markers(commands: &mut Commands, entity: Entity, def: &Abili
             .insert(ProjectileSpawnAbilityEffect {
                 speed: *speed,
                 lifetime_ticks: *lifetime_ticks,
+                knockback_force: *knockback_force,
             });
     }
 }
 
 fn remove_while_active_markers(commands: &mut Commands, entity: Entity) {
     commands.entity(entity).remove::<DashAbilityEffect>();
+    commands.entity(entity).remove::<MeleeHitboxActive>();
+    commands.entity(entity).remove::<MeleeHitTargets>();
 }
 
 /// Safety net: remove all effect markers when `ActiveAbility` is removed.
@@ -427,6 +453,8 @@ pub fn cleanup_effect_markers_on_removal(
     if let Ok(mut cmd) = commands.get_entity(trigger.entity) {
         cmd.remove::<DashAbilityEffect>();
         cmd.remove::<ProjectileSpawnAbilityEffect>();
+        cmd.remove::<MeleeHitboxActive>();
+        cmd.remove::<MeleeHitTargets>();
     }
 }
 
@@ -456,6 +484,7 @@ pub fn ability_projectile_spawn(
             direction,
             speed: request.speed,
             lifetime_ticks: request.lifetime_ticks,
+            knockback_force: request.knockback_force,
             ability_id: active.ability_id.clone(),
             shooter: entity,
         };
@@ -493,6 +522,12 @@ pub fn handle_ability_projectile_spawn(
             LinearVelocity(spawn_info.direction * spawn_info.speed),
             RigidBody::Kinematic,
             Collider::sphere(BULLET_COLLIDER_RADIUS),
+            Sensor,
+            CollisionEventsEnabled,
+            CollidingEntities::default(),
+            crate::hit_detection::projectile_collision_layers(),
+            crate::hit_detection::KnockbackForce(spawn_info.knockback_force),
+            crate::hit_detection::ProjectileOwner(spawn_info.shooter),
             AbilityBulletOf(spawn_entity),
             DisableRollback,
             Name::new("AbilityBullet"),

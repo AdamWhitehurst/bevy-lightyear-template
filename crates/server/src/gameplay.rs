@@ -12,8 +12,24 @@ pub struct ServerGameplayPlugin;
 impl Plugin for ServerGameplayPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(handle_connected);
+        app.add_systems(Startup, spawn_dummy_target);
         app.add_systems(FixedUpdate, handle_character_movement);
     }
+}
+
+fn spawn_dummy_target(mut commands: Commands) {
+    commands.spawn((
+        Name::new("DummyTarget"),
+        Position(Vec3::new(3.0, 30.0, 0.0)),
+        Rotation::default(),
+        Replicate::to_clients(NetworkTarget::All),
+        PredictionTarget::to_clients(NetworkTarget::All),
+        CharacterPhysicsBundle::default(),
+        ColorComponent(css::GRAY.into()),
+        CharacterMarker,
+        DummyTarget,
+        ChunkRenderTarget::<MapWorld>::default(),
+    ));
 }
 
 fn handle_character_movement(
@@ -46,7 +62,7 @@ fn handle_character_movement(
 fn handle_connected(
     trigger: On<Add, Connected>,
     mut commands: Commands,
-    character_query: Query<Entity, With<CharacterMarker>>,
+    character_query: Query<Entity, (With<CharacterMarker>, Without<DummyTarget>)>,
 ) {
     let client_entity = trigger.entity;
     info!("Client {client_entity:?} connected. Spawning character entity.");

@@ -7,7 +7,9 @@
             cooldown_ticks: 16,
             steps: 3,
             step_window_ticks: 20,
-            effect: Melee,
+            effect: Melee(
+                knockback_force: 5.0,
+            ),
         ),
         "dash": (
             startup_ticks: 2,
@@ -30,6 +32,7 @@
             effect: Projectile(
                 speed: 20.0,
                 lifetime_ticks: 192,
+                knockback_force: 8.0,
             ),
         ),
     },
