@@ -9,6 +9,7 @@
             step_window_ticks: 20,
             effect: Melee(
                 knockback_force: 5.0,
+                base_damage: 10.0,
             ),
         ),
         "dash": (
@@ -33,6 +34,7 @@
                 speed: 20.0,
                 lifetime_ticks: 192,
                 knockback_force: 8.0,
+                base_damage: 25.0,
             ),
         ),
     },

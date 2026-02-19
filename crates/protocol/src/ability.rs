@@ -34,8 +34,8 @@ pub struct AbilityId(pub String);
 /// What an ability does when it activates.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
 pub enum AbilityEffect {
-    Melee { knockback_force: f32 },
-    Projectile { speed: f32, lifetime_ticks: u16, knockback_force: f32 },
+    Melee { knockback_force: f32, base_damage: f32 },
+    Projectile { speed: f32, lifetime_ticks: u16, knockback_force: f32, base_damage: f32 },
     Dash { speed: f32 },
 }
 
@@ -152,12 +152,14 @@ pub struct ProjectileSpawnAbilityEffect {
     pub speed: f32,
     pub lifetime_ticks: u16,
     pub knockback_force: f32,
+    pub base_damage: f32,
 }
 
 /// Present during Active phase of a Melee ability. Removed on phase exit.
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct MeleeHitboxActive {
     pub knockback_force: f32,
+    pub base_damage: f32,
 }
 
 /// Tracks entities already hit during this melee active window.
@@ -174,6 +176,7 @@ pub struct AbilityProjectileSpawn {
     pub speed: f32,
     pub lifetime_ticks: u16,
     pub knockback_force: f32,
+    pub base_damage: f32,
     pub ability_id: AbilityId,
     pub shooter: Entity,
 }
@@ -418,9 +421,10 @@ fn dispatch_while_active_markers(commands: &mut Commands, entity: Entity, def: &
                 .entity(entity)
                 .insert(DashAbilityEffect { speed: *speed });
         }
-        AbilityEffect::Melee { knockback_force } => {
+        AbilityEffect::Melee { knockback_force, base_damage } => {
             commands.entity(entity).insert(MeleeHitboxActive {
                 knockback_force: *knockback_force,
+                base_damage: *base_damage,
             });
         }
         _ => {}
@@ -432,6 +436,7 @@ fn dispatch_on_cast_markers(commands: &mut Commands, entity: Entity, def: &Abili
         speed,
         lifetime_ticks,
         knockback_force,
+        base_damage,
     } = &def.effect
     {
         commands
@@ -440,6 +445,7 @@ fn dispatch_on_cast_markers(commands: &mut Commands, entity: Entity, def: &Abili
                 speed: *speed,
                 lifetime_ticks: *lifetime_ticks,
                 knockback_force: *knockback_force,
+                base_damage: *base_damage,
             });
     }
 }
@@ -490,6 +496,7 @@ pub fn ability_projectile_spawn(
             speed: request.speed,
             lifetime_ticks: request.lifetime_ticks,
             knockback_force: request.knockback_force,
+            base_damage: request.base_damage,
             ability_id: active.ability_id.clone(),
             shooter: entity,
         };
@@ -532,6 +539,7 @@ pub fn handle_ability_projectile_spawn(
             CollidingEntities::default(),
             crate::hit_detection::projectile_collision_layers(),
             crate::hit_detection::KnockbackForce(spawn_info.knockback_force),
+            crate::hit_detection::DamageAmount(spawn_info.base_damage),
             crate::hit_detection::ProjectileOwner(spawn_info.shooter),
             AbilityBulletOf(spawn_entity),
             DisableRollback,

@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use lightyear::utils::collections::EntityHashSet;
 
 use crate::ability::{facing_direction, MeleeHitTargets, MeleeHitboxActive};
-use crate::CharacterMarker;
+use crate::{CharacterMarker, Health, Invulnerable};
 
 /// Knockback force stored on a projectile entity.
 #[derive(Component, Clone, Debug)]
@@ -12,6 +12,10 @@ pub struct KnockbackForce(pub f32);
 /// Who shot this projectile (to prevent self-hits).
 #[derive(Component, Clone, Debug)]
 pub struct ProjectileOwner(pub Entity);
+
+/// Damage stored on a projectile entity.
+#[derive(Component, Clone, Debug)]
+pub struct DamageAmount(pub f32);
 
 const MELEE_HITBOX_OFFSET: f32 = 1.5;
 const MELEE_HITBOX_HALF_EXTENTS: Vec3 = Vec3::new(0.75, 1.0, 0.5);
@@ -72,7 +76,7 @@ pub fn process_melee_hits(
         ),
         With<CharacterMarker>,
     >,
-    mut target_query: Query<(&Position, &mut LinearVelocity), With<CharacterMarker>>,
+    mut target_query: Query<(&Position, &mut LinearVelocity, &mut Health, Option<&Invulnerable>), With<CharacterMarker>>,
 ) {
     for (entity, hitbox, mut hit_targets, pos, rot) in &mut attacker_query {
         let direction = facing_direction(rot);
@@ -98,7 +102,7 @@ pub fn process_melee_hits(
             if !hit_targets.0.insert(target) {
                 continue; // already hit
             }
-            apply_knockback(&mut target_query, target, pos.0, hitbox.knockback_force);
+            apply_hit(&mut target_query, target, pos.0, hitbox.knockback_force, hitbox.base_damage);
         }
     }
 }
@@ -107,12 +111,12 @@ pub fn process_melee_hits(
 pub fn process_projectile_hits(
     mut commands: Commands,
     bullet_query: Query<
-        (Entity, &CollidingEntities, &KnockbackForce, &ProjectileOwner, &Position),
+        (Entity, &CollidingEntities, &KnockbackForce, &DamageAmount, &ProjectileOwner, &Position),
         With<Sensor>,
     >,
-    mut target_query: Query<(&Position, &mut LinearVelocity), With<CharacterMarker>>,
+    mut target_query: Query<(&Position, &mut LinearVelocity, &mut Health, Option<&Invulnerable>), With<CharacterMarker>>,
 ) {
-    for (bullet, colliding, knockback, owner, bullet_pos) in &bullet_query {
+    for (bullet, colliding, knockback, damage, owner, bullet_pos) in &bullet_query {
         for &target in colliding.iter() {
             if target == owner.0 {
                 continue;
@@ -120,20 +124,21 @@ pub fn process_projectile_hits(
             if target_query.get(target).is_err() {
                 continue;
             }
-            apply_knockback(&mut target_query, target, bullet_pos.0, knockback.0);
+            apply_hit(&mut target_query, target, bullet_pos.0, knockback.0, damage.0);
             commands.entity(bullet).try_despawn();
             break; // bullet hits one target
         }
     }
 }
 
-fn apply_knockback(
-    target_query: &mut Query<(&Position, &mut LinearVelocity), With<CharacterMarker>>,
+fn apply_hit(
+    target_query: &mut Query<(&Position, &mut LinearVelocity, &mut Health, Option<&Invulnerable>), With<CharacterMarker>>,
     target: Entity,
     source_pos: Vec3,
-    force: f32,
+    knockback_force: f32,
+    damage: f32,
 ) {
-    let Ok((target_pos, mut velocity)) = target_query.get_mut(target) else {
+    let Ok((target_pos, mut velocity, mut health, invulnerable)) = target_query.get_mut(target) else {
         return;
     };
     let horizontal = (target_pos.0 - source_pos).with_y(0.0);
@@ -142,5 +147,8 @@ fn apply_knockback(
     } else {
         Vec3::Y
     };
-    velocity.0 += direction * force;
+    velocity.0 += direction * knockback_force;
+    if invulnerable.is_none() {
+        health.apply_damage(damage);
+    }
 }

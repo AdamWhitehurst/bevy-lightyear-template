@@ -20,7 +20,8 @@ pub use ability::{
     ProjectileSpawnAbilityEffect,
 };
 pub use hit_detection::{
-    character_collision_layers, projectile_collision_layers, terrain_collision_layers, GameLayer,
+    character_collision_layers, projectile_collision_layers, terrain_collision_layers, DamageAmount,
+    GameLayer,
 };
 pub use map::{
     attach_chunk_colliders, MapWorld, VoxelChannel, VoxelEditBroadcast, VoxelEditRequest,
@@ -61,6 +62,40 @@ pub struct CharacterMarker;
 /// Marker to distinguish dummy targets from player characters.
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct DummyTarget;
+
+/// Marks a respawn location. Server-only, not replicated.
+#[derive(Component, Clone, Debug)]
+pub struct RespawnPoint;
+
+#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Health {
+    pub current: f32,
+    pub max: f32,
+}
+
+impl Health {
+    pub fn new(max: f32) -> Self {
+        Self { current: max, max }
+    }
+
+    pub fn apply_damage(&mut self, damage: f32) {
+        self.current = (self.current - damage).max(0.0);
+    }
+
+    pub fn is_dead(&self) -> bool {
+        self.current <= 0.0
+    }
+
+    pub fn restore_full(&mut self) {
+        self.current = self.max;
+    }
+}
+
+/// Post-respawn invulnerability. Prevents damage while present.
+#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Invulnerable {
+    pub expires_at: Tick,
+}
 
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ColorComponent(pub Color);
@@ -128,6 +163,8 @@ impl Plugin for ProtocolPlugin {
         app.register_component::<Name>();
         app.register_component::<CharacterMarker>().add_prediction();
         app.register_component::<DummyTarget>().add_prediction();
+        app.register_component::<Health>().add_prediction();
+        app.register_component::<Invulnerable>().add_prediction();
 
         // Velocity prediction without visual correction
         app.register_component::<LinearVelocity>()
