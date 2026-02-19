@@ -19,6 +19,8 @@ pub enum EffectTrigger {
     WhileActive(AbilityEffect),
     /// Fires when the ability's hitbox connects with an entity
     OnHit(AbilityEffect),
+    /// Fires once when ability exits Active phase (enters Recovery)
+    OnEnd(AbilityEffect),
 }
 ```
 
@@ -68,7 +70,7 @@ The `Ability` variant references another `AbilityDef` by ID. Triggered abilities
 | Variant | Typical trigger | Description |
 |---------|----------------|-------------|
 | `Knockback { force }` | `OnHit` | Applies impulse to target away from caster. Core for sumo mode. |
-| `AreaOfEffect { radius }` | `OnCast` | Spawns a hitbox sphere around caster position. Ground pounds, shockwaves. |
+| `AreaOfEffect { id, radius }` | `OnCast` | Spawns a hitbox sphere around caster position; `id` names the effect triggered on each hit. Ground pounds, shockwaves. |
 | `Grab` | `OnHit` | Locks victim position to caster. Next combo step acts as throw. |
 | `Buff { stat, multiplier, duration_ticks }` | `OnCast` | Temporary stat modifier on target. Enables support moves. |
 | `Shield { absorb }` | `OnCast` | Damage absorption during active phase. Defensive counterplay. |
@@ -86,7 +88,7 @@ pub enum AbilityEffect {
     Projectile { speed: f32, lifetime_ticks: u16 },
     Dash { speed: f32 },
     Knockback { force: f32 },
-    AreaOfEffect { radius: f32 },
+    AreaOfEffect { id: String, radius: f32 },
     Grab,
     Buff { stat: String, multiplier: f32, duration_ticks: u16 },
     Shield { absorb: f32 },
@@ -156,7 +158,7 @@ pub enum AbilityEffect {
     steps: 1,
     step_window_ticks: 0,
     effects: [
-        OnCast(AreaOfEffect(radius: 3.0)),
+        OnCast(AreaOfEffect(id: "ground_pound_hit", radius: 3.0)),
         OnHit(Knockback(force: 15.0)),
     ],
 ),
@@ -188,6 +190,7 @@ Current systems (`ability_projectile_spawn`, `ability_dash_effect`) check the si
 - **`apply_on_cast_effects`** — runs once when `phase` becomes `Active` (`phase_start_tick == tick`). Handles: `Melee`, `Projectile`, `AreaOfEffect`, `Buff`, `Shield`, `Teleport`, `Summon`, nested `Ability`.
 - **`apply_while_active_effects`** — runs every tick where `phase == Active`. Handles: `Dash`.
 - **`apply_on_hit_effects`** — called from hit detection (not phase system). Handles: `Knockback`, `Pull`, `Grab`, nested `Ability`.
+- **`apply_on_end_effects`** — runs once when `phase` transitions from `Active` to `Recovery`. Handles same effect set as `apply_on_cast_effects`.
 
 ### Ability resolution (for `Ability` variant)
 
