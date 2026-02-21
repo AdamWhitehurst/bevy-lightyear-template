@@ -13,10 +13,7 @@ last_updated_by: Claude Sonnet 4.6
 
 # Research: How to Implement Ability Effect Primitives
 
-**Date**: 2026-02-20T14:29:45-0800
-**Git Commit**: 83c1c6a7b81ae8df6f3b15e94b7d507f6ff679db
-**Branch**: master
-**Repository**: bevy-lightyear-template
+**Date**: 2026-02-20T14:29:45-0800 **Git Commit**: 83c1c6a7b81ae8df6f3b15e94b7d507f6ff679db **Branch**: master **Repository**: bevy-lightyear-template
 
 ## Research Question
 
@@ -24,7 +21,10 @@ How to implement the changes described in `doc/design/2026-02-13-ability-effect-
 
 ## Summary
 
-The design doc introduces a composable `Vec<EffectTrigger>` model replacing the current single `effect: AbilityEffect` field. The existing codebase has three ability effects (`Melee`, `Projectile`, `Dash`), a marker-component dispatch system, and `ActiveAbility` as a component on character entities. The implementation requires: (1) a data model refactor, (2) a major architectural shift in how `ActiveAbility` works (component → spawned entity), (3) expanding the hit detection pipeline to dispatch effect lists, and (4) new components for buffs, shields, and grabs.
+The design doc introduces a composable `Vec<EffectTrigger>` model replacing the current single `effect: AbilityEffect` field. The existing codebase
+has three ability effects (`Melee`, `Projectile`, `Dash`), a marker-component dispatch system, and `ActiveAbility` as a component on character
+entities. The implementation requires: (1) a data model refactor, (2) a major architectural shift in how `ActiveAbility` works (component → spawned
+entity), (3) expanding the hit detection pipeline to dispatch effect lists, and (4) new components for buffs, shields, and grabs.
 
 ---
 
@@ -72,9 +72,11 @@ pub struct ActiveAbility {
 }
 ```
 
-The `Without<ActiveAbility>` filter on `ability_activation` ([ability.rs:263](crates/protocol/src/ability.rs#L263)) prevents simultaneous abilities. The design doc changes this: multiple `ActiveAbility` **entities** can coexist per character, gated only by `AbilityCooldowns`.
+The `Without<ActiveAbility>` filter on `ability_activation` ([ability.rs:263](crates/protocol/src/ability.rs#L263)) prevents simultaneous abilities.
+The design doc changes this: multiple `ActiveAbility` **entities** can coexist per character, gated only by `AbilityCooldowns`.
 
-The new `ActiveAbility` structure in the design adds: `caster`, `original_caster`, `target`, `depth`. The existing fields (`ability_id`, `phase`, `phase_start_tick`, `step`, `total_steps`, `chain_input_received`) remain.
+The new `ActiveAbility` structure in the design adds: `caster`, `original_caster`, `target`, `depth`. The existing fields (`ability_id`, `phase`,
+`phase_start_tick`, `step`, `total_steps`, `chain_input_received`) remain.
 
 ### Current Dispatch Architecture
 
@@ -89,7 +91,8 @@ dispatch_effect_markers
   └── On exit Active: remove DashAbilityEffect / MeleeHitboxActive / MeleeHitTargets
 ```
 
-Effect systems (`ability_dash_effect`, `ability_projectile_spawn`) query the markers, not `ActiveAbility` directly. The new design replaces these per-variant marker components with four generic dispatch functions that iterate `Vec<EffectTrigger>`.
+Effect systems (`ability_dash_effect`, `ability_projectile_spawn`) query the markers, not `ActiveAbility` directly. The new design replaces these
+per-variant marker components with four generic dispatch functions that iterate `Vec<EffectTrigger>`.
 
 The system chain in [lib.rs:239-268](crates/protocol/src/lib.rs#L239):
 
@@ -110,7 +113,8 @@ FixedUpdate:
 
 **File**: [crates/protocol/src/hit_detection.rs](crates/protocol/src/hit_detection.rs)
 
-Damage and knockback are **hardcoded** in `apply_hit` ([hit_detection.rs:134](crates/protocol/src/hit_detection.rs#L134)) — pulled from `MeleeHitboxActive.base_damage / knockback_force` or `DamageAmount / KnockbackForce` components on projectile entities.
+Damage and knockback are **hardcoded** in `apply_hit` ([hit_detection.rs:134](crates/protocol/src/hit_detection.rs#L134)) — pulled from
+`MeleeHitboxActive.base_damage / knockback_force` or `DamageAmount / KnockbackForce` components on projectile entities.
 
 ```rust
 fn apply_hit(...) {
@@ -121,9 +125,11 @@ fn apply_hit(...) {
 }
 ```
 
-The new design routes through `apply_on_hit_effects` instead, iterating `OnHit(...)` entries from the `ActiveAbility` entity's `effects` list. The `apply_hit` function's logic (damage → health, impulse → velocity) maps to the new `Damage` and `ApplyForce` primitives.
+The new design routes through `apply_on_hit_effects` instead, iterating `OnHit(...)` entries from the `ActiveAbility` entity's `effects` list. The
+`apply_hit` function's logic (damage → health, impulse → velocity) maps to the new `Damage` and `ApplyForce` primitives.
 
-Physics: **avian3d** (`ExternalImpulse` available). Current code modifies `LinearVelocity` directly (`velocity.0 += ...`) rather than using `ExternalImpulse`.
+Physics: **avian3d** (`ExternalImpulse` available). Current code modifies `LinearVelocity` directly (`velocity.0 += ...`) rather than using
+`ExternalImpulse`.
 
 ### Lightyear Registration
 
@@ -136,9 +142,11 @@ Physics: **avian3d** (`ExternalImpulse` available). Current code modifies `Linea
 | `AbilityCooldowns`       | `.add_prediction()` |
 | `AbilityProjectileSpawn` | replicate-only      |
 
-New components (`ActiveBuff`, `ActiveShield`, `GrabbedBy`, `Grabbing`) will need registration. Components that affect predicted state (e.g., `ActiveShield` intercepting damage, `GrabbedBy` moving a character) should use `.add_prediction()`.
+New components (`ActiveBuff`, `ActiveShield`, `GrabbedBy`, `Grabbing`) will need registration. Components that affect predicted state (e.g.,
+`ActiveShield` intercepting damage, `GrabbedBy` moving a character) should use `.add_prediction()`.
 
-Spawned `ActiveAbility` **entities** (new arch): follow the pattern at [ability.rs:504-516](crates/protocol/src/ability.rs#L504) — `PreSpawned`, `Replicate`, `PredictionTarget`, `ControlledBy` if the owner is a controlled client.
+Spawned `ActiveAbility` **entities** (new arch): follow the pattern at [ability.rs:504-516](crates/protocol/src/ability.rs#L504) — `PreSpawned`,
+`Replicate`, `PredictionTarget`, `ControlledBy` if the owner is a controlled client.
 
 ---
 
@@ -168,7 +176,8 @@ Spawned `ActiveAbility` **entities** (new arch): follow the pattern at [ability.
 
 ### Effect Dispatch Map
 
-`dispatch_effect_markers` partitions `Vec<EffectTrigger>` into per-trigger-type marker components on the `ActiveAbility` entity. Downstream systems query only their own marker type — same parallelism guarantee as the current architecture.
+`dispatch_effect_markers` partitions `Vec<EffectTrigger>` into per-trigger-type marker components on the `ActiveAbility` entity. Downstream systems
+query only their own marker type — same parallelism guarantee as the current architecture.
 
 | System                       | Marker queried                                                    | When                                       |
 | ---------------------------- | ----------------------------------------------------------------- | ------------------------------------------ |
@@ -191,18 +200,22 @@ Spawned `ActiveAbility` **entities** (new arch): follow the pattern at [ability.
 
 ## Implementation Order (from design doc)
 
-1. **Refactor `effect` → `effects: Vec<EffectTrigger>`; remove `steps` / `step_window_ticks`; remove `step` / `total_steps` / `chain_input_received` from `ActiveAbility`; remove `set_chain_input_received` and `has_more_steps`**
+1. **Refactor `effect` → `effects: Vec<EffectTrigger>`; remove `steps` / `step_window_ticks`; remove `step` / `total_steps` / `chain_input_received`
+   from `ActiveAbility`; remove `set_chain_input_received` and `has_more_steps`**
    - Add `EffectTrigger` enum and `EffectTarget` enum to `ability.rs`
    - Change `AbilityDef.effect: AbilityEffect` → `AbilityDef.effects: Vec<EffectTrigger>`
    - Rewrite `AbilityEffect` variants: rename `Dash` → `SetVelocity { speed, target }`, strip damage/knockback from `Melee` and `Projectile`
-   - Migrate `assets/abilities.ron`: `punch` → `[OnCast(Melee()), OnHit(Damage(...)), OnHit(ApplyForce(...))]`; `dash` → `[WhileActive(SetVelocity(...))]`; `fireball` → keep as `OnCast(Projectile(...))` with sub-ability holding hit effects
+   - Migrate `assets/abilities.ron`: `punch` → `[OnCast(Melee()), OnHit(Damage(...)), OnHit(ApplyForce(...))]`; `dash` →
+     `[WhileActive(SetVelocity(...))]`; `fireball` → keep as `OnCast(Projectile(...))` with sub-ability holding hit effects
    - Update tests in `crates/protocol/tests/ability_systems.rs`
 
 2. **Update trigger dispatch systems**
    - Remove `dispatch_while_active_markers`, `dispatch_on_cast_markers`, `remove_while_active_markers`
-   - Rewrite `dispatch_effect_markers` to partition `Vec<EffectTrigger>` into `OnCastEffects`, `WhileActiveEffects`, `OnInputEffects`, `OnEndEffects` marker components on the `ActiveAbility` entity
+   - Rewrite `dispatch_effect_markers` to partition `Vec<EffectTrigger>` into `OnCastEffects`, `WhileActiveEffects`, `OnInputEffects`, `OnEndEffects`
+     marker components on the `ActiveAbility` entity
    - `OnHitEffects` is placed on spawned hitbox/AoE entities (not the `ActiveAbility` entity)
-   - Write `apply_on_cast_effects`, `apply_while_active_effects`, `apply_on_input_effects`, `apply_on_end_effects`, each querying only its own marker type
+   - Write `apply_on_cast_effects`, `apply_while_active_effects`, `apply_on_input_effects`, `apply_on_end_effects`, each querying only its own marker
+     type
    - `MeleeHitTargets` moves to the spawned hitbox entity; `MeleeHitboxActive` is replaced by `OnHitEffects` on that entity
    - Rewrite `ability_dash_effect` → `apply_while_active_effects` handling `SetVelocity` from `WhileActiveEffects`
    - `apply_on_input_effects` needs a second query for the caster's `ActionState<PlayerActions>` (looked up via `active.caster`)
@@ -255,7 +268,14 @@ Spawned `ActiveAbility` **entities** (new arch): follow the pattern at [ability.
 
 ## Open Questions
 
-- **`throw` victim resolution**: The design resolves `Victim` in `apply_on_cast_effects` for `throw` by querying `GrabbedBy(caster_entity)`. This means `apply_on_cast_effects` needs to handle `ApplyForce` specially when target is `Victim` in a grab context (vs. the normal hit-context meaning of `Victim`). The design says "resolves via `GrabbedBy`" but the exact query + entity lookup plumbing is not specified.
-- **`AreaOfEffect` per-tick vs. on-cast**: The design marks `AreaOfEffect` as `OnCast`, but if it should re-fire each tick (like `Melee` does continuously via `MeleeHitboxActive`), it may need a `WhileActive` trigger variant instead.
-- **`ActiveAbility` entity replication**: Spawned `ActiveAbility` entities need a Lightyear replication strategy. The existing pattern for `AbilityProjectileSpawn` ([ability.rs:504-516](crates/protocol/src/ability.rs#L504)) using `PreSpawned` + salt is the likely model, but the deterministic salt for arbitrary sub-abilities needs design.
-- **`ActiveAbility` component registration**: Currently `ActiveAbility` is a component registered with `.add_prediction()`. In the new model it becomes the identity of a spawned entity — it may need to stay as a replicated component on that entity (same registration) or transition to a different pattern.
+- **`throw` victim resolution**: The design resolves `Victim` in `apply_on_cast_effects` for `throw` by querying `GrabbedBy(caster_entity)`. This
+  means `apply_on_cast_effects` needs to handle `ApplyForce` specially when target is `Victim` in a grab context (vs. the normal hit-context meaning
+  of `Victim`). The design says "resolves via `GrabbedBy`" but the exact query + entity lookup plumbing is not specified.
+- **`AreaOfEffect` per-tick vs. on-cast**: The design marks `AreaOfEffect` as `OnCast`, but if it should re-fire each tick (like `Melee` does
+  continuously via `MeleeHitboxActive`), it may need a `WhileActive` trigger variant instead.
+- **`ActiveAbility` entity replication**: Spawned `ActiveAbility` entities need a Lightyear replication strategy. The existing pattern for
+  `AbilityProjectileSpawn` ([ability.rs:504-516](crates/protocol/src/ability.rs#L504)) using `PreSpawned` + salt is the likely model, but the
+  deterministic salt for arbitrary sub-abilities needs design.
+- **`ActiveAbility` component registration**: Currently `ActiveAbility` is a component registered with `.add_prediction()`. In the new model it
+  becomes the identity of a spawned entity — it may need to stay as a replicated component on that entity (same registration) or transition to a
+  different pattern.

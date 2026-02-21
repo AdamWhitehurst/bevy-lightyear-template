@@ -65,6 +65,9 @@ Avoid large functions. Break them into smaller, atomic, self-describing function
 - For non-trivial tasks: Pause and ask "is there a more elegant way?"
 - Challenge your own work before presenting it.
 </rule>
+<rule>
+Always log warnings (`warn!`) when an unexpected situation occurs (e.g. entity lookup fails, ability ID not found in defs). Never silently `continue` past a condition that indicates something is wrong.
+</rule>
 </code_style>
 <verification_rules description="Rules for verifying implementation work">
 <rule priority="high">
