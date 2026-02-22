@@ -129,9 +129,14 @@ fn handle_connected(
     trigger: On<Add, Connected>,
     mut commands: Commands,
     character_query: Query<Entity, (With<CharacterMarker>, Without<DummyTarget>)>,
+    remote_id_query: Query<&RemoteId, With<ClientOf>>,
 ) {
     let client_entity = trigger.entity;
-    info!("Client {client_entity:?} connected. Spawning character entity.");
+    let peer_id = remote_id_query
+        .get(client_entity)
+        .expect("Connected client should have RemoteId")
+        .0;
+    info!("Client {peer_id} connected. Spawning character entity.");
 
     let num_characters = character_query.iter().count();
 
@@ -150,6 +155,7 @@ fn handle_connected(
 
     commands.spawn((
         Name::new("Character"),
+        PlayerId(peer_id),
         Position(Vec3::new(x, 30.0, z)),
         Rotation::default(),
         ActionState::<PlayerActions>::default(),

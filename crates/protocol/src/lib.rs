@@ -56,6 +56,12 @@ impl Actionlike for PlayerActions {
     }
 }
 
+/// Identifies which client owns this character. Replicated to all clients so
+/// shared systems (e.g. prespawn salt computation) can access the owner's
+/// `PeerId` without server-only queries.
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Reflect)]
+pub struct PlayerId(pub PeerId);
+
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct CharacterMarker;
 
@@ -159,6 +165,7 @@ impl Plugin for ProtocolPlugin {
 
         app.register_component::<ChunkRenderTarget<MapWorld>>();
         // Marker components
+        app.register_component::<PlayerId>();
         app.register_component::<ColorComponent>().add_prediction();
         app.register_component::<Name>();
         app.register_component::<CharacterMarker>().add_prediction();
