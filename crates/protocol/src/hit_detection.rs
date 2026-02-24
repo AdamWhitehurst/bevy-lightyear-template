@@ -110,7 +110,7 @@ pub fn process_hitbox_hits(
             }
             apply_on_hit_effects(
                 &mut commands,
-                &ability_defs,
+                ability_defs.as_ref(),
                 tick,
                 &server_query,
                 &player_id_query,
@@ -176,7 +176,7 @@ pub fn process_projectile_hits(
             }
             apply_on_hit_effects(
                 &mut commands,
-                &ability_defs,
+                ability_defs.as_ref(),
                 tick,
                 &server_query,
                 &player_id_query,

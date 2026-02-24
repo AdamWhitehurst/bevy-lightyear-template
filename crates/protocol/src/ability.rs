@@ -728,11 +728,11 @@ pub fn apply_on_cast_effects(
                     });
                 }
                 AbilityEffect::Ability { id, target } => {
-                    let target_entity = resolve_caster_target(target, active);
+                    let target_entity = resolve_caster_target(&target, active);
                     spawn_sub_ability(
                         &mut commands,
-                        &ability_defs,
-                        id,
+                        ability_defs.as_ref(),
+                        &id,
                         target_entity,
                         active.original_caster,
                         active.ability_slot,
@@ -758,8 +758,8 @@ pub fn apply_on_cast_effects(
                 } => {
                     apply_buff(
                         &mut commands,
-                        resolve_caster_target(target, active),
-                        stat,
+                        resolve_caster_target(&target, active),
+                        &stat,
                         *multiplier,
                         *duration_ticks,
                         tick,
@@ -859,7 +859,7 @@ pub fn apply_while_active_effects(
         for effect in &effects.0 {
             match effect {
                 AbilityEffect::SetVelocity { speed, target } => {
-                    let target_entity = resolve_caster_target(target, active);
+                    let target_entity = resolve_caster_target(&target, active);
                     if let Ok((rotation, mut velocity)) = caster_query.get_mut(target_entity) {
                         let direction = facing_direction(rotation);
                         velocity.x = direction.x * speed;
@@ -889,7 +889,7 @@ pub fn apply_on_end_effects(
         for effect in &effects.0 {
             match effect {
                 AbilityEffect::SetVelocity { speed, target } => {
-                    let target_entity = resolve_caster_target(target, active);
+                    let target_entity = resolve_caster_target(&target, active);
                     if let Ok((_, rotation, mut velocity)) = caster_query.get_mut(target_entity) {
                         let direction = facing_direction(rotation);
                         velocity.x = direction.x * speed;
@@ -897,11 +897,11 @@ pub fn apply_on_end_effects(
                     }
                 }
                 AbilityEffect::Ability { id, target } => {
-                    let target_entity = resolve_caster_target(target, active);
+                    let target_entity = resolve_caster_target(&target, active);
                     spawn_sub_ability(
                         &mut commands,
-                        &ability_defs,
-                        id,
+                        ability_defs.as_ref(),
+                        &id,
                         target_entity,
                         active.original_caster,
                         active.ability_slot,
@@ -936,8 +936,8 @@ pub fn apply_on_end_effects(
                 } => {
                     apply_buff(
                         &mut commands,
-                        resolve_caster_target(target, active),
-                        stat,
+                        resolve_caster_target(&target, active),
+                        &stat,
                         *multiplier,
                         *duration_ticks,
                         tick,
@@ -974,11 +974,11 @@ pub fn apply_on_input_effects(
             }
             match effect {
                 AbilityEffect::Ability { id, target } => {
-                    let target_entity = resolve_caster_target(target, active);
+                    let target_entity = resolve_caster_target(&target, active);
                     spawn_sub_ability(
                         &mut commands,
-                        &ability_defs,
-                        id,
+                        ability_defs.as_ref(),
+                        &id,
                         target_entity,
                         active.original_caster,
                         active.ability_slot,
