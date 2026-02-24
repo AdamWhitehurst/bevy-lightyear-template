@@ -1,7 +1,9 @@
 use avian3d::prelude::*;
+use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
 use leafwing_input_manager::prelude::ActionState;
+use lightyear::prelude::PredictionDespawnCommandsExt;
 use lightyear::prelude::server::ClientOf;
 use lightyear::prelude::{
     ControlledBy, DisableRollback, LocalTimeline, NetworkTarget, NetworkTimeline, PreSpawned,
@@ -10,8 +12,10 @@ use lightyear::prelude::{
 use lightyear::utils::collections::EntityHashSet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::hash::{DefaultHasher, Hash, Hasher};
 
-use crate::{CharacterMarker, PlayerActions};
+use crate::hit_detection::{hitbox_collision_layers, MELEE_HITBOX_HALF_EXTENTS, MELEE_HITBOX_OFFSET};
+use crate::{PlayerId, PlayerActions};
 
 const PROJECTILE_SPAWN_OFFSET: f32 = 1.5;
 const BULLET_COLLIDER_RADIUS: f32 = 0.25;
@@ -31,12 +35,63 @@ pub fn facing_direction(rotation: &Rotation) -> Vec3 {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect)]
 pub struct AbilityId(pub String);
 
+/// Specifies who receives an effect.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Reflect, Default)]
+pub enum EffectTarget {
+    #[default]
+    Caster,
+    Victim,
+    OriginalCaster,
+}
+
 /// What an ability does when it activates.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
 pub enum AbilityEffect {
-    Melee { knockback_force: f32, base_damage: f32 },
-    Projectile { speed: f32, lifetime_ticks: u16, knockback_force: f32, base_damage: f32 },
-    Dash { speed: f32 },
+    Melee {
+        #[serde(default)]
+        id: Option<String>,
+        #[serde(default)]
+        target: EffectTarget,
+    },
+    Projectile {
+        #[serde(default)]
+        id: Option<String>,
+        speed: f32,
+        lifetime_ticks: u16,
+    },
+    SetVelocity { speed: f32, target: EffectTarget },
+    Damage { amount: f32, target: EffectTarget },
+    ApplyForce { force: f32, target: EffectTarget },
+    AreaOfEffect {
+        #[serde(default)]
+        id: Option<String>,
+        #[serde(default)]
+        target: EffectTarget,
+        radius: f32,
+    },
+    /// Spawn a sub-ability. Enables recursive ability composition.
+    Ability { id: String, target: EffectTarget },
+    /// Instantly move caster forward by `distance` units in facing direction.
+    Teleport { distance: f32 },
+    /// Grant a damage-absorbing shield to the caster.
+    Shield { absorb: f32 },
+    /// Apply a temporary stat multiplier to the target.
+    Buff { stat: String, multiplier: f32, duration_ticks: u16, target: EffectTarget },
+}
+
+/// Controls when an effect fires.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
+pub enum EffectTrigger {
+    /// Fires once when ability enters Active phase.
+    OnCast(AbilityEffect),
+    /// Fires every tick during Active phase.
+    WhileActive(AbilityEffect),
+    /// Fires when a hitbox/projectile spawned by this ability hits a target.
+    OnHit(AbilityEffect),
+    /// Fires once when ability exits Active phase (enters Recovery).
+    OnEnd(AbilityEffect),
+    /// Fires during Active phase when the specified input is just-pressed.
+    OnInput { action: PlayerActions, effect: AbilityEffect },
 }
 
 /// Definition of a single ability, loaded from RON.
@@ -46,9 +101,7 @@ pub struct AbilityDef {
     pub active_ticks: u16,
     pub recovery_ticks: u16,
     pub cooldown_ticks: u16,
-    pub steps: u8,
-    pub step_window_ticks: u16,
-    pub effect: AbilityEffect,
+    pub effects: Vec<EffectTrigger>,
 }
 
 impl AbilityDef {
@@ -98,23 +151,25 @@ pub enum AbilityPhase {
     Recovery,
 }
 
-/// Tracks the currently executing ability on a character.
-/// Present only while an ability is active; removed when ability completes.
+/// Tracks an executing ability as a standalone predicted entity.
+/// Spawned when ability activates; despawned when ability completes.
 #[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ActiveAbility {
-    pub ability_id: AbilityId,
+    pub def_id: AbilityId,
+    pub caster: Entity,
+    pub original_caster: Entity,
+    pub target: Entity,
     pub phase: AbilityPhase,
     pub phase_start_tick: Tick,
-    /// Current step in a multi-hit combo (0-indexed).
-    pub step: u8,
-    pub total_steps: u8,
-    /// Whether the player pressed the key again during this step's window.
-    pub chain_input_received: bool,
+    pub ability_slot: u8,
+    pub depth: u8,
 }
 
-impl ActiveAbility {
-    pub fn has_more_steps(&self) -> bool {
-        self.step + 1 < self.total_steps
+impl MapEntities for ActiveAbility {
+    fn map_entities<M: EntityMapper>(&mut self, entity_mapper: &mut M) {
+        self.caster = entity_mapper.get_mapped(self.caster);
+        self.original_caster = entity_mapper.get_mapped(self.original_caster);
+        self.target = entity_mapper.get_mapped(self.target);
     }
 }
 
@@ -140,34 +195,78 @@ impl AbilityCooldowns {
     }
 }
 
-/// Present during Active phase of a Dash ability. Removed on phase exit.
+/// One-shot: inserted by apply_on_cast_effects when processing Projectile.
+/// Consumed by ability_projectile_spawn.
 #[derive(Component, Clone, Debug, PartialEq)]
-pub struct DashAbilityEffect {
-    pub speed: f32,
-}
-
-/// One-shot: inserted when Projectile enters Active. Consumed by spawn system.
-#[derive(Component, Clone, Debug, PartialEq)]
-pub struct ProjectileSpawnAbilityEffect {
+pub struct ProjectileSpawnEffect {
     pub speed: f32,
     pub lifetime_ticks: u16,
-    pub knockback_force: f32,
-    pub base_damage: f32,
 }
 
-/// Present during Active phase of a Melee ability. Removed on phase exit.
-#[derive(Component, Clone, Debug, PartialEq)]
-pub struct MeleeHitboxActive {
-    pub knockback_force: f32,
-    pub base_damage: f32,
-}
+/// Relationship: hitbox entity belongs to an ActiveAbility entity.
+#[derive(Component, Debug)]
+#[relationship(relationship_target = ActiveAbilityHitboxes)]
+pub struct HitboxOf(#[entities] pub Entity);
 
-/// Tracks entities already hit during this melee active window.
-/// Separate from MeleeHitboxActive to avoid overwrite on re-insert.
+/// Relationship target: ActiveAbility's spawned hitbox entities.
+#[derive(Component, Debug, Default)]
+#[relationship_target(relationship = HitboxOf, linked_spawn)]
+pub struct ActiveAbilityHitboxes(Vec<Entity>);
+
+/// Marker on hitbox entities that need to track caster position each tick.
+#[derive(Component, Clone, Debug)]
+pub struct MeleeHitbox;
+
+/// Tracks entities already hit by this hitbox to prevent duplicate effects.
 #[derive(Component, Clone, Debug, Default)]
-pub struct MeleeHitTargets(pub EntityHashSet);
+pub struct HitTargets(pub EntityHashSet);
 
-/// Marker on a ProjectileSpawn entity — stores spawn parameters.
+/// Carried on ActiveAbility entities (for melee) and bullet entities (for projectiles).
+/// Hit detection systems read this to determine what effects to apply on contact.
+#[derive(Component, Clone, Debug)]
+pub struct OnHitEffects {
+    pub effects: Vec<AbilityEffect>,
+    pub caster: Entity,
+    pub original_caster: Entity,
+    pub depth: u8,
+}
+
+/// One-shot: inserted on first Active tick; consumed by apply_on_cast_effects.
+#[derive(Component)]
+pub struct OnCastEffects(pub Vec<AbilityEffect>);
+
+/// Persistent: present every Active tick; removed when phase exits Active.
+#[derive(Component)]
+pub struct WhileActiveEffects(pub Vec<AbilityEffect>);
+
+/// One-shot: inserted when Active → Recovery transition happens.
+/// Consumed by apply_on_end_effects.
+#[derive(Component)]
+pub struct OnEndEffects(pub Vec<AbilityEffect>);
+
+/// Persistent: present every Active tick. Each entry is (action, effect).
+/// System checks just_pressed on caster's ActionState.
+#[derive(Component)]
+pub struct OnInputEffects(pub Vec<(PlayerActions, AbilityEffect)>);
+
+/// Damage absorption shield on a character. Intercepts damage before Health.
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ActiveShield {
+    pub remaining: f32,
+}
+
+/// Temporary stat modifiers on a character. Tick-based expiry.
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ActiveBuffs(pub Vec<ActiveBuff>);
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ActiveBuff {
+    pub stat: String,
+    pub multiplier: f32,
+    pub expires_tick: Tick,
+}
+
+/// Marker on a ProjectileSpawn entity -- stores spawn parameters.
 #[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
 pub struct AbilityProjectileSpawn {
     pub spawn_tick: Tick,
@@ -175,8 +274,6 @@ pub struct AbilityProjectileSpawn {
     pub direction: Vec3,
     pub speed: f32,
     pub lifetime_ticks: u16,
-    pub knockback_force: f32,
-    pub base_damage: f32,
     pub ability_id: AbilityId,
     pub shooter: Entity,
 }
@@ -190,8 +287,6 @@ pub struct AbilityBulletOf(#[entities] pub Entity);
 #[derive(Component, Debug, Default)]
 #[relationship_target(relationship = AbilityBulletOf, linked_spawn)]
 pub struct AbilityBullets(Vec<Entity>);
-
-// -- Asset loading --
 
 #[derive(Resource)]
 struct AbilityDefsHandle(Handle<AbilityDefsAsset>);
@@ -248,24 +343,23 @@ pub fn slot_to_ability_action(slot: usize) -> Option<PlayerActions> {
     ABILITY_ACTIONS.get(slot).copied()
 }
 
-/// Activate an ability when a hotkey is pressed and no ability is currently active.
+/// Activate an ability when a hotkey is pressed. Spawns an ActiveAbility entity.
 pub fn ability_activation(
     mut commands: Commands,
     ability_defs: Res<AbilityDefs>,
     timeline: Single<&LocalTimeline, Without<ClientOf>>,
-    mut query: Query<
-        (
-            Entity,
-            &ActionState<PlayerActions>,
-            &AbilitySlots,
-            &mut AbilityCooldowns,
-        ),
-        Without<ActiveAbility>,
-    >,
+    mut query: Query<(
+        Entity,
+        &ActionState<PlayerActions>,
+        &AbilitySlots,
+        &mut AbilityCooldowns,
+        &PlayerId,
+    )>,
+    server_query: Query<&ControlledBy>,
 ) {
     let tick = timeline.tick();
 
-    for (entity, action_state, slots, mut cooldowns) in &mut query {
+    for (entity, action_state, slots, mut cooldowns, player_id) in &mut query {
         for (slot_idx, action) in ABILITY_ACTIONS.iter().enumerate() {
             if !action_state.just_pressed(action) {
                 continue;
@@ -274,6 +368,7 @@ pub fn ability_activation(
                 continue;
             };
             let Some(def) = ability_defs.get(ability_id) else {
+                warn!("Ability {:?} not found in defs", ability_id);
                 continue;
             };
             if cooldowns.is_on_cooldown(slot_idx, tick, def.cooldown_ticks) {
@@ -281,45 +376,37 @@ pub fn ability_activation(
             }
 
             cooldowns.last_used[slot_idx] = Some(tick);
-            commands.entity(entity).insert(ActiveAbility {
-                ability_id: ability_id.clone(),
-                phase: AbilityPhase::Startup,
-                phase_start_tick: tick,
-                step: 0,
-                total_steps: def.steps,
-                chain_input_received: false,
-            });
-            break; // only one ability at a time
+
+            let salt = (player_id.0.to_bits()) << 32
+                     | (slot_idx as u64) << 16
+                     | 0u64;
+
+            let mut cmd = commands.spawn((
+                ActiveAbility {
+                    def_id: ability_id.clone(),
+                    caster: entity,
+                    original_caster: entity,
+                    target: entity,
+                    phase: AbilityPhase::Startup,
+                    phase_start_tick: tick,
+                    ability_slot: slot_idx as u8,
+                    depth: 0,
+                },
+                PreSpawned::default_with_salt(salt),
+                Name::new("ActiveAbility"),
+            ));
+
+            if let Ok(controlled_by) = server_query.get(entity) {
+                cmd.insert((
+                    Replicate::to_clients(NetworkTarget::All),
+                    PredictionTarget::to_clients(NetworkTarget::All),
+                    *controlled_by,
+                ));
+            }
         }
     }
 }
 
-/// Set `chain_input_received` to true if the player re-pressed the ability key for combo chaining.
-fn set_chain_input_received(
-    active: &mut ActiveAbility,
-    action_state: &ActionState<PlayerActions>,
-    slots: &AbilitySlots,
-) {
-    if active.chain_input_received || !active.has_more_steps() {
-        return;
-    }
-    let Some((slot_idx, _)) = slots
-        .0
-        .iter()
-        .enumerate()
-        .find(|(_, slot)| slot.as_ref() == Some(&active.ability_id))
-    else {
-        return;
-    };
-    let Some(action) = slot_to_ability_action(slot_idx) else {
-        return;
-    };
-    if action_state.just_pressed(&action) {
-        active.chain_input_received = true;
-    }
-}
-
-/// Advance the ability phase
 fn advance_ability_phase(
     commands: &mut Commands,
     entity: Entity,
@@ -330,65 +417,46 @@ fn advance_ability_phase(
     let elapsed = tick - active.phase_start_tick;
     let phase_complete = elapsed >= def.phase_duration(&active.phase) as i16;
 
+    if !phase_complete {
+        return;
+    }
+
     match active.phase {
-        AbilityPhase::Startup if phase_complete => {
+        AbilityPhase::Startup => {
             active.phase = AbilityPhase::Active;
             active.phase_start_tick = tick;
         }
-        AbilityPhase::Active if phase_complete => {
+        AbilityPhase::Active => {
             active.phase = AbilityPhase::Recovery;
             active.phase_start_tick = tick;
         }
-        AbilityPhase::Recovery if phase_complete => {
-            if active.chain_input_received && active.has_more_steps() {
-                active.step += 1;
-                active.phase = AbilityPhase::Startup;
-                active.phase_start_tick = tick;
-                active.chain_input_received = false;
-            } else {
-                commands.entity(entity).remove::<ActiveAbility>();
-            }
-        }
         AbilityPhase::Recovery => {
-            let chain_window_expired = !active.chain_input_received
-                && active.has_more_steps()
-                && elapsed >= def.step_window_ticks as i16;
-            if chain_window_expired {
-                commands.entity(entity).remove::<ActiveAbility>();
-            }
+            commands.entity(entity).prediction_despawn();
         }
-        _ => {}
     }
 }
 
-/// Advance ability phases based on tick counts. Handle multi-step combo chaining.
+/// Advance ability phases based on tick counts.
 pub fn update_active_abilities(
     mut commands: Commands,
     ability_defs: Res<AbilityDefs>,
     timeline: Single<&LocalTimeline, Without<ClientOf>>,
-    mut query: Query<(
-        Entity,
-        &mut ActiveAbility,
-        &ActionState<PlayerActions>,
-        &AbilitySlots,
-    )>,
+    mut query: Query<(Entity, &mut ActiveAbility)>,
 ) {
     let tick = timeline.tick();
 
-    for (entity, mut active, action_state, slots) in &mut query {
-        let Some(def) = ability_defs.get(&active.ability_id) else {
-            warn!("Ability {:?} not found", active.ability_id);
-            commands.entity(entity).remove::<ActiveAbility>();
+    for (entity, mut active) in &mut query {
+        let Some(def) = ability_defs.get(&active.def_id) else {
+            warn!("Ability {:?} not found", active.def_id);
+            commands.entity(entity).prediction_despawn();
             continue;
         };
 
-        set_chain_input_received(&mut active, action_state, slots);
         advance_ability_phase(&mut commands, entity, &mut active, def, tick);
     }
 }
 
 /// Insert/remove effect marker components based on `ActiveAbility` phase.
-/// Centralizes the `AbilityDefs` lookup so effect systems query markers directly.
 pub fn dispatch_effect_markers(
     mut commands: Commands,
     ability_defs: Res<AbilityDefs>,
@@ -398,62 +466,446 @@ pub fn dispatch_effect_markers(
     let tick = timeline.tick();
 
     for (entity, active) in &query {
-        let Some(def) = ability_defs.get(&active.ability_id) else {
-            warn!("dispatch_effect_markers: ability {:?} not found", active.ability_id);
+        let Some(def) = ability_defs.get(&active.def_id) else {
+            warn!("dispatch_effect_markers: ability {:?} not found", active.def_id);
             continue;
         };
 
         if active.phase == AbilityPhase::Active {
-            dispatch_while_active_markers(&mut commands, entity, def);
-            if active.phase_start_tick == tick {
-                dispatch_on_cast_markers(&mut commands, entity, def);
-            }
+            dispatch_active_phase_markers(&mut commands, entity, active, def, tick);
         } else {
-            remove_while_active_markers(&mut commands, entity);
+            remove_active_phase_markers(&mut commands, entity);
+            if active.phase == AbilityPhase::Recovery && active.phase_start_tick == tick {
+                dispatch_on_end_markers(&mut commands, entity, def);
+            }
         }
     }
 }
 
-fn dispatch_while_active_markers(commands: &mut Commands, entity: Entity, def: &AbilityDef) {
-    match &def.effect {
-        AbilityEffect::Dash { speed } => {
-            commands
-                .entity(entity)
-                .insert(DashAbilityEffect { speed: *speed });
+fn dispatch_active_phase_markers(
+    commands: &mut Commands,
+    entity: Entity,
+    active: &ActiveAbility,
+    def: &AbilityDef,
+    tick: Tick,
+) {
+    let first_active_tick = active.phase_start_tick == tick;
+
+    if first_active_tick {
+        let on_cast: Vec<AbilityEffect> = def.effects.iter().filter_map(|t| match t {
+            EffectTrigger::OnCast(e) => Some(e.clone()),
+            _ => None,
+        }).collect();
+        if !on_cast.is_empty() {
+            commands.entity(entity).insert(OnCastEffects(on_cast));
         }
-        AbilityEffect::Melee { knockback_force, base_damage } => {
-            commands.entity(entity).insert(MeleeHitboxActive {
-                knockback_force: *knockback_force,
-                base_damage: *base_damage,
+
+        let on_hit: Vec<AbilityEffect> = def.effects.iter().filter_map(|t| match t {
+            EffectTrigger::OnHit(e) => Some(e.clone()),
+            _ => None,
+        }).collect();
+        if !on_hit.is_empty() {
+            commands.entity(entity).insert(OnHitEffects {
+                effects: on_hit,
+                caster: active.caster,
+                original_caster: active.original_caster,
+                depth: active.depth,
             });
         }
-        _ => {}
+    }
+
+    let while_active: Vec<AbilityEffect> = def.effects.iter().filter_map(|t| match t {
+        EffectTrigger::WhileActive(e) => Some(e.clone()),
+        _ => None,
+    }).collect();
+    if !while_active.is_empty() {
+        commands.entity(entity).insert(WhileActiveEffects(while_active));
+    }
+
+    let on_input: Vec<(PlayerActions, AbilityEffect)> = def.effects.iter().filter_map(|t| match t {
+        EffectTrigger::OnInput { action, effect } => Some((*action, effect.clone())),
+        _ => None,
+    }).collect();
+    if !on_input.is_empty() {
+        commands.entity(entity).insert(OnInputEffects(on_input));
     }
 }
 
-fn dispatch_on_cast_markers(commands: &mut Commands, entity: Entity, def: &AbilityDef) {
-    if let AbilityEffect::Projectile {
-        speed,
-        lifetime_ticks,
-        knockback_force,
-        base_damage,
-    } = &def.effect
-    {
-        commands
-            .entity(entity)
-            .insert(ProjectileSpawnAbilityEffect {
-                speed: *speed,
-                lifetime_ticks: *lifetime_ticks,
-                knockback_force: *knockback_force,
-                base_damage: *base_damage,
-            });
+fn remove_active_phase_markers(commands: &mut Commands, entity: Entity) {
+    commands.entity(entity).remove::<OnCastEffects>();
+    commands.entity(entity).remove::<WhileActiveEffects>();
+    commands.entity(entity).remove::<OnHitEffects>();
+    commands.entity(entity).remove::<OnInputEffects>();
+}
+
+fn dispatch_on_end_markers(commands: &mut Commands, entity: Entity, def: &AbilityDef) {
+    let on_end: Vec<AbilityEffect> = def.effects.iter().filter_map(|t| match t {
+        EffectTrigger::OnEnd(e) => Some(e.clone()),
+        _ => None,
+    }).collect();
+    if !on_end.is_empty() {
+        commands.entity(entity).insert(OnEndEffects(on_end));
     }
 }
 
-fn remove_while_active_markers(commands: &mut Commands, entity: Entity) {
-    commands.entity(entity).remove::<DashAbilityEffect>();
-    commands.entity(entity).remove::<MeleeHitboxActive>();
-    commands.entity(entity).remove::<MeleeHitTargets>();
+/// Resolve an EffectTarget to an entity using ActiveAbility's caster fields.
+/// Only valid for Caster/OriginalCaster — Victim requires hit context.
+fn resolve_caster_target(target: &EffectTarget, active: &ActiveAbility) -> Entity {
+    match target {
+        EffectTarget::Caster => active.caster,
+        EffectTarget::OriginalCaster => active.original_caster,
+        other => {
+            warn!("EffectTarget::{:?} not valid in caster context, falling back to caster", other);
+            active.caster
+        }
+    }
+}
+
+fn compute_sub_ability_salt(player_id: PlayerId, slot: u8, depth: u8, id: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    player_id.0.to_bits().hash(&mut hasher);
+    slot.hash(&mut hasher);
+    depth.hash(&mut hasher);
+    id.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Spawn a sub-ability entity for recursive ability composition.
+/// Caps at depth 4 to prevent infinite recursion.
+pub(crate) fn spawn_sub_ability(
+    commands: &mut Commands,
+    ability_defs: &AbilityDefs,
+    id: &str,
+    target_entity: Entity,
+    original_caster: Entity,
+    parent_slot: u8,
+    parent_depth: u8,
+    tick: Tick,
+    server_query: &Query<&ControlledBy>,
+    player_id_query: &Query<&PlayerId>,
+) {
+    if parent_depth >= 4 {
+        warn!("Ability recursion depth exceeded for {:?}", id);
+        return;
+    }
+    let ability_id = AbilityId(id.to_string());
+    if ability_defs.get(&ability_id).is_none() {
+        warn!("Sub-ability {:?} not found in defs", id);
+        return;
+    }
+    let Some(&player_id) = player_id_query.get(original_caster).ok() else {
+        warn!("Sub-ability spawn: original_caster {:?} missing PlayerId", original_caster);
+        return;
+    };
+    let depth = parent_depth + 1;
+    let salt = compute_sub_ability_salt(player_id, parent_slot, depth, id);
+
+    let mut cmd = commands.spawn((
+        ActiveAbility {
+            def_id: ability_id,
+            caster: target_entity,
+            original_caster,
+            target: target_entity,
+            phase: AbilityPhase::Startup,
+            phase_start_tick: tick,
+            ability_slot: parent_slot,
+            depth,
+        },
+        PreSpawned::default_with_salt(salt),
+        Name::new("ActiveAbility"),
+    ));
+
+    if let Ok(controlled_by) = server_query.get(original_caster) {
+        cmd.insert((
+            Replicate::to_clients(NetworkTarget::All),
+            PredictionTarget::to_clients(NetworkTarget::All),
+            *controlled_by,
+        ));
+    }
+}
+
+/// Process OnCast effects: spawn hitbox entities, projectiles, or sub-abilities.
+pub fn apply_on_cast_effects(
+    mut commands: Commands,
+    ability_defs: Res<AbilityDefs>,
+    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    server_query: Query<&ControlledBy>,
+    player_id_query: Query<&PlayerId>,
+    query: Query<(Entity, &OnCastEffects, &ActiveAbility, Option<&OnHitEffects>)>,
+    mut caster_query: Query<(&mut Position, &Rotation)>,
+) {
+    let tick = timeline.tick();
+    for (entity, effects, active, on_hit_effects) in &query {
+        for effect in &effects.0 {
+            match effect {
+                AbilityEffect::Melee { .. } => {
+                    spawn_melee_hitbox(&mut commands, entity, active, on_hit_effects, &caster_query);
+                }
+                AbilityEffect::AreaOfEffect { radius, .. } => {
+                    spawn_aoe_hitbox(&mut commands, entity, active, on_hit_effects, &caster_query, *radius);
+                }
+                AbilityEffect::Projectile { speed, lifetime_ticks, .. } => {
+                    commands.entity(entity).insert(ProjectileSpawnEffect {
+                        speed: *speed,
+                        lifetime_ticks: *lifetime_ticks,
+                    });
+                }
+                AbilityEffect::Ability { id, target } => {
+                    let target_entity = resolve_caster_target(target, active);
+                    spawn_sub_ability(
+                        &mut commands, &ability_defs, id, target_entity,
+                        active.original_caster, active.ability_slot,
+                        active.depth, tick, &server_query, &player_id_query,
+                    );
+                }
+                AbilityEffect::Teleport { distance } => {
+                    apply_teleport(&mut caster_query, active.caster, *distance);
+                }
+                AbilityEffect::Shield { absorb } => {
+                    commands.entity(active.caster).insert(ActiveShield { remaining: *absorb });
+                }
+                AbilityEffect::Buff { stat, multiplier, duration_ticks, target } => {
+                    apply_buff(&mut commands, resolve_caster_target(target, active), stat, *multiplier, *duration_ticks, tick);
+                }
+                _ => {
+                    warn!("Unhandled OnCast effect: {:?}", effect);
+                }
+            }
+        }
+        commands.entity(entity).remove::<OnCastEffects>();
+    }
+}
+
+fn spawn_melee_hitbox(
+    commands: &mut Commands,
+    ability_entity: Entity,
+    active: &ActiveAbility,
+    on_hit_effects: Option<&OnHitEffects>,
+    caster_query: &Query<(&mut Position, &Rotation)>,
+) {
+    let Ok((caster_pos, caster_rot)) = caster_query.get(active.caster) else {
+        warn!("Melee hitbox spawn: caster {:?} missing Position/Rotation", active.caster);
+        return;
+    };
+    let direction = facing_direction(caster_rot);
+    let pos = caster_pos.0 + direction * MELEE_HITBOX_OFFSET;
+
+    let mut cmd = commands.spawn((
+        Position(pos),
+        *caster_rot,
+        RigidBody::Kinematic,
+        Collider::cuboid(
+            MELEE_HITBOX_HALF_EXTENTS.x,
+            MELEE_HITBOX_HALF_EXTENTS.y,
+            MELEE_HITBOX_HALF_EXTENTS.z,
+        ),
+        Sensor,
+        CollisionEventsEnabled,
+        CollidingEntities::default(),
+        hitbox_collision_layers(),
+        HitboxOf(ability_entity),
+        DisableRollback,
+        MeleeHitbox,
+        HitTargets::default(),
+        Name::new("MeleeHitbox"),
+    ));
+    if let Some(on_hit) = on_hit_effects {
+        cmd.insert(on_hit.clone());
+    }
+}
+
+fn spawn_aoe_hitbox(
+    commands: &mut Commands,
+    ability_entity: Entity,
+    active: &ActiveAbility,
+    on_hit_effects: Option<&OnHitEffects>,
+    caster_query: &Query<(&mut Position, &Rotation)>,
+    radius: f32,
+) {
+    let Ok((caster_pos, caster_rot)) = caster_query.get(active.caster) else {
+        warn!("AoE hitbox spawn: caster {:?} missing Position/Rotation", active.caster);
+        return;
+    };
+
+    let mut cmd = commands.spawn((
+        Position(caster_pos.0),
+        *caster_rot,
+        RigidBody::Kinematic,
+        Collider::sphere(radius),
+        Sensor,
+        CollisionEventsEnabled,
+        CollidingEntities::default(),
+        hitbox_collision_layers(),
+        HitboxOf(ability_entity),
+        DisableRollback,
+        HitTargets::default(),
+        Name::new("AoEHitbox"),
+    ));
+    if let Some(on_hit) = on_hit_effects {
+        cmd.insert(on_hit.clone());
+    }
+}
+
+/// Apply WhileActive effects each tick (e.g. SetVelocity for dashes).
+pub fn apply_while_active_effects(
+    query: Query<(&WhileActiveEffects, &ActiveAbility)>,
+    mut caster_query: Query<(&Rotation, &mut LinearVelocity)>,
+) {
+    for (effects, active) in &query {
+        for effect in &effects.0 {
+            match effect {
+                AbilityEffect::SetVelocity { speed, target } => {
+                    let target_entity = resolve_caster_target(target, active);
+                    if let Ok((rotation, mut velocity)) = caster_query.get_mut(target_entity) {
+                        let direction = facing_direction(rotation);
+                        velocity.x = direction.x * speed;
+                        velocity.z = direction.z * speed;
+                    }
+                }
+                _ => {
+                    warn!("Unhandled WhileActive effect: {:?}", effect);
+                }
+            }
+        }
+    }
+}
+
+/// Process OnEnd effects — handles effects that fire when ability exits Active phase.
+pub fn apply_on_end_effects(
+    mut commands: Commands,
+    ability_defs: Res<AbilityDefs>,
+    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    server_query: Query<&ControlledBy>,
+    player_id_query: Query<&PlayerId>,
+    query: Query<(Entity, &OnEndEffects, &ActiveAbility)>,
+    mut caster_query: Query<(&mut Position, &Rotation, &mut LinearVelocity)>,
+) {
+    let tick = timeline.tick();
+    for (entity, effects, active) in &query {
+        for effect in &effects.0 {
+            match effect {
+                AbilityEffect::SetVelocity { speed, target } => {
+                    let target_entity = resolve_caster_target(target, active);
+                    if let Ok((_, rotation, mut velocity)) = caster_query.get_mut(target_entity) {
+                        let direction = facing_direction(rotation);
+                        velocity.x = direction.x * speed;
+                        velocity.z = direction.z * speed;
+                    }
+                }
+                AbilityEffect::Ability { id, target } => {
+                    let target_entity = resolve_caster_target(target, active);
+                    spawn_sub_ability(
+                        &mut commands, &ability_defs, id, target_entity,
+                        active.original_caster, active.ability_slot,
+                        active.depth, tick, &server_query, &player_id_query,
+                    );
+                }
+                AbilityEffect::Teleport { distance } => {
+                    let target_entity = resolve_caster_target(&EffectTarget::Caster, active);
+                    if let Ok((mut position, rotation, _)) = caster_query.get_mut(target_entity) {
+                        let direction = facing_direction(rotation);
+                        position.0 += direction * *distance;
+                    } else {
+                        warn!("Teleport: caster {:?} missing Position/Rotation", active.caster);
+                    }
+                }
+                AbilityEffect::Shield { absorb } => {
+                    commands.entity(active.caster).insert(ActiveShield { remaining: *absorb });
+                }
+                AbilityEffect::Buff { stat, multiplier, duration_ticks, target } => {
+                    apply_buff(&mut commands, resolve_caster_target(target, active), stat, *multiplier, *duration_ticks, tick);
+                }
+                _ => {
+                    warn!("Unhandled OnEnd effect: {:?}", effect);
+                }
+            }
+        }
+        commands.entity(entity).remove::<OnEndEffects>();
+    }
+}
+
+/// Process OnInput effects -- checks caster's ActionState for just_pressed inputs
+/// and applies matched effects (typically spawning sub-abilities for combo chaining).
+pub fn apply_on_input_effects(
+    mut commands: Commands,
+    ability_defs: Res<AbilityDefs>,
+    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    server_query: Query<&ControlledBy>,
+    player_id_query: Query<&PlayerId>,
+    query: Query<(Entity, &OnInputEffects, &ActiveAbility)>,
+    action_query: Query<&ActionState<PlayerActions>>,
+) {
+    let tick = timeline.tick();
+    for (_entity, effects, active) in &query {
+        let Ok(action_state) = action_query.get(active.caster) else {
+            continue;
+        };
+        for (action, effect) in &effects.0 {
+            if !action_state.just_pressed(action) {
+                continue;
+            }
+            match effect {
+                AbilityEffect::Ability { id, target } => {
+                    let target_entity = resolve_caster_target(target, active);
+                    spawn_sub_ability(
+                        &mut commands, &ability_defs, id, target_entity,
+                        active.original_caster, active.ability_slot,
+                        active.depth, tick, &server_query, &player_id_query,
+                    );
+                }
+                _ => {
+                    warn!("Unhandled OnInput effect: {:?}", effect);
+                }
+            }
+        }
+    }
+}
+
+fn apply_teleport(
+    caster_query: &mut Query<(&mut Position, &Rotation)>,
+    caster: Entity,
+    distance: f32,
+) {
+    if let Ok((mut position, rotation)) = caster_query.get_mut(caster) {
+        let direction = facing_direction(rotation);
+        position.0 += direction * distance;
+    } else {
+        warn!("Teleport: caster {:?} missing Position/Rotation", caster);
+    }
+}
+
+fn apply_buff(
+    commands: &mut Commands,
+    target_entity: Entity,
+    stat: &str,
+    multiplier: f32,
+    duration_ticks: u16,
+    tick: Tick,
+) {
+    let expires_tick = tick + duration_ticks as i16;
+    commands.entity(target_entity).insert(ActiveBuffs(vec![ActiveBuff {
+        stat: stat.to_string(),
+        multiplier,
+        expires_tick,
+    }]));
+}
+
+/// Remove expired buffs each tick. Removes the ActiveBuffs component when empty.
+pub fn expire_buffs(
+    mut commands: Commands,
+    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    mut query: Query<(Entity, &mut ActiveBuffs)>,
+) {
+    let tick = timeline.tick();
+    for (entity, mut buffs) in &mut query {
+        buffs.0.retain(|b| {
+            let remaining: i16 = b.expires_tick - tick;
+            remaining > 0
+        });
+        if buffs.0.is_empty() {
+            commands.entity(entity).remove::<ActiveBuffs>();
+        }
+    }
 }
 
 /// Safety net: remove all effect markers when `ActiveAbility` is removed.
@@ -462,32 +914,30 @@ pub fn cleanup_effect_markers_on_removal(
     mut commands: Commands,
 ) {
     if let Ok(mut cmd) = commands.get_entity(trigger.entity) {
-        cmd.remove::<DashAbilityEffect>();
-        cmd.remove::<ProjectileSpawnAbilityEffect>();
-        cmd.remove::<MeleeHitboxActive>();
-        cmd.remove::<MeleeHitTargets>();
+        cmd.try_remove::<OnCastEffects>();
+        cmd.try_remove::<WhileActiveEffects>();
+        cmd.try_remove::<OnHitEffects>();
+        cmd.try_remove::<OnEndEffects>();
+        cmd.try_remove::<OnInputEffects>();
+        cmd.try_remove::<ProjectileSpawnEffect>();
     }
 }
 
-/// Spawn a `AbilityProjectileSpawn` entity from `ProjectileSpawnAbilityEffect` markers.
+/// Spawn a `AbilityProjectileSpawn` entity from `ProjectileSpawnEffect` markers.
 pub fn ability_projectile_spawn(
     mut commands: Commands,
     timeline: Single<&LocalTimeline, Without<ClientOf>>,
-    query: Query<
-        (
-            Entity,
-            &ProjectileSpawnAbilityEffect,
-            &ActiveAbility,
-            &Position,
-            &Rotation,
-        ),
-        With<CharacterMarker>,
-    >,
+    query: Query<(Entity, &ProjectileSpawnEffect, &ActiveAbility, Option<&OnHitEffects>)>,
+    caster_query: Query<(&Position, &Rotation)>,
     server_query: Query<&ControlledBy>,
 ) {
     let tick = timeline.tick();
 
-    for (entity, request, active, position, rotation) in &query {
+    for (ability_entity, request, active, on_hit_effects) in &query {
+        let Ok((position, rotation)) = caster_query.get(active.caster) else {
+            warn!("Projectile spawn: caster {:?} missing Position/Rotation", active.caster);
+            continue;
+        };
         let direction = facing_direction(rotation);
         let spawn_info = AbilityProjectileSpawn {
             spawn_tick: tick,
@@ -495,19 +945,22 @@ pub fn ability_projectile_spawn(
             direction,
             speed: request.speed,
             lifetime_ticks: request.lifetime_ticks,
-            knockback_force: request.knockback_force,
-            base_damage: request.base_damage,
-            ability_id: active.ability_id.clone(),
-            shooter: entity,
+            ability_id: active.def_id.clone(),
+            shooter: active.caster,
         };
 
+        let salt = (active.ability_slot as u64) << 8 | (active.depth as u64);
         let mut cmd = commands.spawn((
             spawn_info,
-            PreSpawned::default_with_salt(active.step as u64),
+            PreSpawned::default_with_salt(salt),
             Name::new("AbilityProjectileSpawn"),
         ));
 
-        if let Ok(controlled_by) = server_query.get(entity) {
+        if let Some(on_hit) = on_hit_effects {
+            cmd.insert(on_hit.clone());
+        }
+
+        if let Ok(controlled_by) = server_query.get(active.caster) {
             cmd.insert((
                 Replicate::to_clients(NetworkTarget::All),
                 PredictionTarget::to_clients(NetworkTarget::All),
@@ -515,20 +968,18 @@ pub fn ability_projectile_spawn(
             ));
         }
 
-        commands
-            .entity(entity)
-            .remove::<ProjectileSpawnAbilityEffect>();
+        commands.entity(ability_entity).remove::<ProjectileSpawnEffect>();
     }
 }
 
 /// Spawn child bullet entities from `AbilityProjectileSpawn` parents.
 pub fn handle_ability_projectile_spawn(
     mut commands: Commands,
-    spawn_query: Query<(Entity, &AbilityProjectileSpawn), Without<AbilityBullets>>,
+    spawn_query: Query<(Entity, &AbilityProjectileSpawn, Option<&OnHitEffects>), Without<AbilityBullets>>,
 ) {
-    for (spawn_entity, spawn_info) in &spawn_query {
+    for (spawn_entity, spawn_info, on_hit_effects) in &spawn_query {
         info!("Spawning ability bullet from {:?}", spawn_info.ability_id);
-        commands.spawn((
+        let mut bullet_cmd = commands.spawn((
             Position(spawn_info.position),
             Rotation::default(),
             LinearVelocity(spawn_info.direction * spawn_info.speed),
@@ -538,13 +989,13 @@ pub fn handle_ability_projectile_spawn(
             CollisionEventsEnabled,
             CollidingEntities::default(),
             crate::hit_detection::projectile_collision_layers(),
-            crate::hit_detection::KnockbackForce(spawn_info.knockback_force),
-            crate::hit_detection::DamageAmount(spawn_info.base_damage),
-            crate::hit_detection::ProjectileOwner(spawn_info.shooter),
             AbilityBulletOf(spawn_entity),
             DisableRollback,
             Name::new("AbilityBullet"),
         ));
+        if let Some(on_hit) = on_hit_effects {
+            bullet_cmd.insert(on_hit.clone());
+        }
     }
 }
 
@@ -556,7 +1007,7 @@ pub fn despawn_ability_projectile_spawn(
 ) {
     if let Ok(bullet_of) = bullet_query.get(trigger.entity) {
         if let Ok(mut c) = commands.get_entity(bullet_of.0) {
-            c.try_despawn();
+            c.prediction_despawn();
         }
     }
 }
@@ -576,16 +1027,5 @@ pub fn ability_bullet_lifetime(
                 commands.entity(entity).try_despawn();
             }
         }
-    }
-}
-
-/// Apply dash velocity while `DashAbilityEffect` marker is present.
-pub fn ability_dash_effect(
-    mut query: Query<(&DashAbilityEffect, &Rotation, &mut LinearVelocity), With<CharacterMarker>>,
-) {
-    for (dash, rotation, mut velocity) in &mut query {
-        let direction = facing_direction(rotation);
-        velocity.x = direction.x * dash.speed;
-        velocity.z = direction.z * dash.speed;
     }
 }

@@ -16,12 +16,12 @@ pub use app_state::{AppState, AppStatePlugin, TrackedAssets};
 pub use ability::{
     ability_action_to_slot, AbilityBulletOf, AbilityBullets, AbilityCooldowns, AbilityDef,
     AbilityDefs, AbilityDefsAsset, AbilityEffect, AbilityId, AbilityPhase, AbilityPlugin,
-    AbilityProjectileSpawn, AbilitySlots, ActiveAbility, DashAbilityEffect,
-    ProjectileSpawnAbilityEffect,
+    AbilityProjectileSpawn, AbilitySlots, ActiveAbility, ActiveBuff, ActiveBuffs, ActiveShield,
+    EffectTarget, EffectTrigger, OnHitEffects, ProjectileSpawnEffect,
 };
 pub use hit_detection::{
-    character_collision_layers, projectile_collision_layers, terrain_collision_layers, DamageAmount,
-    GameLayer,
+    character_collision_layers, hitbox_collision_layers, projectile_collision_layers,
+    terrain_collision_layers, GameLayer,
 };
 pub use map::{
     attach_chunk_colliders, MapWorld, VoxelChannel, VoxelEditBroadcast, VoxelEditRequest,
@@ -184,9 +184,13 @@ impl Plugin for ProtocolPlugin {
 
         // Ability components
         app.register_component::<AbilitySlots>();
-        app.register_component::<ActiveAbility>().add_prediction();
+        app.register_component::<ActiveAbility>()
+            .add_prediction()
+            .add_map_entities();
         app.register_component::<AbilityCooldowns>()
             .add_prediction();
+        app.register_component::<ActiveShield>().add_prediction();
+        app.register_component::<ActiveBuffs>().add_prediction();
         app.register_component::<AbilityProjectileSpawn>();
 
         // Position/Rotation with prediction + visual correction + interpolation
@@ -249,8 +253,11 @@ impl Plugin for SharedGameplayPlugin {
                 ability::ability_activation,
                 ability::update_active_abilities,
                 ability::dispatch_effect_markers,
+                ability::apply_on_cast_effects,
+                ability::apply_while_active_effects,
+                ability::apply_on_end_effects,
+                ability::apply_on_input_effects,
                 ability::ability_projectile_spawn,
-                ability::ability_dash_effect,
             )
                 .chain()
                 .run_if(ready.clone()),
@@ -259,15 +266,17 @@ impl Plugin for SharedGameplayPlugin {
         app.add_systems(
             FixedUpdate,
             (
-                hit_detection::ensure_melee_hit_targets,
-                hit_detection::process_melee_hits,
+                hit_detection::update_hitbox_positions,
+                hit_detection::process_hitbox_hits,
                 hit_detection::process_projectile_hits,
+                hit_detection::cleanup_hitbox_entities,
             )
                 .chain()
-                .after(ability::dispatch_effect_markers)
+                .after(ability::apply_on_cast_effects)
                 .run_if(ready.clone()),
         );
 
+        app.add_systems(FixedUpdate, ability::expire_buffs.run_if(ready.clone()));
         app.add_systems(FixedUpdate, update_facing.run_if(ready.clone()));
         app.add_systems(PreUpdate, ability::handle_ability_projectile_spawn);
         app.add_systems(FixedUpdate, ability::ability_bullet_lifetime.run_if(ready));

@@ -20,3 +20,4 @@ serde = { version = "1.0", features = ["derive"] }
 [dev-dependencies]
 serde_json = "1.0"
 lightyear_transport = "0.25.5"
+lightyear_replication = "0.25.5"

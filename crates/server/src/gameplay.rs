@@ -52,7 +52,7 @@ fn handle_character_movement(
             &Position,
             Forces,
         ),
-        (With<CharacterMarker>, Without<ActiveAbility>),
+        With<CharacterMarker>,
     >,
 ) {
     for (entity, action_state, mass, position, mut forces) in &mut query {
@@ -173,7 +173,7 @@ fn handle_connected(
         AbilitySlots([
             Some(AbilityId("punch".into())),
             Some(AbilityId("dash".into())),
-            Some(AbilityId("fireball".into())),
+            Some(AbilityId("ground_pound".into())),
             None,
         ]),
         AbilityCooldowns::default(),
