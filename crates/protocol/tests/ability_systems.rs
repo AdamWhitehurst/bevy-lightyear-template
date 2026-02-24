@@ -912,6 +912,7 @@ fn aoe_hitbox_damages_target() {
                         id: None,
                         target: EffectTarget::Caster,
                         radius: 5.0,
+                        duration_ticks: None,
                     }),
                     EffectTrigger::OnHit(AbilityEffect::Damage {
                         amount: 25.0,
@@ -1375,6 +1376,7 @@ fn run_force_test(
                         id: None,
                         target: EffectTarget::Caster,
                         radius: 10.0,
+                        duration_ticks: None,
                     }),
                     EffectTrigger::OnHit(AbilityEffect::ApplyForce {
                         force,

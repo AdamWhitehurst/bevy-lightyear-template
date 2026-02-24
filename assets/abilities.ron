@@ -60,11 +60,11 @@
         ),
         "ground_pound": (
             startup_ticks: 6,
-            active_ticks: 2,
+            active_ticks: 10,
             recovery_ticks: 8,
             cooldown_ticks: 42,
             effects: [
-                OnCast(AreaOfEffect( target: Victim, radius: 5.0)),
+                OnCast(AreaOfEffect( target: Victim, radius: 5.0, duration_ticks: Some(10))),
                 OnHit(Damage(amount: 25.0, target: Victim)),
                 OnHit(ApplyForce(force: (0.0, 8.0, 0.0), frame: World, target: Victim)),
             ],

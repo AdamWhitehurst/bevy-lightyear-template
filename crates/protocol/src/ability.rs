@@ -111,6 +111,9 @@ pub enum AbilityEffect {
         #[serde(default)]
         target: EffectTarget,
         radius: f32,
+        /// How many ticks the AoE hitbox persists. `None` defaults to 1 tick.
+        #[serde(default)]
+        duration_ticks: Option<u16>,
     },
     /// Spawn a sub-ability. Enables recursive ability composition.
     Ability {
@@ -274,6 +277,13 @@ pub struct ActiveAbilityHitboxes(Vec<Entity>);
 /// Marker on hitbox entities that need to track caster position each tick.
 #[derive(Component, Clone, Debug)]
 pub struct MeleeHitbox;
+
+/// Tracks spawn tick and duration for AoE hitbox lifetime management.
+#[derive(Component, Clone, Debug)]
+pub struct AoEHitbox {
+    pub spawn_tick: Tick,
+    pub duration_ticks: u16,
+}
 
 /// Tracks entities already hit by this hitbox to prevent duplicate effects.
 #[derive(Component, Clone, Debug, Default)]
@@ -739,7 +749,11 @@ pub fn apply_on_cast_effects(
                         &caster_query,
                     );
                 }
-                AbilityEffect::AreaOfEffect { radius, .. } => {
+                AbilityEffect::AreaOfEffect {
+                    radius,
+                    duration_ticks,
+                    ..
+                } => {
                     spawn_aoe_hitbox(
                         &mut commands,
                         entity,
@@ -747,6 +761,8 @@ pub fn apply_on_cast_effects(
                         on_hit_effects,
                         &caster_query,
                         *radius,
+                        tick,
+                        duration_ticks.unwrap_or(1),
                     );
                 }
                 AbilityEffect::Projectile {
@@ -854,7 +870,10 @@ fn spawn_aoe_hitbox(
     on_hit_effects: Option<&OnHitEffects>,
     caster_query: &Query<(&mut Position, &Rotation)>,
     radius: f32,
+    spawn_tick: Tick,
+    duration_ticks: u16,
 ) {
+    info!("Spawning AoE hitbox with {duration_ticks:?} lifetime");
     let Ok((caster_pos, caster_rot)) = caster_query.get(active.caster) else {
         warn!(
             "AoE hitbox spawn: caster {:?} missing Position/Rotation",
@@ -875,6 +894,10 @@ fn spawn_aoe_hitbox(
         HitboxOf(ability_entity),
         DisableRollback,
         HitTargets::default(),
+        AoEHitbox {
+            spawn_tick,
+            duration_ticks,
+        },
         Name::new("AoEHitbox"),
     ));
     if let Some(on_hit) = on_hit_effects {
@@ -1190,6 +1213,21 @@ pub fn despawn_ability_projectile_spawn(
     if let Ok(bullet_of) = bullet_query.get(trigger.entity) {
         if let Ok(mut c) = commands.get_entity(bullet_of.0) {
             c.prediction_despawn();
+        }
+    }
+}
+
+/// Despawn AoE hitboxes whose duration has expired.
+pub fn aoe_hitbox_lifetime(
+    mut commands: Commands,
+    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    query: Query<(Entity, &AoEHitbox)>,
+) {
+    let tick = timeline.tick();
+    for (entity, aoe) in &query {
+        let elapsed = tick - aoe.spawn_tick;
+        if elapsed >= aoe.duration_ticks as i16 {
+            commands.entity(entity).try_despawn();
         }
     }
 }

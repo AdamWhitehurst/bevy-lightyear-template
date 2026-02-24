@@ -277,6 +277,10 @@ impl Plugin for SharedGameplayPlugin {
         );
 
         app.add_systems(FixedUpdate, ability::expire_buffs.run_if(ready.clone()));
+        app.add_systems(
+            FixedUpdate,
+            ability::aoe_hitbox_lifetime.run_if(ready.clone()),
+        );
         app.add_systems(FixedUpdate, update_facing.run_if(ready.clone()));
         app.add_systems(PreUpdate, ability::handle_ability_projectile_spawn);
         app.add_systems(FixedUpdate, ability::ability_bullet_lifetime.run_if(ready));
