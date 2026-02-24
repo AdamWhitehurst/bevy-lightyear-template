@@ -365,7 +365,7 @@ impl Plugin for AbilityPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(RonAssetPlugin::<AbilityDefsAsset>::new(&["abilities.ron"]));
         app.add_systems(Startup, load_ability_defs);
-        app.add_systems(Update, insert_ability_defs);
+        app.add_systems(Update, (insert_ability_defs, reload_ability_defs));
     }
 }
 
@@ -399,6 +399,30 @@ fn insert_ability_defs(
         .collect();
     info!("Loaded {} ability definitions", abilities.len());
     commands.insert_resource(AbilityDefs { abilities });
+}
+
+fn reload_ability_defs(
+    mut commands: Commands,
+    handle: Option<Res<AbilityDefsHandle>>,
+    assets: Res<Assets<AbilityDefsAsset>>,
+    mut events: MessageReader<AssetEvent<AbilityDefsAsset>>,
+) {
+    let Some(handle) = handle else { return };
+    for event in events.read() {
+        if event.is_modified(&handle.0) {
+            let Some(asset) = assets.get(&handle.0) else {
+                warn!("abilities.ron modified but asset not available");
+                return;
+            };
+            let abilities: HashMap<AbilityId, AbilityDef> = asset
+                .abilities
+                .iter()
+                .map(|(k, v)| (AbilityId(k.clone()), v.clone()))
+                .collect();
+            info!("Hot-reloaded {} ability definitions", abilities.len());
+            commands.insert_resource(AbilityDefs { abilities });
+        }
+    }
 }
 
 /// Maps a `PlayerActions` ability variant to a slot index (0-3).

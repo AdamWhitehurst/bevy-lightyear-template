@@ -11,7 +11,7 @@ name = "server"
 path = "src/main.rs"
 
 [dependencies]
-bevy = { workspace = true, default-features = true }
+bevy = { workspace = true, default-features = true, features = ["file_watcher"] }
 bevy_voxel_world = { workspace = true }
 leafwing-input-manager = { workspace = true }
 lightyear = { workspace = true, features = ["server", "netcode", "udp", "webtransport", "websocket", "leafwing", "replication" ] }
