@@ -32,5 +32,8 @@ fn test_bevy_minimal_app() {
     app.update();
 
     // Verify app is functional (has at least one entity)
-    assert!(app.world().entities().len() > 0, "App should have spawned entity");
+    assert!(
+        app.world().entities().len() > 0,
+        "App should have spawned entity"
+    );
 }

@@ -1,8 +1,8 @@
 use bevy::prelude::*;
-use lightyear::prelude::*;
 use lightyear::prelude::server::*;
+use lightyear::prelude::*;
 use lightyear::webtransport::prelude::Identity;
-use protocol::{FIXED_TIMESTEP_HZ, PROTOCOL_ID, PRIVATE_KEY};
+use protocol::{FIXED_TIMESTEP_HZ, PRIVATE_KEY, PROTOCOL_ID};
 use std::time::Duration;
 
 #[test]
@@ -21,12 +21,15 @@ fn test_server_creates_udp_transport() {
         ..default()
     };
 
-    let server_id = app.world_mut().spawn((
-        Name::new("UDP Server"),
-        NetcodeServer::new(netcode_config),
-        LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 5000))),
-        ServerUdpIo::default(),
-    )).id();
+    let server_id = app
+        .world_mut()
+        .spawn((
+            Name::new("UDP Server"),
+            NetcodeServer::new(netcode_config),
+            LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 5000))),
+            ServerUdpIo::default(),
+        ))
+        .id();
 
     // Verify server entity exists
     assert!(app.world().get_entity(server_id).is_ok());
@@ -56,16 +59,20 @@ fn test_server_creates_webtransport() {
         "127.0.0.1".to_string(),
         "::1".to_string(),
     ];
-    let wt_certificate = Identity::self_signed(wt_sans).expect("Failed to generate WebTransport certificate");
+    let wt_certificate =
+        Identity::self_signed(wt_sans).expect("Failed to generate WebTransport certificate");
 
-    let server_id = app.world_mut().spawn((
-        Name::new("WebTransport Server"),
-        NetcodeServer::new(netcode_config),
-        LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 5001))),
-        WebTransportServerIo {
-            certificate: wt_certificate,
-        },
-    )).id();
+    let server_id = app
+        .world_mut()
+        .spawn((
+            Name::new("WebTransport Server"),
+            NetcodeServer::new(netcode_config),
+            LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 5001))),
+            WebTransportServerIo {
+                certificate: wt_certificate,
+            },
+        ))
+        .id();
 
     // Verify server entity exists
     assert!(app.world().get_entity(server_id).is_ok());
@@ -92,17 +99,23 @@ fn test_server_creates_websocket() {
 
     let ws_config = lightyear::websocket::server::ServerConfig::builder()
         .with_bind_address(std::net::SocketAddr::from(([0, 0, 0, 0], 5002)))
-        .with_identity(lightyear::websocket::server::Identity::self_signed(vec![
-            "localhost".to_string(),
-            "127.0.0.1".to_string(),
-        ]).expect("Failed to generate WebSocket certificate"));
+        .with_identity(
+            lightyear::websocket::server::Identity::self_signed(vec![
+                "localhost".to_string(),
+                "127.0.0.1".to_string(),
+            ])
+            .expect("Failed to generate WebSocket certificate"),
+        );
 
-    let server_id = app.world_mut().spawn((
-        Name::new("WebSocket Server"),
-        NetcodeServer::new(netcode_config),
-        LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 5002))),
-        WebSocketServerIo { config: ws_config },
-    )).id();
+    let server_id = app
+        .world_mut()
+        .spawn((
+            Name::new("WebSocket Server"),
+            NetcodeServer::new(netcode_config),
+            LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 5002))),
+            WebSocketServerIo { config: ws_config },
+        ))
+        .id();
 
     // Verify server entity exists
     assert!(app.world().get_entity(server_id).is_ok());

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
-use lightyear::prelude::*;
 use lightyear::prelude::client::*;
-use protocol::{FIXED_TIMESTEP_HZ, PROTOCOL_ID, PRIVATE_KEY};
+use lightyear::prelude::*;
+use protocol::{FIXED_TIMESTEP_HZ, PRIVATE_KEY, PROTOCOL_ID};
 use std::time::Duration;
 
 #[test]
@@ -25,17 +25,20 @@ fn test_client_connects_to_server() {
         protocol_id: PROTOCOL_ID,
     };
 
-    let client_id = app.world_mut().spawn((
-        Name::new("Test Client"),
-        Client::default(),
-        LocalAddr(client_addr),
-        PeerAddr(server_addr),
-        Link::new(None),
-        ReplicationReceiver::default(),
-        NetcodeClient::new(auth, NetcodeConfig::default())
-            .expect("Failed to create NetcodeClient"),
-        UdpIo::default(),
-    )).id();
+    let client_id = app
+        .world_mut()
+        .spawn((
+            Name::new("Test Client"),
+            Client::default(),
+            LocalAddr(client_addr),
+            PeerAddr(server_addr),
+            Link::new(None),
+            ReplicationReceiver::default(),
+            NetcodeClient::new(auth, NetcodeConfig::default())
+                .expect("Failed to create NetcodeClient"),
+            UdpIo::default(),
+        ))
+        .id();
 
     // Verify client entity exists
     assert!(app.world().get_entity(client_id).is_ok());
@@ -66,17 +69,20 @@ fn test_client_has_ping_manager() {
         protocol_id: PROTOCOL_ID,
     };
 
-    let client_id = app.world_mut().spawn((
-        Name::new("Test Client"),
-        Client::default(),
-        LocalAddr(client_addr),
-        PeerAddr(server_addr),
-        Link::new(None),
-        ReplicationReceiver::default(),
-        NetcodeClient::new(auth, NetcodeConfig::default())
-            .expect("Failed to create NetcodeClient"),
-        UdpIo::default(),
-    )).id();
+    let client_id = app
+        .world_mut()
+        .spawn((
+            Name::new("Test Client"),
+            Client::default(),
+            LocalAddr(client_addr),
+            PeerAddr(server_addr),
+            Link::new(None),
+            ReplicationReceiver::default(),
+            NetcodeClient::new(auth, NetcodeConfig::default())
+                .expect("Failed to create NetcodeClient"),
+            UdpIo::default(),
+        ))
+        .id();
 
     // Run app setup
     app.update();

@@ -1,8 +1,8 @@
 #![cfg(target_family = "wasm")]
 
 use bevy::prelude::*;
-use lightyear::prelude::*;
 use lightyear::prelude::client::*;
+use lightyear::prelude::*;
 use lightyear::webtransport::client::WebTransportClientIo;
 use protocol::*;
 use wasm_bindgen_test::*;
@@ -22,11 +22,9 @@ fn test_web_client_plugin_spawns_entity() {
     app.update();
 
     // Verify client entity was spawned
-    let mut query = app.world_mut().query::<(
-        &Client,
-        &NetcodeClient,
-        &WebTransportClientIo,
-    )>();
+    let mut query = app
+        .world_mut()
+        .query::<(&Client, &NetcodeClient, &WebTransportClientIo)>();
 
     // Verify we can get the single client entity
     let _ = query.single(app.world());
@@ -48,16 +46,15 @@ fn test_web_client_plugin_connected_observer() {
     let client_entity = query.single(app.world()).unwrap();
 
     // Manually trigger Connected event by inserting component (with required RemoteId)
-    app.world_mut().entity_mut(client_entity).insert((Connected, RemoteId(PeerId::Netcode(0))));
+    app.world_mut()
+        .entity_mut(client_entity)
+        .insert((Connected, RemoteId(PeerId::Netcode(0))));
 
     // Run update to trigger observers
     app.update();
 
     // Verify observer ran without panicking
-    let has_connected = app
-        .world()
-        .entity(client_entity)
-        .contains::<Connected>();
+    let has_connected = app.world().entity(client_entity).contains::<Connected>();
     assert!(has_connected, "Observer should process Connected component");
 }
 
@@ -77,15 +74,17 @@ fn test_web_client_plugin_disconnected_observer() {
     let client_entity = query.single(app.world()).unwrap();
 
     // Manually trigger Disconnected event by inserting component
-    app.world_mut().entity_mut(client_entity).insert(Disconnected::default());
+    app.world_mut()
+        .entity_mut(client_entity)
+        .insert(Disconnected::default());
 
     // Run update to trigger observers
     app.update();
 
     // Verify observer ran without panicking
-    let has_disconnected = app
-        .world()
-        .entity(client_entity)
-        .contains::<Disconnected>();
-    assert!(has_disconnected, "Observer should process Disconnected component");
+    let has_disconnected = app.world().entity(client_entity).contains::<Disconnected>();
+    assert!(
+        has_disconnected,
+        "Observer should process Disconnected component"
+    );
 }

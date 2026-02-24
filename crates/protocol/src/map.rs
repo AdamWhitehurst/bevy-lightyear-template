@@ -112,8 +112,10 @@ pub fn attach_chunk_colliders(
             commands.entity(entity).remove::<Collider>();
         }
 
-        commands
-            .entity(entity)
-            .insert((collider, RigidBody::Static, crate::hit_detection::terrain_collision_layers()));
+        commands.entity(entity).insert((
+            collider,
+            RigidBody::Static,
+            crate::hit_detection::terrain_collision_layers(),
+        ));
     }
 }

@@ -3,8 +3,8 @@ use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
 use leafwing_input_manager::prelude::ActionState;
-use lightyear::prelude::PredictionDespawnCommandsExt;
 use lightyear::prelude::server::ClientOf;
+use lightyear::prelude::PredictionDespawnCommandsExt;
 use lightyear::prelude::{
     ControlledBy, DisableRollback, LocalTimeline, NetworkTarget, NetworkTimeline, PreSpawned,
     PredictionTarget, Replicate, Tick,
@@ -14,8 +14,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use crate::hit_detection::{hitbox_collision_layers, MELEE_HITBOX_HALF_EXTENTS, MELEE_HITBOX_OFFSET};
-use crate::{PlayerId, PlayerActions};
+use crate::hit_detection::{
+    hitbox_collision_layers, MELEE_HITBOX_HALF_EXTENTS, MELEE_HITBOX_OFFSET,
+};
+use crate::{PlayerActions, PlayerId};
 
 const PROJECTILE_SPAWN_OFFSET: f32 = 1.5;
 const BULLET_COLLIDER_RADIUS: f32 = 0.25;
@@ -59,9 +61,18 @@ pub enum AbilityEffect {
         speed: f32,
         lifetime_ticks: u16,
     },
-    SetVelocity { speed: f32, target: EffectTarget },
-    Damage { amount: f32, target: EffectTarget },
-    ApplyForce { force: f32, target: EffectTarget },
+    SetVelocity {
+        speed: f32,
+        target: EffectTarget,
+    },
+    Damage {
+        amount: f32,
+        target: EffectTarget,
+    },
+    ApplyForce {
+        force: f32,
+        target: EffectTarget,
+    },
     AreaOfEffect {
         #[serde(default)]
         id: Option<String>,
@@ -70,13 +81,25 @@ pub enum AbilityEffect {
         radius: f32,
     },
     /// Spawn a sub-ability. Enables recursive ability composition.
-    Ability { id: String, target: EffectTarget },
+    Ability {
+        id: String,
+        target: EffectTarget,
+    },
     /// Instantly move caster forward by `distance` units in facing direction.
-    Teleport { distance: f32 },
+    Teleport {
+        distance: f32,
+    },
     /// Grant a damage-absorbing shield to the caster.
-    Shield { absorb: f32 },
+    Shield {
+        absorb: f32,
+    },
     /// Apply a temporary stat multiplier to the target.
-    Buff { stat: String, multiplier: f32, duration_ticks: u16, target: EffectTarget },
+    Buff {
+        stat: String,
+        multiplier: f32,
+        duration_ticks: u16,
+        target: EffectTarget,
+    },
 }
 
 /// Controls when an effect fires.
@@ -91,7 +114,10 @@ pub enum EffectTrigger {
     /// Fires once when ability exits Active phase (enters Recovery).
     OnEnd(AbilityEffect),
     /// Fires during Active phase when the specified input is just-pressed.
-    OnInput { action: PlayerActions, effect: AbilityEffect },
+    OnInput {
+        action: PlayerActions,
+        effect: AbilityEffect,
+    },
 }
 
 /// Definition of a single ability, loaded from RON.
@@ -377,9 +403,7 @@ pub fn ability_activation(
 
             cooldowns.last_used[slot_idx] = Some(tick);
 
-            let salt = (player_id.0.to_bits()) << 32
-                     | (slot_idx as u64) << 16
-                     | 0u64;
+            let salt = (player_id.0.to_bits()) << 32 | (slot_idx as u64) << 16 | 0u64;
 
             let mut cmd = commands.spawn((
                 ActiveAbility {
@@ -467,7 +491,10 @@ pub fn dispatch_effect_markers(
 
     for (entity, active) in &query {
         let Some(def) = ability_defs.get(&active.def_id) else {
-            warn!("dispatch_effect_markers: ability {:?} not found", active.def_id);
+            warn!(
+                "dispatch_effect_markers: ability {:?} not found",
+                active.def_id
+            );
             continue;
         };
 
@@ -492,18 +519,26 @@ fn dispatch_active_phase_markers(
     let first_active_tick = active.phase_start_tick == tick;
 
     if first_active_tick {
-        let on_cast: Vec<AbilityEffect> = def.effects.iter().filter_map(|t| match t {
-            EffectTrigger::OnCast(e) => Some(e.clone()),
-            _ => None,
-        }).collect();
+        let on_cast: Vec<AbilityEffect> = def
+            .effects
+            .iter()
+            .filter_map(|t| match t {
+                EffectTrigger::OnCast(e) => Some(e.clone()),
+                _ => None,
+            })
+            .collect();
         if !on_cast.is_empty() {
             commands.entity(entity).insert(OnCastEffects(on_cast));
         }
 
-        let on_hit: Vec<AbilityEffect> = def.effects.iter().filter_map(|t| match t {
-            EffectTrigger::OnHit(e) => Some(e.clone()),
-            _ => None,
-        }).collect();
+        let on_hit: Vec<AbilityEffect> = def
+            .effects
+            .iter()
+            .filter_map(|t| match t {
+                EffectTrigger::OnHit(e) => Some(e.clone()),
+                _ => None,
+            })
+            .collect();
         if !on_hit.is_empty() {
             commands.entity(entity).insert(OnHitEffects {
                 effects: on_hit,
@@ -514,18 +549,28 @@ fn dispatch_active_phase_markers(
         }
     }
 
-    let while_active: Vec<AbilityEffect> = def.effects.iter().filter_map(|t| match t {
-        EffectTrigger::WhileActive(e) => Some(e.clone()),
-        _ => None,
-    }).collect();
+    let while_active: Vec<AbilityEffect> = def
+        .effects
+        .iter()
+        .filter_map(|t| match t {
+            EffectTrigger::WhileActive(e) => Some(e.clone()),
+            _ => None,
+        })
+        .collect();
     if !while_active.is_empty() {
-        commands.entity(entity).insert(WhileActiveEffects(while_active));
+        commands
+            .entity(entity)
+            .insert(WhileActiveEffects(while_active));
     }
 
-    let on_input: Vec<(PlayerActions, AbilityEffect)> = def.effects.iter().filter_map(|t| match t {
-        EffectTrigger::OnInput { action, effect } => Some((*action, effect.clone())),
-        _ => None,
-    }).collect();
+    let on_input: Vec<(PlayerActions, AbilityEffect)> = def
+        .effects
+        .iter()
+        .filter_map(|t| match t {
+            EffectTrigger::OnInput { action, effect } => Some((*action, effect.clone())),
+            _ => None,
+        })
+        .collect();
     if !on_input.is_empty() {
         commands.entity(entity).insert(OnInputEffects(on_input));
     }
@@ -539,10 +584,14 @@ fn remove_active_phase_markers(commands: &mut Commands, entity: Entity) {
 }
 
 fn dispatch_on_end_markers(commands: &mut Commands, entity: Entity, def: &AbilityDef) {
-    let on_end: Vec<AbilityEffect> = def.effects.iter().filter_map(|t| match t {
-        EffectTrigger::OnEnd(e) => Some(e.clone()),
-        _ => None,
-    }).collect();
+    let on_end: Vec<AbilityEffect> = def
+        .effects
+        .iter()
+        .filter_map(|t| match t {
+            EffectTrigger::OnEnd(e) => Some(e.clone()),
+            _ => None,
+        })
+        .collect();
     if !on_end.is_empty() {
         commands.entity(entity).insert(OnEndEffects(on_end));
     }
@@ -555,7 +604,10 @@ fn resolve_caster_target(target: &EffectTarget, active: &ActiveAbility) -> Entit
         EffectTarget::Caster => active.caster,
         EffectTarget::OriginalCaster => active.original_caster,
         other => {
-            warn!("EffectTarget::{:?} not valid in caster context, falling back to caster", other);
+            warn!(
+                "EffectTarget::{:?} not valid in caster context, falling back to caster",
+                other
+            );
             active.caster
         }
     }
@@ -594,7 +646,10 @@ pub(crate) fn spawn_sub_ability(
         return;
     }
     let Some(&player_id) = player_id_query.get(original_caster).ok() else {
-        warn!("Sub-ability spawn: original_caster {:?} missing PlayerId", original_caster);
+        warn!(
+            "Sub-ability spawn: original_caster {:?} missing PlayerId",
+            original_caster
+        );
         return;
     };
     let depth = parent_depth + 1;
@@ -631,7 +686,12 @@ pub fn apply_on_cast_effects(
     timeline: Single<&LocalTimeline, Without<ClientOf>>,
     server_query: Query<&ControlledBy>,
     player_id_query: Query<&PlayerId>,
-    query: Query<(Entity, &OnCastEffects, &ActiveAbility, Option<&OnHitEffects>)>,
+    query: Query<(
+        Entity,
+        &OnCastEffects,
+        &ActiveAbility,
+        Option<&OnHitEffects>,
+    )>,
     mut caster_query: Query<(&mut Position, &Rotation)>,
 ) {
     let tick = timeline.tick();
@@ -639,12 +699,29 @@ pub fn apply_on_cast_effects(
         for effect in &effects.0 {
             match effect {
                 AbilityEffect::Melee { .. } => {
-                    spawn_melee_hitbox(&mut commands, entity, active, on_hit_effects, &caster_query);
+                    spawn_melee_hitbox(
+                        &mut commands,
+                        entity,
+                        active,
+                        on_hit_effects,
+                        &caster_query,
+                    );
                 }
                 AbilityEffect::AreaOfEffect { radius, .. } => {
-                    spawn_aoe_hitbox(&mut commands, entity, active, on_hit_effects, &caster_query, *radius);
+                    spawn_aoe_hitbox(
+                        &mut commands,
+                        entity,
+                        active,
+                        on_hit_effects,
+                        &caster_query,
+                        *radius,
+                    );
                 }
-                AbilityEffect::Projectile { speed, lifetime_ticks, .. } => {
+                AbilityEffect::Projectile {
+                    speed,
+                    lifetime_ticks,
+                    ..
+                } => {
                     commands.entity(entity).insert(ProjectileSpawnEffect {
                         speed: *speed,
                         lifetime_ticks: *lifetime_ticks,
@@ -653,19 +730,40 @@ pub fn apply_on_cast_effects(
                 AbilityEffect::Ability { id, target } => {
                     let target_entity = resolve_caster_target(target, active);
                     spawn_sub_ability(
-                        &mut commands, &ability_defs, id, target_entity,
-                        active.original_caster, active.ability_slot,
-                        active.depth, tick, &server_query, &player_id_query,
+                        &mut commands,
+                        &ability_defs,
+                        id,
+                        target_entity,
+                        active.original_caster,
+                        active.ability_slot,
+                        active.depth,
+                        tick,
+                        &server_query,
+                        &player_id_query,
                     );
                 }
                 AbilityEffect::Teleport { distance } => {
                     apply_teleport(&mut caster_query, active.caster, *distance);
                 }
                 AbilityEffect::Shield { absorb } => {
-                    commands.entity(active.caster).insert(ActiveShield { remaining: *absorb });
+                    commands
+                        .entity(active.caster)
+                        .insert(ActiveShield { remaining: *absorb });
                 }
-                AbilityEffect::Buff { stat, multiplier, duration_ticks, target } => {
-                    apply_buff(&mut commands, resolve_caster_target(target, active), stat, *multiplier, *duration_ticks, tick);
+                AbilityEffect::Buff {
+                    stat,
+                    multiplier,
+                    duration_ticks,
+                    target,
+                } => {
+                    apply_buff(
+                        &mut commands,
+                        resolve_caster_target(target, active),
+                        stat,
+                        *multiplier,
+                        *duration_ticks,
+                        tick,
+                    );
                 }
                 _ => {
                     warn!("Unhandled OnCast effect: {:?}", effect);
@@ -684,7 +782,10 @@ fn spawn_melee_hitbox(
     caster_query: &Query<(&mut Position, &Rotation)>,
 ) {
     let Ok((caster_pos, caster_rot)) = caster_query.get(active.caster) else {
-        warn!("Melee hitbox spawn: caster {:?} missing Position/Rotation", active.caster);
+        warn!(
+            "Melee hitbox spawn: caster {:?} missing Position/Rotation",
+            active.caster
+        );
         return;
     };
     let direction = facing_direction(caster_rot);
@@ -723,7 +824,10 @@ fn spawn_aoe_hitbox(
     radius: f32,
 ) {
     let Ok((caster_pos, caster_rot)) = caster_query.get(active.caster) else {
-        warn!("AoE hitbox spawn: caster {:?} missing Position/Rotation", active.caster);
+        warn!(
+            "AoE hitbox spawn: caster {:?} missing Position/Rotation",
+            active.caster
+        );
         return;
     };
 
@@ -795,9 +899,16 @@ pub fn apply_on_end_effects(
                 AbilityEffect::Ability { id, target } => {
                     let target_entity = resolve_caster_target(target, active);
                     spawn_sub_ability(
-                        &mut commands, &ability_defs, id, target_entity,
-                        active.original_caster, active.ability_slot,
-                        active.depth, tick, &server_query, &player_id_query,
+                        &mut commands,
+                        &ability_defs,
+                        id,
+                        target_entity,
+                        active.original_caster,
+                        active.ability_slot,
+                        active.depth,
+                        tick,
+                        &server_query,
+                        &player_id_query,
                     );
                 }
                 AbilityEffect::Teleport { distance } => {
@@ -806,14 +917,31 @@ pub fn apply_on_end_effects(
                         let direction = facing_direction(rotation);
                         position.0 += direction * *distance;
                     } else {
-                        warn!("Teleport: caster {:?} missing Position/Rotation", active.caster);
+                        warn!(
+                            "Teleport: caster {:?} missing Position/Rotation",
+                            active.caster
+                        );
                     }
                 }
                 AbilityEffect::Shield { absorb } => {
-                    commands.entity(active.caster).insert(ActiveShield { remaining: *absorb });
+                    commands
+                        .entity(active.caster)
+                        .insert(ActiveShield { remaining: *absorb });
                 }
-                AbilityEffect::Buff { stat, multiplier, duration_ticks, target } => {
-                    apply_buff(&mut commands, resolve_caster_target(target, active), stat, *multiplier, *duration_ticks, tick);
+                AbilityEffect::Buff {
+                    stat,
+                    multiplier,
+                    duration_ticks,
+                    target,
+                } => {
+                    apply_buff(
+                        &mut commands,
+                        resolve_caster_target(target, active),
+                        stat,
+                        *multiplier,
+                        *duration_ticks,
+                        tick,
+                    );
                 }
                 _ => {
                     warn!("Unhandled OnEnd effect: {:?}", effect);
@@ -848,9 +976,16 @@ pub fn apply_on_input_effects(
                 AbilityEffect::Ability { id, target } => {
                     let target_entity = resolve_caster_target(target, active);
                     spawn_sub_ability(
-                        &mut commands, &ability_defs, id, target_entity,
-                        active.original_caster, active.ability_slot,
-                        active.depth, tick, &server_query, &player_id_query,
+                        &mut commands,
+                        &ability_defs,
+                        id,
+                        target_entity,
+                        active.original_caster,
+                        active.ability_slot,
+                        active.depth,
+                        tick,
+                        &server_query,
+                        &player_id_query,
                     );
                 }
                 _ => {
@@ -883,11 +1018,13 @@ fn apply_buff(
     tick: Tick,
 ) {
     let expires_tick = tick + duration_ticks as i16;
-    commands.entity(target_entity).insert(ActiveBuffs(vec![ActiveBuff {
-        stat: stat.to_string(),
-        multiplier,
-        expires_tick,
-    }]));
+    commands
+        .entity(target_entity)
+        .insert(ActiveBuffs(vec![ActiveBuff {
+            stat: stat.to_string(),
+            multiplier,
+            expires_tick,
+        }]));
 }
 
 /// Remove expired buffs each tick. Removes the ActiveBuffs component when empty.
@@ -927,7 +1064,12 @@ pub fn cleanup_effect_markers_on_removal(
 pub fn ability_projectile_spawn(
     mut commands: Commands,
     timeline: Single<&LocalTimeline, Without<ClientOf>>,
-    query: Query<(Entity, &ProjectileSpawnEffect, &ActiveAbility, Option<&OnHitEffects>)>,
+    query: Query<(
+        Entity,
+        &ProjectileSpawnEffect,
+        &ActiveAbility,
+        Option<&OnHitEffects>,
+    )>,
     caster_query: Query<(&Position, &Rotation)>,
     server_query: Query<&ControlledBy>,
 ) {
@@ -935,7 +1077,10 @@ pub fn ability_projectile_spawn(
 
     for (ability_entity, request, active, on_hit_effects) in &query {
         let Ok((position, rotation)) = caster_query.get(active.caster) else {
-            warn!("Projectile spawn: caster {:?} missing Position/Rotation", active.caster);
+            warn!(
+                "Projectile spawn: caster {:?} missing Position/Rotation",
+                active.caster
+            );
             continue;
         };
         let direction = facing_direction(rotation);
@@ -968,14 +1113,19 @@ pub fn ability_projectile_spawn(
             ));
         }
 
-        commands.entity(ability_entity).remove::<ProjectileSpawnEffect>();
+        commands
+            .entity(ability_entity)
+            .remove::<ProjectileSpawnEffect>();
     }
 }
 
 /// Spawn child bullet entities from `AbilityProjectileSpawn` parents.
 pub fn handle_ability_projectile_spawn(
     mut commands: Commands,
-    spawn_query: Query<(Entity, &AbilityProjectileSpawn, Option<&OnHitEffects>), Without<AbilityBullets>>,
+    spawn_query: Query<
+        (Entity, &AbilityProjectileSpawn, Option<&OnHitEffects>),
+        Without<AbilityBullets>,
+    >,
 ) {
     for (spawn_entity, spawn_info, on_hit_effects) in &spawn_query {
         info!("Spawning ability bullet from {:?}", spawn_info.ability_id);

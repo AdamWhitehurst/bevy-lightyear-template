@@ -94,7 +94,13 @@ pub(crate) fn on_invulnerable_added(
     fg_query: Query<&MeshMaterial3d<StandardMaterial>, With<HealthBarForeground>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    set_fg_color(trigger.entity, HEALTH_BAR_FG_INVULN, &children_query, &fg_query, &mut materials);
+    set_fg_color(
+        trigger.entity,
+        HEALTH_BAR_FG_INVULN,
+        &children_query,
+        &fg_query,
+        &mut materials,
+    );
 }
 
 pub(crate) fn on_invulnerable_removed(
@@ -103,7 +109,13 @@ pub(crate) fn on_invulnerable_removed(
     fg_query: Query<&MeshMaterial3d<StandardMaterial>, With<HealthBarForeground>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    set_fg_color(trigger.entity, HEALTH_BAR_FG_NORMAL, &children_query, &fg_query, &mut materials);
+    set_fg_color(
+        trigger.entity,
+        HEALTH_BAR_FG_NORMAL,
+        &children_query,
+        &fg_query,
+        &mut materials,
+    );
 }
 
 /// Walk character → HealthBarRoot children → HealthBarForeground grandchildren and set material color.
@@ -114,9 +126,13 @@ fn set_fg_color(
     fg_query: &Query<&MeshMaterial3d<StandardMaterial>, With<HealthBarForeground>>,
     materials: &mut Assets<StandardMaterial>,
 ) {
-    let Ok(children) = children_query.get(character) else { return };
+    let Ok(children) = children_query.get(character) else {
+        return;
+    };
     for &bar_root in children {
-        let Ok(grandchildren) = children_query.get(bar_root) else { continue };
+        let Ok(grandchildren) = children_query.get(bar_root) else {
+            continue;
+        };
         for &grandchild in grandchildren {
             if let Ok(handle) = fg_query.get(grandchild) {
                 if let Some(mat) = materials.get_mut(&handle.0) {

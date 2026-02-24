@@ -4,7 +4,10 @@ use leafwing_input_manager::prelude::ActionState;
 use lightyear::core::time::TickDelta;
 use lightyear::prelude::{ComponentRegistry, LocalTimeline, NetworkTimeline, PeerId, Server, Tick};
 use lightyear_replication::prespawn::PreSpawnedReceiver;
-use protocol::ability::{ActiveBuff, ActiveBuffs, ActiveShield, HitTargets, HitboxOf, MeleeHitbox, OnEndEffects, OnInputEffects};
+use protocol::ability::{
+    ActiveBuff, ActiveBuffs, ActiveShield, HitTargets, HitboxOf, MeleeHitbox, OnEndEffects,
+    OnInputEffects,
+};
 use protocol::{hit_detection, *};
 use std::collections::HashMap;
 
@@ -164,7 +167,9 @@ fn test_app() -> App {
 }
 
 fn spawn_timeline(world: &mut World, tick_value: u16) -> Entity {
-    let entity = world.spawn((LocalTimeline::default(), PreSpawnedReceiver::default())).id();
+    let entity = world
+        .spawn((LocalTimeline::default(), PreSpawnedReceiver::default()))
+        .id();
     let mut timeline = world.get_mut::<LocalTimeline>(entity).unwrap();
     timeline.apply_delta(TickDelta::from_i16(tick_value as i16));
     entity
@@ -228,7 +233,8 @@ fn activation_on_press() {
 
     app.update();
 
-    let (_, active) = find_active_ability(app.world_mut()).expect("ActiveAbility entity should exist");
+    let (_, active) =
+        find_active_ability(app.world_mut()).expect("ActiveAbility entity should exist");
     assert_eq!(active.def_id, AbilityId("punch".into()));
     assert_eq!(active.caster, char_entity);
 
@@ -435,22 +441,31 @@ fn on_hit_effects_dispatched_on_first_active_tick() {
     spawn_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
-    let ability_entity = app.world_mut().spawn(ActiveAbility {
-        def_id: AbilityId("punch".into()),
-        caster: char_entity,
-        original_caster: char_entity,
-        target: char_entity,
-        phase: AbilityPhase::Active,
-        phase_start_tick: Tick(200),
-        ability_slot: 0,
-        depth: 0,
-    }).id();
+    let ability_entity = app
+        .world_mut()
+        .spawn(ActiveAbility {
+            def_id: AbilityId("punch".into()),
+            caster: char_entity,
+            original_caster: char_entity,
+            target: char_entity,
+            phase: AbilityPhase::Active,
+            phase_start_tick: Tick(200),
+            ability_slot: 0,
+            depth: 0,
+        })
+        .id();
 
     app.update();
 
-    let on_hit = app.world().get::<OnHitEffects>(ability_entity)
+    let on_hit = app
+        .world()
+        .get::<OnHitEffects>(ability_entity)
         .expect("OnHitEffects should be present on first Active tick");
-    assert_eq!(on_hit.effects.len(), 2, "punch has 2 OnHit effects (Damage + ApplyForce)");
+    assert_eq!(
+        on_hit.effects.len(),
+        2,
+        "punch has 2 OnHit effects (Damage + ApplyForce)"
+    );
     assert_eq!(on_hit.caster, char_entity);
     assert_eq!(on_hit.original_caster, char_entity);
     assert_eq!(on_hit.depth, 0);
@@ -462,16 +477,19 @@ fn on_hit_effects_removed_on_recovery() {
     let timeline_entity = spawn_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
-    let ability_entity = app.world_mut().spawn(ActiveAbility {
-        def_id: AbilityId("punch3".into()),
-        caster: char_entity,
-        original_caster: char_entity,
-        target: char_entity,
-        phase: AbilityPhase::Active,
-        phase_start_tick: Tick(200),
-        ability_slot: 0,
-        depth: 0,
-    }).id();
+    let ability_entity = app
+        .world_mut()
+        .spawn(ActiveAbility {
+            def_id: AbilityId("punch3".into()),
+            caster: char_entity,
+            original_caster: char_entity,
+            target: char_entity,
+            phase: AbilityPhase::Active,
+            phase_start_tick: Tick(200),
+            ability_slot: 0,
+            depth: 0,
+        })
+        .id();
 
     // First update: dispatches markers (Active phase, tick 200)
     app.update();
@@ -482,7 +500,9 @@ fn on_hit_effects_removed_on_recovery() {
     app.update();
 
     // Now in Recovery — OnHitEffects should be removed
-    let active = app.world().get::<ActiveAbility>(ability_entity)
+    let active = app
+        .world()
+        .get::<ActiveAbility>(ability_entity)
         .expect("ActiveAbility should still exist in Recovery");
     assert_eq!(active.phase, AbilityPhase::Recovery);
     assert!(
@@ -510,11 +530,15 @@ fn melee_hitbox_entity_spawned() {
 
     app.update();
 
-    let hitbox = app.world_mut()
+    let hitbox = app
+        .world_mut()
         .query::<(Entity, &HitboxOf, &MeleeHitbox, &HitTargets)>()
         .iter(app.world())
         .next();
-    assert!(hitbox.is_some(), "Melee hitbox entity should be spawned with HitboxOf, MeleeHitbox, HitTargets");
+    assert!(
+        hitbox.is_some(),
+        "Melee hitbox entity should be spawned with HitboxOf, MeleeHitbox, HitTargets"
+    );
 }
 
 #[test]
@@ -536,12 +560,17 @@ fn hitbox_entity_has_correct_on_hit_effects() {
 
     app.update();
 
-    let hitbox_on_hit = app.world_mut()
+    let hitbox_on_hit = app
+        .world_mut()
         .query_filtered::<&OnHitEffects, With<HitboxOf>>()
         .iter(app.world())
         .next();
     let on_hit = hitbox_on_hit.expect("Hitbox entity should have OnHitEffects");
-    assert_eq!(on_hit.effects.len(), 2, "punch has 2 OnHit effects (Damage + ApplyForce)");
+    assert_eq!(
+        on_hit.effects.len(),
+        2,
+        "punch has 2 OnHit effects (Damage + ApplyForce)"
+    );
     assert_eq!(on_hit.caster, char_entity);
     assert_eq!(on_hit.original_caster, char_entity);
 }
@@ -616,10 +645,7 @@ fn on_end_effects_dispatched_on_active_to_recovery() {
 }
 
 fn count_active_abilities(world: &mut World) -> usize {
-    world
-        .query::<&ActiveAbility>()
-        .iter(world)
-        .count()
+    world.query::<&ActiveAbility>().iter(world).count()
 }
 
 #[test]
@@ -639,12 +665,10 @@ fn sub_ability_spawned_on_cast() {
                 active_ticks: 4,
                 recovery_ticks: 2,
                 cooldown_ticks: 0,
-                effects: vec![
-                    EffectTrigger::OnCast(AbilityEffect::Ability {
-                        id: "punch".into(),
-                        target: EffectTarget::Caster,
-                    }),
-                ],
+                effects: vec![EffectTrigger::OnCast(AbilityEffect::Ability {
+                    id: "punch".into(),
+                    target: EffectTarget::Caster,
+                })],
             },
         );
 
@@ -689,12 +713,10 @@ fn sub_ability_depth_limited() {
                 active_ticks: 4,
                 recovery_ticks: 2,
                 cooldown_ticks: 0,
-                effects: vec![
-                    EffectTrigger::OnCast(AbilityEffect::Ability {
-                        id: "punch".into(),
-                        target: EffectTarget::Caster,
-                    }),
-                ],
+                effects: vec![EffectTrigger::OnCast(AbilityEffect::Ability {
+                    id: "punch".into(),
+                    target: EffectTarget::Caster,
+                })],
             },
         );
 
@@ -741,8 +763,8 @@ fn sub_ability_phase_management() {
 
     app.update();
 
-    let (_, sub) = find_active_ability_for_def(app.world_mut(), "punch3")
-        .expect("punch3 should exist");
+    let (_, sub) =
+        find_active_ability_for_def(app.world_mut(), "punch3").expect("punch3 should exist");
     assert_eq!(sub.phase, AbilityPhase::Startup);
     assert_eq!(sub.depth, 1);
 
@@ -750,8 +772,8 @@ fn sub_ability_phase_management() {
     advance_timeline(app.world_mut(), timeline_entity, 4);
     app.update();
 
-    let (_, sub) = find_active_ability_for_def(app.world_mut(), "punch3")
-        .expect("punch3 should still exist");
+    let (_, sub) =
+        find_active_ability_for_def(app.world_mut(), "punch3").expect("punch3 should still exist");
     assert_eq!(sub.phase, AbilityPhase::Active);
 
     // Advance 6 more ticks: punch3 Active (6 ticks) completes → Recovery
@@ -769,26 +791,34 @@ fn on_input_effects_dispatched_during_active() {
     spawn_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
-    let ability_entity = app.world_mut().spawn(ActiveAbility {
-        def_id: AbilityId("punch".into()),
-        caster: char_entity,
-        original_caster: char_entity,
-        target: char_entity,
-        phase: AbilityPhase::Active,
-        phase_start_tick: Tick(200),
-        ability_slot: 0,
-        depth: 0,
-    }).id();
+    let ability_entity = app
+        .world_mut()
+        .spawn(ActiveAbility {
+            def_id: AbilityId("punch".into()),
+            caster: char_entity,
+            original_caster: char_entity,
+            target: char_entity,
+            phase: AbilityPhase::Active,
+            phase_start_tick: Tick(200),
+            ability_slot: 0,
+            depth: 0,
+        })
+        .id();
 
     app.update();
 
-    let on_input = app.world().get::<OnInputEffects>(ability_entity)
+    let on_input = app
+        .world()
+        .get::<OnInputEffects>(ability_entity)
         .expect("OnInputEffects should be present during Active phase");
     assert_eq!(on_input.0.len(), 1, "punch has 1 OnInput effect");
     assert_eq!(on_input.0[0].0, PlayerActions::Ability1);
     assert_eq!(
         on_input.0[0].1,
-        AbilityEffect::Ability { id: "punch2".into(), target: EffectTarget::Caster },
+        AbilityEffect::Ability {
+            id: "punch2".into(),
+            target: EffectTarget::Caster
+        },
     );
 }
 
@@ -798,16 +828,19 @@ fn on_input_effects_removed_on_recovery() {
     let timeline_entity = spawn_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
-    let ability_entity = app.world_mut().spawn(ActiveAbility {
-        def_id: AbilityId("punch".into()),
-        caster: char_entity,
-        original_caster: char_entity,
-        target: char_entity,
-        phase: AbilityPhase::Active,
-        phase_start_tick: Tick(200),
-        ability_slot: 0,
-        depth: 0,
-    }).id();
+    let ability_entity = app
+        .world_mut()
+        .spawn(ActiveAbility {
+            def_id: AbilityId("punch".into()),
+            caster: char_entity,
+            original_caster: char_entity,
+            target: char_entity,
+            phase: AbilityPhase::Active,
+            phase_start_tick: Tick(200),
+            ability_slot: 0,
+            depth: 0,
+        })
+        .id();
 
     // First update: Active phase, OnInputEffects dispatched
     app.update();
@@ -964,11 +997,7 @@ fn teleport_moves_caster() {
         .get::<avian3d::prelude::Position>(char_entity)
         .unwrap();
     // Default Rotation faces NEG_Z, so teleport should move to ~(0, 0, -10)
-    assert!(
-        (pos.0.x).abs() < 0.01,
-        "X should be ~0, got {}",
-        pos.0.x
-    );
+    assert!((pos.0.x).abs() < 0.01, "X should be ~0, got {}", pos.0.x);
     assert!(
         (pos.0.z - (-10.0)).abs() < 0.01,
         "Z should be ~-10, got {}",
@@ -1052,7 +1081,10 @@ fn shield_absorbs_damage() {
     assert_eq!(shield.remaining, 20.0);
 
     let health = app.world().get::<Health>(target).unwrap();
-    assert_eq!(health.current, 100.0, "Health should be untouched when shield absorbs all damage");
+    assert_eq!(
+        health.current, 100.0,
+        "Health should be untouched when shield absorbs all damage"
+    );
 }
 
 #[test]
@@ -1130,7 +1162,10 @@ fn shield_overflow_damages_health() {
 
     // Health takes overflow: 100 - (50 - 20) = 70
     let health = app.world().get::<Health>(target).unwrap();
-    assert_eq!(health.current, 70.0, "Health should take overflow damage past shield");
+    assert_eq!(
+        health.current, 70.0,
+        "Health should take overflow damage past shield"
+    );
 }
 
 #[test]
@@ -1189,13 +1224,13 @@ fn buff_expires_after_duration() {
     let timeline_entity = spawn_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
-    app.world_mut().entity_mut(char_entity).insert(ActiveBuffs(vec![
-        ActiveBuff {
+    app.world_mut()
+        .entity_mut(char_entity)
+        .insert(ActiveBuffs(vec![ActiveBuff {
             stat: "speed".into(),
             multiplier: 1.5,
             expires_tick: Tick(210),
-        },
-    ]));
+        }]));
 
     // At tick 200: buff should still exist (expires at 210)
     app.update();

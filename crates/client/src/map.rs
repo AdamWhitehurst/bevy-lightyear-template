@@ -12,16 +12,18 @@ pub struct ClientMapPlugin;
 
 impl Plugin for ClientMapPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(VoxelWorldPlugin::<MapWorld>::with_config(MapWorld::default()))
-            .add_systems(
-                Update,
-                (
-                    handle_voxel_broadcasts,
-                    handle_state_sync,
-                    protocol::attach_chunk_colliders,
-                    handle_voxel_input,
-                ),
-            );
+        app.add_plugins(VoxelWorldPlugin::<MapWorld>::with_config(
+            MapWorld::default(),
+        ))
+        .add_systems(
+            Update,
+            (
+                handle_voxel_broadcasts,
+                handle_state_sync,
+                protocol::attach_chunk_colliders,
+                handle_voxel_input,
+            ),
+        );
     }
 }
 

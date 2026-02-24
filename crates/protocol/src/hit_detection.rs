@@ -85,7 +85,12 @@ pub fn process_hitbox_hits(
         &Position,
     )>,
     mut target_query: Query<
-        (&Position, &mut LinearVelocity, &mut Health, Option<&Invulnerable>),
+        (
+            &Position,
+            &mut LinearVelocity,
+            &mut Health,
+            Option<&Invulnerable>,
+        ),
         With<CharacterMarker>,
     >,
     mut shield_query: Query<&mut ActiveShield>,
@@ -144,7 +149,10 @@ pub fn process_projectile_hits(
     timeline: Single<&LocalTimeline, Without<ClientOf>>,
     server_query: Query<&ControlledBy>,
     player_id_query: Query<&PlayerId>,
-    bullet_query: Query<(Entity, &CollidingEntities, &OnHitEffects, &Position), With<AbilityBulletOf>>,
+    bullet_query: Query<
+        (Entity, &CollidingEntities, &OnHitEffects, &Position),
+        With<AbilityBulletOf>,
+    >,
     mut target_query: Query<
         (
             &Position,

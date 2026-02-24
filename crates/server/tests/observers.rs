@@ -1,6 +1,6 @@
 use bevy::prelude::*;
-use lightyear::prelude::*;
 use lightyear::prelude::server::*;
+use lightyear::prelude::*;
 use protocol::FIXED_TIMESTEP_HZ;
 use std::time::Duration;
 
@@ -10,17 +10,11 @@ struct ObserverTestState {
     client_disconnected: bool,
 }
 
-fn on_client_connected(
-    _trigger: On<Add, Connected>,
-    mut state: ResMut<ObserverTestState>,
-) {
+fn on_client_connected(_trigger: On<Add, Connected>, mut state: ResMut<ObserverTestState>) {
     state.client_connected = true;
 }
 
-fn on_client_disconnected(
-    _trigger: On<Add, Disconnected>,
-    mut state: ResMut<ObserverTestState>,
-) {
+fn on_client_disconnected(_trigger: On<Add, Disconnected>, mut state: ResMut<ObserverTestState>) {
     state.client_disconnected = true;
 }
 

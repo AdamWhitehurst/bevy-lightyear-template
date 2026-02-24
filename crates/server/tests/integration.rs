@@ -212,7 +212,9 @@ fn collect_events<E: Event + Debug + Clone>(
         .mapping
         .get(&trigger.event().from)
         .expect("Remote entity should be in peer metadata");
-    buffer.events.push((remote, trigger.event().trigger.clone()));
+    buffer
+        .events
+        .push((remote, trigger.event().trigger.clone()));
 }
 
 /// Integration test using UDP transport to validate connection establishment

@@ -1,7 +1,7 @@
 use bevy::prelude::*;
-use lightyear::prelude::*;
 use lightyear::prelude::server::*;
-use protocol::{FIXED_TIMESTEP_HZ, PROTOCOL_ID, PRIVATE_KEY};
+use lightyear::prelude::*;
+use protocol::{FIXED_TIMESTEP_HZ, PRIVATE_KEY, PROTOCOL_ID};
 use std::time::Duration;
 
 #[test]
@@ -19,12 +19,15 @@ fn test_server_started() {
         ..default()
     };
 
-    let server_entity = app.world_mut().spawn((
-        Name::new("Test Server"),
-        NetcodeServer::new(netcode_config),
-        LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 0))),
-        ServerUdpIo::default(),
-    )).id();
+    let server_entity = app
+        .world_mut()
+        .spawn((
+            Name::new("Test Server"),
+            NetcodeServer::new(netcode_config),
+            LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 0))),
+            ServerUdpIo::default(),
+        ))
+        .id();
 
     // Trigger Start event
     app.world_mut().trigger(Start {
@@ -34,7 +37,10 @@ fn test_server_started() {
     app.update();
 
     // Verify Started component present
-    assert!(app.world().get::<Started>(server_entity).is_some(), "Server should have Started component");
+    assert!(
+        app.world().get::<Started>(server_entity).is_some(),
+        "Server should have Started component"
+    );
 }
 
 // NOTE: Full client-server connection test with crossbeam requires lightyear "test_utils" feature
@@ -58,12 +64,15 @@ fn test_client_server_connection() {
         ..default()
     };
 
-    let server_entity = server_app.world_mut().spawn((
-        Name::new("Test Server"),
-        NetcodeServer::new(netcode_config),
-        LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 0))),
-        ServerUdpIo::default(),
-    )).id();
+    let server_entity = server_app
+        .world_mut()
+        .spawn((
+            Name::new("Test Server"),
+            NetcodeServer::new(netcode_config),
+            LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 0))),
+            ServerUdpIo::default(),
+        ))
+        .id();
 
     server_app.world_mut().trigger(Start {
         entity: server_entity,
