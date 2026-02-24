@@ -6,8 +6,8 @@ use lightyear::prelude::{ControlledBy, LocalTimeline, NetworkTimeline, Tick};
 
 use crate::ability::{
     facing_direction, spawn_sub_ability, AbilityBulletOf, AbilityDefs, AbilityEffect, AbilityPhase,
-    ActiveAbility, ActiveBuffs, ActiveShield, EffectTarget, HitTargets, HitboxOf, MeleeHitbox,
-    OnHitEffects,
+    ActiveAbility, ActiveBuffs, ActiveShield, EffectTarget, ForceFrame, HitTargets, HitboxOf,
+    MeleeHitbox, OnHitEffects,
 };
 use crate::{CharacterMarker, Health, Invulnerable, PlayerId};
 
@@ -95,6 +95,7 @@ pub fn process_hitbox_hits(
     >,
     mut shield_query: Query<&mut ActiveShield>,
     buff_query: Query<&ActiveBuffs>,
+    rotation_query: Query<&Rotation>,
 ) {
     let tick = timeline.tick();
     for (colliding, on_hit, mut hit_targets, hitbox_pos) in &mut hitbox_query {
@@ -120,6 +121,7 @@ pub fn process_hitbox_hits(
                 &mut target_query,
                 &mut shield_query,
                 &buff_query,
+                &rotation_query,
             );
         }
     }
@@ -164,6 +166,7 @@ pub fn process_projectile_hits(
     >,
     mut shield_query: Query<&mut ActiveShield>,
     buff_query: Query<&ActiveBuffs>,
+    rotation_query: Query<&Rotation>,
 ) {
     let tick = timeline.tick();
     for (bullet, colliding, on_hit, bullet_pos) in &bullet_query {
@@ -186,6 +189,7 @@ pub fn process_projectile_hits(
                 &mut target_query,
                 &mut shield_query,
                 &buff_query,
+                &rotation_query,
             );
             commands.entity(bullet).try_despawn();
             break;
@@ -215,6 +219,33 @@ fn apply_damage_buffs(base: f32, caster: Entity, buff_query: &Query<&ActiveBuffs
     base * multiplier
 }
 
+fn resolve_force_frame(
+    force: Vec3,
+    frame: &ForceFrame,
+    caster_pos: Vec3,
+    victim_pos: Vec3,
+    caster: Entity,
+    victim: Entity,
+    rotation_query: &Query<&Rotation>,
+) -> Vec3 {
+    match frame {
+        ForceFrame::World => force,
+        ForceFrame::Caster => rotation_query.get(caster).map(|r| r.0).unwrap_or_default() * force,
+        ForceFrame::Victim => rotation_query.get(victim).map(|r| r.0).unwrap_or_default() * force,
+        ForceFrame::RelativePosition => {
+            let forward = (victim_pos - caster_pos).normalize_or(Vec3::Z);
+            let right = Vec3::Y.cross(forward).normalize_or(Vec3::X);
+            let up = forward.cross(right);
+            Quat::from_mat3(&Mat3::from_cols(right, up, forward)) * force
+        }
+        ForceFrame::RelativeRotation => {
+            let cr = rotation_query.get(caster).map(|r| r.0).unwrap_or_default();
+            let vr = rotation_query.get(victim).map(|r| r.0).unwrap_or_default();
+            (vr * cr.inverse()) * force
+        }
+    }
+}
+
 fn apply_on_hit_effects(
     commands: &mut Commands,
     ability_defs: &AbilityDefs,
@@ -235,6 +266,7 @@ fn apply_on_hit_effects(
     >,
     shield_query: &mut Query<&mut ActiveShield>,
     buff_query: &Query<&ActiveBuffs>,
+    rotation_query: &Query<&Rotation>,
 ) {
     for effect in &on_hit.effects {
         match effect {
@@ -260,16 +292,25 @@ fn apply_on_hit_effects(
                     warn!("Damage target {:?} not found", entity);
                 }
             }
-            AbilityEffect::ApplyForce { force, target } => {
+            AbilityEffect::ApplyForce {
+                force,
+                frame,
+                target,
+            } => {
                 let entity = resolve_on_hit_target(target, victim, on_hit);
                 if let Ok((target_pos, mut velocity, _, _)) = target_query.get_mut(entity) {
-                    let horizontal = (target_pos.0 - source_pos).with_y(0.0);
-                    let direction = if horizontal.length() > 0.01 {
-                        (horizontal.normalize() + Vec3::Y * 0.3).normalize()
-                    } else {
-                        Vec3::Y
-                    };
-                    velocity.0 += direction * *force;
+                    let world_force = resolve_force_frame(
+                        *force,
+                        frame,
+                        source_pos,
+                        target_pos.0,
+                        on_hit.caster,
+                        entity,
+                        rotation_query,
+                    );
+                    velocity.0 += world_force;
+                } else {
+                    warn!("ApplyForce target {:?} not found", entity);
                 }
             }
             AbilityEffect::Ability { id, target } => {

@@ -30,7 +30,8 @@ fn test_defs() -> HashMap<AbilityId, AbilityDef> {
                     target: EffectTarget::Victim,
                 }),
                 EffectTrigger::OnHit(AbilityEffect::ApplyForce {
-                    force: 3.0,
+                    force: Vec3::new(0.0, 0.9, 2.85),
+                    frame: ForceFrame::RelativePosition,
                     target: EffectTarget::Victim,
                 }),
                 EffectTrigger::OnInput {
@@ -60,7 +61,8 @@ fn test_defs() -> HashMap<AbilityId, AbilityDef> {
                     target: EffectTarget::Victim,
                 }),
                 EffectTrigger::OnHit(AbilityEffect::ApplyForce {
-                    force: 3.5,
+                    force: Vec3::new(0.0, 1.05, 3.32),
+                    frame: ForceFrame::RelativePosition,
                     target: EffectTarget::Victim,
                 }),
                 EffectTrigger::OnInput {
@@ -90,7 +92,8 @@ fn test_defs() -> HashMap<AbilityId, AbilityDef> {
                     target: EffectTarget::Victim,
                 }),
                 EffectTrigger::OnHit(AbilityEffect::ApplyForce {
-                    force: 8.0,
+                    force: Vec3::new(0.0, 2.4, 7.65),
+                    frame: ForceFrame::RelativePosition,
                     target: EffectTarget::Victim,
                 }),
             ],
@@ -127,7 +130,8 @@ fn test_defs() -> HashMap<AbilityId, AbilityDef> {
                     target: EffectTarget::Victim,
                 }),
                 EffectTrigger::OnHit(AbilityEffect::ApplyForce {
-                    force: 8.0,
+                    force: Vec3::new(0.0, 2.4, 7.65),
+                    frame: ForceFrame::RelativePosition,
                     target: EffectTarget::Victim,
                 }),
             ],
@@ -880,6 +884,7 @@ fn spawn_target(world: &mut World, pos: Vec3) -> Entity {
             CharacterMarker,
             Health::new(100.0),
             avian3d::prelude::Position(pos),
+            avian3d::prelude::Rotation::default(),
             avian3d::prelude::LinearVelocity(Vec3::ZERO),
         ))
         .id()
@@ -1322,5 +1327,184 @@ fn buff_increases_damage() {
     assert_eq!(
         health.current, 80.0,
         "10 base damage * 2.0 buff = 20 effective damage; 100 - 20 = 80 HP"
+    );
+}
+
+fn assert_vec3_approx(actual: Vec3, expected: Vec3, msg: &str) {
+    let diff = (actual - expected).length();
+    assert!(
+        diff < 1e-4,
+        "{msg}: expected {expected:?}, got {actual:?} (diff {diff})"
+    );
+}
+
+/// Apply an `ApplyForce` effect via an AoE hitbox and return the resulting velocity of the target.
+fn run_force_test(
+    force: Vec3,
+    frame: ForceFrame,
+    caster_rotation: Quat,
+    target_pos: Vec3,
+    target_rotation: Quat,
+) -> Vec3 {
+    let mut app = test_app_with_hit_detection();
+    let timeline_entity = spawn_timeline(app.world_mut(), 200);
+    let caster = spawn_character(app.world_mut());
+    let target = spawn_target(app.world_mut(), target_pos);
+
+    app.world_mut()
+        .get_mut::<avian3d::prelude::Rotation>(caster)
+        .unwrap()
+        .0 = caster_rotation;
+    app.world_mut()
+        .get_mut::<avian3d::prelude::Rotation>(target)
+        .unwrap()
+        .0 = target_rotation;
+
+    app.world_mut()
+        .resource_mut::<AbilityDefs>()
+        .abilities
+        .insert(
+            AbilityId("force_test".into()),
+            AbilityDef {
+                startup_ticks: 0,
+                active_ticks: 1,
+                recovery_ticks: 4,
+                cooldown_ticks: 0,
+                effects: vec![
+                    EffectTrigger::OnCast(AbilityEffect::AreaOfEffect {
+                        id: None,
+                        target: EffectTarget::Caster,
+                        radius: 10.0,
+                    }),
+                    EffectTrigger::OnHit(AbilityEffect::ApplyForce {
+                        force,
+                        frame,
+                        target: EffectTarget::Victim,
+                    }),
+                ],
+            },
+        );
+
+    app.world_mut().spawn(ActiveAbility {
+        def_id: AbilityId("force_test".into()),
+        caster,
+        original_caster: caster,
+        target: caster,
+        phase: AbilityPhase::Active,
+        phase_start_tick: Tick(200),
+        ability_slot: 0,
+        depth: 0,
+    });
+
+    // Update 1: dispatch markers + spawn AoE hitbox
+    app.update();
+
+    let hitbox_entity = app
+        .world_mut()
+        .query_filtered::<Entity, With<HitboxOf>>()
+        .iter(app.world())
+        .next()
+        .expect("AoE hitbox should exist");
+
+    app.world_mut()
+        .get_mut::<CollidingEntities>(hitbox_entity)
+        .unwrap()
+        .insert(target);
+
+    advance_timeline(app.world_mut(), timeline_entity, 1);
+
+    // Update 2: process hit → apply force
+    app.update();
+
+    app.world()
+        .get::<avian3d::prelude::LinearVelocity>(target)
+        .unwrap()
+        .0
+}
+
+#[test]
+fn force_frame_world() {
+    // Caster and victim have arbitrary rotations — World frame ignores both.
+    let vel = run_force_test(
+        Vec3::new(1.0, 0.0, 0.0),
+        ForceFrame::World,
+        Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+        Vec3::new(3.0, 0.0, 0.0),
+        Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+    );
+    assert_vec3_approx(
+        vel,
+        Vec3::new(1.0, 0.0, 0.0),
+        "World frame: force applied verbatim",
+    );
+}
+
+#[test]
+fn force_frame_caster() {
+    // Caster rotated 90° around Y: local +X maps to world -Z.
+    let vel = run_force_test(
+        Vec3::new(1.0, 0.0, 0.0),
+        ForceFrame::Caster,
+        Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+        Vec3::new(3.0, 0.0, 0.0),
+        Quat::IDENTITY,
+    );
+    assert_vec3_approx(
+        vel,
+        Vec3::new(0.0, 0.0, -1.0),
+        "Caster frame: rotated by caster rotation",
+    );
+}
+
+#[test]
+fn force_frame_victim() {
+    // Victim rotated 90° around Y: local +X maps to world -Z.
+    let vel = run_force_test(
+        Vec3::new(1.0, 0.0, 0.0),
+        ForceFrame::Victim,
+        Quat::IDENTITY,
+        Vec3::new(3.0, 0.0, 0.0),
+        Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+    );
+    assert_vec3_approx(
+        vel,
+        Vec3::new(0.0, 0.0, -1.0),
+        "Victim frame: rotated by victim rotation",
+    );
+}
+
+#[test]
+fn force_frame_relative_position() {
+    // Victim directly in +X from source. The RelativePosition frame maps +Z → world +X.
+    // Force (0, 0, 1) = "push toward victim" → world +X.
+    let vel = run_force_test(
+        Vec3::new(0.0, 0.0, 1.0),
+        ForceFrame::RelativePosition,
+        Quat::IDENTITY,
+        Vec3::new(5.0, 0.0, 0.0),
+        Quat::IDENTITY,
+    );
+    assert_vec3_approx(
+        vel,
+        Vec3::new(1.0, 0.0, 0.0),
+        "RelativePosition: +Z maps to caster→victim direction",
+    );
+}
+
+#[test]
+fn force_frame_relative_rotation() {
+    // Caster identity, victim 90°Y: relative = victim * caster.inverse() = 90°Y.
+    // 90°Y * Vec3::X = Vec3::NEG_Z.
+    let vel = run_force_test(
+        Vec3::new(1.0, 0.0, 0.0),
+        ForceFrame::RelativeRotation,
+        Quat::IDENTITY,
+        Vec3::new(3.0, 0.0, 0.0),
+        Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+    );
+    assert_vec3_approx(
+        vel,
+        Vec3::new(0.0, 0.0, -1.0),
+        "RelativeRotation: victim_rot * caster_rot.inverse() * force",
     );
 }

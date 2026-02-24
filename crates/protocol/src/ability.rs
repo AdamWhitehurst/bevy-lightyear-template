@@ -46,6 +46,36 @@ pub enum EffectTarget {
     OriginalCaster,
 }
 
+/// Coordinate frame used to interpret a force vector in [`AbilityEffect::ApplyForce`].
+///
+/// Given `force = Vec3::new(0.0, -10.0, 10.0)` ("back and up"):
+///
+/// - [`World`]: applied as `(0, -10, 10)` in global space. Neither body's rotation matters.
+/// - [`Caster`]: `caster_rotation * (0, -10, 10)`. "Away from where the caster faces, upward
+///   relative to the caster." Rotates with the caster; victim orientation is irrelevant.
+/// - [`Victim`]: `victim_rotation * (0, -10, 10)`. "Backward and up from the victim's own
+///   perspective." Rotates with the victim; caster orientation is irrelevant.
+/// - [`RelativePosition`]: frame built from the caster→victim displacement. +Z points toward
+///   the victim, +Y is world up, +X is the right-hand cross product. Useful for "push target
+///   away from me" regardless of either body's facing direction.
+/// - [`RelativeRotation`]: `(victim_rotation * caster_rotation.inverse()) * force`. Captures
+///   how rotationally misaligned the two bodies are; the result changes only when their
+///   relative orientation changes.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, Reflect)]
+pub enum ForceFrame {
+    /// Force in global (world) space.
+    #[default]
+    World,
+    /// Force in the caster's local space — rotates with the caster.
+    Caster,
+    /// Force in the victim's local space — rotates with the victim.
+    Victim,
+    /// Force in a frame where +Z is the caster-to-victim direction and +Y is world up.
+    RelativePosition,
+    /// Force scaled by `victim_rotation * caster_rotation.inverse()`.
+    RelativeRotation,
+}
+
 /// What an ability does when it activates.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
 pub enum AbilityEffect {
@@ -70,7 +100,9 @@ pub enum AbilityEffect {
         target: EffectTarget,
     },
     ApplyForce {
-        force: f32,
+        force: Vec3,
+        #[serde(default)]
+        frame: ForceFrame,
         target: EffectTarget,
     },
     AreaOfEffect {

@@ -16,7 +16,7 @@ pub use ability::{
     ability_action_to_slot, AbilityBulletOf, AbilityBullets, AbilityCooldowns, AbilityDef,
     AbilityDefs, AbilityDefsAsset, AbilityEffect, AbilityId, AbilityPhase, AbilityPlugin,
     AbilityProjectileSpawn, AbilitySlots, ActiveAbility, ActiveBuff, ActiveBuffs, ActiveShield,
-    EffectTarget, EffectTrigger, OnHitEffects, ProjectileSpawnEffect,
+    EffectTarget, EffectTrigger, ForceFrame, OnHitEffects, ProjectileSpawnEffect,
 };
 pub use app_state::{AppState, AppStatePlugin, TrackedAssets};
 pub use hit_detection::{

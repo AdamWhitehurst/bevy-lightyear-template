@@ -8,7 +8,7 @@
             effects: [
                 OnCast(Melee()),
                 OnHit(Damage(amount: 5.0, target: Victim)),
-                OnHit(ApplyForce(force: 3.0, target: Victim)),
+                OnHit(ApplyForce(force: (0.0, 0.9, 2.85), frame: RelativePosition, target: Victim)),
                 OnInput(action: Ability1, effect: Ability(id: "punch2", target: Caster)),
             ],
         ),
@@ -20,7 +20,7 @@
             effects: [
                 OnCast(Melee()),
                 OnHit(Damage(amount: 6.0, target: Victim)),
-                OnHit(ApplyForce(force: 3.5, target: Victim)),
+                OnHit(ApplyForce(force: (0.0, 1.05, 3.32), frame: RelativePosition, target: Victim)),
                 OnInput(action: Ability1, effect: Ability(id: "punch3", target: Caster)),
             ],
         ),
@@ -32,7 +32,7 @@
             effects: [
                 OnCast(Melee()),
                 OnHit(Damage(amount: 10.0, target: Victim)),
-                OnHit(ApplyForce(force: 8.0, target: Victim)),
+                OnHit(ApplyForce(force: (0.0, 2.4, 7.65), frame: RelativePosition, target: Victim)),
             ],
         ),
         "dash": (
@@ -55,7 +55,7 @@
             effects: [
                 OnCast(Projectile(speed: 20.0, lifetime_ticks: 192)),
                 OnHit(Damage(amount: 25.0, target: Victim)),
-                OnHit(ApplyForce(force: 8.0, target: Victim)),
+                OnHit(ApplyForce(force: (0.0, 2.4, 7.65), frame: RelativePosition, target: Victim)),
             ],
         ),
         "ground_pound": (
@@ -66,7 +66,7 @@
             effects: [
                 OnCast(AreaOfEffect( target: Victim, radius: 5.0)),
                 OnHit(Damage(amount: 25.0, target: Victim)),
-                OnHit(ApplyForce(force: 8.0, target: Victim)),
+                OnHit(ApplyForce(force: (0.0, 8.0, 0.0), frame: World, target: Victim)),
             ],
         )
     },
