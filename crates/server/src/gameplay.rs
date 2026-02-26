@@ -171,9 +171,9 @@ fn handle_connected(
         Health::new(100.0),
         ChunkRenderTarget::<MapWorld>::default(),
         AbilitySlots([
-            Some(AbilityId("punch".into())),
-            Some(AbilityId("dash".into())),
-            Some(AbilityId("ground_pound".into())),
+            Some(AbilityId("dive_kick".into())),
+            Some(AbilityId("speed_burst".into())),
+            Some(AbilityId("shockwave".into())),
             None,
         ]),
         AbilityCooldowns::default(),

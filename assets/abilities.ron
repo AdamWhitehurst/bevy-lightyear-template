@@ -68,6 +68,95 @@
                 OnHit(Damage(amount: 25.0, target: Victim)),
                 OnHit(ApplyForce(force: (0.0, 8.0, 0.0), frame: World, target: Victim)),
             ],
-        )
+        ),
+        "blink_strike": (
+            startup_ticks: 3,
+            active_ticks: 4,
+            recovery_ticks: 10,
+            cooldown_ticks: 28,
+            effects: [
+                OnCast(Teleport(distance: 6.0)),
+                OnCast(Melee()),
+                OnHit(Damage(amount: 18.0, target: Victim)),
+                OnHit(ApplyForce(force: (0.0, 1.2, 4.0), frame: RelativePosition, target: Victim)),
+            ],
+        ),
+        "uppercut": (
+            startup_ticks: 6,
+            active_ticks: 8,
+            recovery_ticks: 12,
+            cooldown_ticks: 20,
+            effects: [
+                OnCast(Melee()),
+                OnHit(Damage(amount: 12.0, target: Victim)),
+                OnHit(ApplyForce(force: (0.0, 14.0, 0.0), frame: World, target: Victim)),
+            ],
+        ),
+        "shield_bash": (
+            startup_ticks: 8,
+            active_ticks: 6,
+            recovery_ticks: 10,
+            cooldown_ticks: 36,
+            effects: [
+                OnCast(Shield(absorb: 25.0)),
+                OnCast(Melee()),
+                OnHit(Damage(amount: 8.0, target: Victim)),
+                OnHit(ApplyForce(force: (0.0, 1.0, 5.5), frame: RelativePosition, target: Victim)),
+            ],
+        ),
+        "shockwave": (
+            startup_ticks: 10,
+            active_ticks: 6,
+            recovery_ticks: 12,
+            cooldown_ticks: 50,
+            effects: [
+                OnCast(AreaOfEffect(radius: 7.0, duration_ticks: Some(6), target: Victim)),
+                OnHit(Damage(amount: 10.0, target: Victim)),
+                OnHit(ApplyForce(force: (0.0, 1.5, 8.0), frame: RelativePosition, target: Victim)),
+            ],
+        ),
+        "dive_kick": (
+            startup_ticks: 2,
+            active_ticks: 10,
+            recovery_ticks: 6,
+            cooldown_ticks: 24,
+            effects: [
+                WhileActive(SetVelocity(speed: 18.0, target: Caster)),
+                OnCast(Melee()),
+                OnHit(Damage(amount: 14.0, target: Victim)),
+                OnHit(ApplyForce(force: (0.0, 0.5, 3.0), frame: RelativePosition, target: Victim)),
+            ],
+        ),
+        "speed_burst": (
+            startup_ticks: 1,
+            active_ticks: 20,
+            recovery_ticks: 6,
+            cooldown_ticks: 60,
+            effects: [
+                OnCast(Buff(stat: "speed", multiplier: 2.5, duration_ticks: 60, target: Caster)),
+                WhileActive(SetVelocity(speed: 20.0, target: Caster)),
+            ],
+        ),
+        "barrier": (
+            startup_ticks: 4,
+            active_ticks: 4,
+            recovery_ticks: 8,
+            cooldown_ticks: 80,
+            effects: [
+                OnCast(Shield(absorb: 60.0)),
+            ],
+        ),
+        "teleport_burst": (
+            startup_ticks: 4,
+            active_ticks: 8,
+            recovery_ticks: 10,
+            cooldown_ticks: 45,
+            effects: [
+                OnCast(Teleport(distance: 7.0)),
+                OnCast(AreaOfEffect(radius: 3.5, duration_ticks: Some(8), target: Victim)),
+                OnHit(Damage(amount: 20.0, target: Victim)),
+                OnHit(ApplyForce(force: (0.0, 2.0, 5.0), frame: RelativePosition, target: Victim)),
+            ],
+        ),
     },
 )
