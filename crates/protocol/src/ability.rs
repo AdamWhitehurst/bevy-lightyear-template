@@ -207,7 +207,8 @@ impl AbilityDefs {
 }
 
 /// Per-character ability loadout (up to 4 slots).
-#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize, Asset, TypePath)]
+#[type_path = "protocol::ability"]
 pub struct AbilitySlots(pub [Option<AbilityId>; 4]);
 
 impl Default for AbilitySlots {
@@ -371,12 +372,18 @@ pub struct AbilityBullets(Vec<Entity>);
 #[derive(Resource)]
 struct AbilityDefsHandle(Handle<AbilityDefsAsset>);
 
+/// Resource holding the handle for the global default ability slots asset.
+/// Consumers resolve the current value via `Assets<AbilitySlots>`.
+#[derive(Resource)]
+pub struct DefaultAbilitySlots(pub Handle<AbilitySlots>);
+
 pub struct AbilityPlugin;
 
 impl Plugin for AbilityPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(RonAssetPlugin::<AbilityDefsAsset>::new(&["abilities.ron"]));
-        app.add_systems(Startup, load_ability_defs);
+        app.add_plugins(RonAssetPlugin::<AbilitySlots>::new(&["ability_slots.ron"]));
+        app.add_systems(Startup, (load_ability_defs, load_default_ability_slots));
         app.add_systems(Update, (insert_ability_defs, reload_ability_defs));
     }
 }
@@ -437,6 +444,16 @@ fn reload_ability_defs(
     }
 }
 
+fn load_default_ability_slots(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut tracked: ResMut<crate::app_state::TrackedAssets>,
+) {
+    let handle = asset_server.load::<AbilitySlots>("default.ability_slots.ron");
+    tracked.add(handle.clone());
+    commands.insert_resource(DefaultAbilitySlots(handle));
+}
+
 /// Maps a `PlayerActions` ability variant to a slot index (0-3).
 pub fn ability_action_to_slot(action: &PlayerActions) -> Option<usize> {
     ABILITY_ACTIONS.iter().position(|a| a == action)
@@ -451,19 +468,25 @@ pub fn slot_to_ability_action(slot: usize) -> Option<PlayerActions> {
 pub fn ability_activation(
     mut commands: Commands,
     ability_defs: Res<AbilityDefs>,
+    default_slots: Res<DefaultAbilitySlots>,
+    ability_slots_assets: Res<Assets<AbilitySlots>>,
     timeline: Single<&LocalTimeline, Without<ClientOf>>,
     mut query: Query<(
         Entity,
         &ActionState<PlayerActions>,
-        &AbilitySlots,
+        Option<&AbilitySlots>,
         &mut AbilityCooldowns,
         &PlayerId,
     )>,
     server_query: Query<&ControlledBy>,
 ) {
     let tick = timeline.tick();
+    let default = ability_slots_assets
+        .get(&default_slots.0)
+        .expect("default.ability_slots.ron not loaded");
 
-    for (entity, action_state, slots, mut cooldowns, player_id) in &mut query {
+    for (entity, action_state, slots_opt, mut cooldowns, player_id) in &mut query {
+        let slots = slots_opt.unwrap_or(default);
         for (slot_idx, action) in ABILITY_ACTIONS.iter().enumerate() {
             if !action_state.just_pressed(action) {
                 continue;

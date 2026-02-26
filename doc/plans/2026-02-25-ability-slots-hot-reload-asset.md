@@ -115,7 +115,7 @@ fn load_default_ability_slots(
 ### Success Criteria
 
 #### Automated Verification
-- [ ] `cargo check-all` compiles without errors
+- [x] `cargo check-all` compiles without errors
 
 ---
 
@@ -162,7 +162,7 @@ pub fn ability_activation(
 ### Success Criteria
 
 #### Automated Verification
-- [ ] `cargo check-all` compiles without errors
+- [x] `cargo check-all` compiles without errors
 
 ---
 
@@ -191,8 +191,8 @@ Check if `AbilitySlots` import is still needed in `server/src/gameplay.rs` after
 ### Success Criteria
 
 #### Automated Verification
-- [ ] `cargo check-all` compiles without errors
-- [ ] `cargo server` starts without panic
+- [x] `cargo check-all` compiles without errors
+- [x] `cargo server` starts without panic
 
 #### Manual Verification
 - [ ] Connect a client; character can activate abilities using the default slots from `default.ability_slots.ron`
