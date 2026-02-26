@@ -1,0 +1,6 @@
+- hot-reloaded player ability slots
+- delay ability effect
+- buff stat modifiers
+- multiple map 'rooms?'
+- meaningful proc gen terrain
+- prefab world objects 'doodads?'
