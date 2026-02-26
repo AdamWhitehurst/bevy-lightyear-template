@@ -115,7 +115,15 @@ pub enum AbilityEffect {
         #[serde(default)]
         duration_ticks: Option<u16>,
     },
-    /// Spawn a sub-ability. Enables recursive ability composition.
+    /// Spawn a sub-ability as an independent `ActiveAbility` entity.
+    ///
+    /// The sub-ability goes through its own full phase cycle (Startup → Active → Recovery).
+    /// **Latency**: adds at minimum 1 tick before the sub-ability's effects fire, because
+    /// the spawned entity is created via `Commands` and won't be processed by
+    /// `update_active_abilities` until the next tick.
+    ///
+    /// For same-tick sequencing, use multiple `OnTick` effects on the parent ability instead.
+    /// Reserve `Ability` for when you need independent phase cycles or different `OnHit` effects.
     Ability {
         id: String,
         target: EffectTarget,
@@ -137,7 +145,11 @@ pub enum AbilityEffect {
     },
 }
 
-/// Controls when an effect fires.
+/// Controls when an effect fires during an ability's lifecycle.
+///
+/// Effects that need to fire on specific ticks within the Active phase use `OnTick`
+/// with a tick offset. Multiple `OnTick` effects on the same ability fire on the same
+/// tick if they share the same offset — use different offsets to sequence them.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
 pub enum EffectTrigger {
     /// Fires once when ability enters Active phase.
