@@ -1,1 +1,10 @@
-((Some(AbilityId("dive_kick")), Some(AbilityId("speed_burst")), Some(AbilityId("shockwave")), None))
+#![enable(implicit_some)]
+
+(
+    (
+        AbilityId("dive_kick"), 
+        AbilityId("speed_burst"),
+        AbilityId("shockwave"), 
+        None,
+    )
+)

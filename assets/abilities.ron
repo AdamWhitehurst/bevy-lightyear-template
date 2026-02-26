@@ -1,3 +1,5 @@
+#![enable(implicit_some)]
+
 (
     abilities: {
         "punch": (
@@ -64,7 +66,7 @@
             recovery_ticks: 8,
             cooldown_ticks: 42,
             effects: [
-                OnCast(AreaOfEffect( target: Victim, radius: 5.0, duration_ticks: Some(10))),
+                OnCast(AreaOfEffect( target: Victim, radius: 5.0, duration_ticks: 10)),
                 OnHit(Damage(amount: 25.0, target: Victim)),
                 OnHit(ApplyForce(force: (0.0, 8.0, 0.0), frame: World, target: Victim)),
             ],
@@ -110,7 +112,7 @@
             recovery_ticks: 12,
             cooldown_ticks: 50,
             effects: [
-                OnCast(AreaOfEffect(radius: 7.0, duration_ticks: Some(6), target: Victim)),
+                OnCast(AreaOfEffect(radius: 7.0, duration_ticks: 6, target: Victim)),
                 OnHit(Damage(amount: 10.0, target: Victim)),
                 OnHit(ApplyForce(force: (0.0, 1.5, 8.0), frame: RelativePosition, target: Victim)),
             ],
@@ -153,7 +155,7 @@
             cooldown_ticks: 45,
             effects: [
                 OnCast(Teleport(distance: 7.0)),
-                OnCast(AreaOfEffect(radius: 3.5, duration_ticks: Some(8), target: Victim)),
+                OnCast(AreaOfEffect(radius: 3.5, duration_ticks: 8, target: Victim)),
                 OnHit(Damage(amount: 20.0, target: Victim)),
                 OnHit(ApplyForce(force: (0.0, 2.0, 5.0), frame: RelativePosition, target: Victim)),
             ],
