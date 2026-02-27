@@ -1,0 +1,12 @@
+#![enable(implicit_some)]
+(
+    startup_ticks: 6,
+    active_ticks: 8,
+    recovery_ticks: 12,
+    cooldown_ticks: 20,
+    effects: [
+        OnCast(Melee()),
+        OnHit(Damage(amount: 12.0, target: Victim)),
+        OnHit(ApplyForce(force: (0.0, 14.0, 0.0), frame: World, target: Victim)),
+    ],
+)

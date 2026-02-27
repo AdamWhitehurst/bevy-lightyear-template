@@ -1,4 +1,5 @@
 use avian3d::prelude::*;
+use bevy::asset::AssetPath;
 use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
@@ -13,6 +14,9 @@ use lightyear::utils::collections::EntityHashSet;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
+
+#[cfg(not(target_arch = "wasm32"))]
+use bevy::asset::LoadedFolder;
 
 use crate::hit_detection::{
     hitbox_collision_layers, MELEE_HITBOX_HALF_EXTENTS, MELEE_HITBOX_OFFSET,
@@ -167,8 +171,8 @@ pub enum EffectTrigger {
     },
 }
 
-/// Definition of a single ability, loaded from RON.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
+/// Definition of a single ability, loaded from an individual `.ability.ron` file.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Reflect, Asset)]
 pub struct AbilityDef {
     pub startup_ticks: u16,
     pub active_ticks: u16,
@@ -187,12 +191,9 @@ impl AbilityDef {
     }
 }
 
-/// Asset file containing all ability definitions.
+/// Manifest listing ability IDs, used by WASM builds where `load_folder` is unavailable.
 #[derive(Clone, Debug, Serialize, Deserialize, Asset, TypePath)]
-#[type_path = "protocol::ability"]
-pub struct AbilityDefsAsset {
-    pub abilities: HashMap<String, AbilityDef>,
-}
+pub struct AbilityManifest(pub Vec<String>);
 
 /// Resource holding loaded ability definitions, keyed by `AbilityId`.
 #[derive(Resource, Clone, Debug)]
@@ -369,8 +370,17 @@ pub struct AbilityBulletOf(#[entities] pub Entity);
 #[relationship_target(relationship = AbilityBulletOf, linked_spawn)]
 pub struct AbilityBullets(Vec<Entity>);
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Resource)]
-struct AbilityDefsHandle(Handle<AbilityDefsAsset>);
+struct AbilityFolderHandle(Handle<LoadedFolder>);
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Resource)]
+struct AbilityManifestHandle(Handle<AbilityManifest>);
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Resource)]
+struct PendingAbilityHandles(Vec<Handle<AbilityDef>>);
 
 /// Resource holding the handle for the global default ability slots asset.
 /// Consumers resolve the current value via `Assets<AbilitySlots>`.
@@ -381,67 +391,219 @@ pub struct AbilityPlugin;
 
 impl Plugin for AbilityPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(RonAssetPlugin::<AbilityDefsAsset>::new(&["abilities.ron"]));
+        app.add_plugins(RonAssetPlugin::<AbilityDef>::new(&["ability.ron"]));
         app.add_plugins(RonAssetPlugin::<AbilitySlots>::new(&["ability_slots.ron"]));
+
+        #[cfg(target_arch = "wasm32")]
+        app.add_plugins(RonAssetPlugin::<AbilityManifest>::new(&[
+            "abilities.manifest.ron",
+        ]));
+
         app.add_systems(Startup, (load_ability_defs, load_default_ability_slots));
+
+        #[cfg(target_arch = "wasm32")]
+        app.add_systems(
+            PreUpdate,
+            trigger_individual_ability_loads.run_if(in_state(crate::app_state::AppState::Loading)),
+        );
+
         app.add_systems(Update, (insert_ability_defs, reload_ability_defs));
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_ability_defs(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut tracked: ResMut<crate::app_state::TrackedAssets>,
 ) {
-    let handle = asset_server.load::<AbilityDefsAsset>("abilities.ron");
+    let handle = asset_server.load_folder("abilities");
     tracked.add(handle.clone());
-    commands.insert_resource(AbilityDefsHandle(handle));
+    commands.insert_resource(AbilityFolderHandle(handle));
 }
 
+#[cfg(target_arch = "wasm32")]
+fn load_ability_defs(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut tracked: ResMut<crate::app_state::TrackedAssets>,
+) {
+    let handle = asset_server.load::<AbilityManifest>("abilities.manifest.ron");
+    tracked.add(handle.clone());
+    commands.insert_resource(AbilityManifestHandle(handle));
+}
+
+#[cfg(target_arch = "wasm32")]
+fn trigger_individual_ability_loads(
+    manifest_handle: Option<Res<AbilityManifestHandle>>,
+    manifest_assets: Res<Assets<AbilityManifest>>,
+    pending: Option<Res<PendingAbilityHandles>>,
+    mut tracked: ResMut<crate::app_state::TrackedAssets>,
+    asset_server: Res<AssetServer>,
+    mut commands: Commands,
+) {
+    if pending.is_some() {
+        return;
+    }
+    let Some(manifest_handle) = manifest_handle else {
+        return;
+    };
+    let Some(manifest) = manifest_assets.get(&manifest_handle.0) else {
+        return;
+    };
+    let handles: Vec<Handle<AbilityDef>> = manifest
+        .0
+        .iter()
+        .map(|id| {
+            let h = asset_server.load(format!("abilities/{id}.ability.ron"));
+            tracked.add(h.clone());
+            h
+        })
+        .collect();
+    commands.insert_resource(PendingAbilityHandles(handles));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn insert_ability_defs(
     mut commands: Commands,
-    handle: Option<Res<AbilityDefsHandle>>,
-    assets: Res<Assets<AbilityDefsAsset>>,
+    folder_handle: Option<Res<AbilityFolderHandle>>,
+    loaded_folders: Res<Assets<LoadedFolder>>,
+    ability_assets: Res<Assets<AbilityDef>>,
+    asset_server: Res<AssetServer>,
     existing: Option<Res<AbilityDefs>>,
 ) {
     if existing.is_some() {
         return;
     }
-    let Some(handle) = handle else { return };
-    let Some(asset) = assets.get(&handle.0) else {
+    let Some(folder_handle) = folder_handle else {
         return;
     };
-    let abilities: HashMap<AbilityId, AbilityDef> = asset
-        .abilities
-        .iter()
-        .map(|(k, v)| (AbilityId(k.clone()), v.clone()))
-        .collect();
+    let Some(folder) = loaded_folders.get(&folder_handle.0) else {
+        return;
+    };
+    let abilities = collect_abilities_from_folder(folder, &*ability_assets, &*asset_server);
     info!("Loaded {} ability definitions", abilities.len());
     commands.insert_resource(AbilityDefs { abilities });
 }
 
+#[cfg(target_arch = "wasm32")]
+fn insert_ability_defs(
+    mut commands: Commands,
+    pending: Option<Res<PendingAbilityHandles>>,
+    ability_assets: Res<Assets<AbilityDef>>,
+    asset_server: Res<AssetServer>,
+    existing: Option<Res<AbilityDefs>>,
+) {
+    if existing.is_some() {
+        return;
+    }
+    let Some(pending) = pending else { return };
+    let abilities: HashMap<AbilityId, AbilityDef> = pending
+        .0
+        .iter()
+        .filter_map(|handle| {
+            let def = ability_assets.get(handle)?;
+            let path = asset_server.get_path(handle.id())?;
+            let id = ability_id_from_path(&path)?;
+            Some((id, def.clone()))
+        })
+        .collect();
+    if abilities.len() != pending.0.len() {
+        return;
+    }
+    info!("Loaded {} ability definitions", abilities.len());
+    commands.insert_resource(AbilityDefs { abilities });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn reload_ability_defs(
     mut commands: Commands,
-    handle: Option<Res<AbilityDefsHandle>>,
-    assets: Res<Assets<AbilityDefsAsset>>,
-    mut events: MessageReader<AssetEvent<AbilityDefsAsset>>,
+    folder_handle: Option<Res<AbilityFolderHandle>>,
+    loaded_folders: Res<Assets<LoadedFolder>>,
+    ability_assets: Res<Assets<AbilityDef>>,
+    asset_server: Res<AssetServer>,
+    mut events: MessageReader<AssetEvent<AbilityDef>>,
 ) {
-    let Some(handle) = handle else { return };
-    for event in events.read() {
-        if event.is_modified(&handle.0) {
-            let Some(asset) = assets.get(&handle.0) else {
-                warn!("abilities.ron modified but asset not available");
-                return;
-            };
-            let abilities: HashMap<AbilityId, AbilityDef> = asset
-                .abilities
-                .iter()
-                .map(|(k, v)| (AbilityId(k.clone()), v.clone()))
-                .collect();
-            info!("Hot-reloaded {} ability definitions", abilities.len());
-            commands.insert_resource(AbilityDefs { abilities });
-        }
+    let Some(folder_handle) = folder_handle else {
+        events.clear();
+        return;
+    };
+    let has_changes = events
+        .read()
+        .any(|e| matches!(e, AssetEvent::Modified { .. }));
+    if !has_changes {
+        return;
     }
+    let Some(folder) = loaded_folders.get(&folder_handle.0) else {
+        warn!("ability assets changed but LoadedFolder not available");
+        return;
+    };
+    let abilities = collect_abilities_from_folder(folder, &*ability_assets, &*asset_server);
+    info!("Hot-reloaded {} ability definitions", abilities.len());
+    commands.insert_resource(AbilityDefs { abilities });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn reload_ability_defs(
+    mut commands: Commands,
+    pending: Option<Res<PendingAbilityHandles>>,
+    ability_assets: Res<Assets<AbilityDef>>,
+    asset_server: Res<AssetServer>,
+    mut events: MessageReader<AssetEvent<AbilityDef>>,
+) {
+    let Some(pending) = pending else {
+        events.clear();
+        return;
+    };
+    let has_changes = events
+        .read()
+        .any(|e| matches!(e, AssetEvent::Modified { .. }));
+    if !has_changes {
+        return;
+    }
+    let abilities: HashMap<AbilityId, AbilityDef> = pending
+        .0
+        .iter()
+        .filter_map(|handle| {
+            let def = ability_assets.get(handle)?;
+            let path = asset_server.get_path(handle.id())?;
+            let id = ability_id_from_path(&path)?;
+            Some((id, def.clone()))
+        })
+        .collect();
+    if abilities.len() != pending.0.len() {
+        return;
+    }
+    info!("Hot-reloaded {} ability definitions", abilities.len());
+    commands.insert_resource(AbilityDefs { abilities });
+}
+
+fn ability_id_from_path(path: &AssetPath) -> Option<AbilityId> {
+    let name = path.path().file_name()?.to_str()?;
+    Some(AbilityId(name.strip_suffix(".ability.ron")?.to_string()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn collect_abilities_from_folder(
+    folder: &LoadedFolder,
+    ability_assets: &Assets<AbilityDef>,
+    asset_server: &AssetServer,
+) -> HashMap<AbilityId, AbilityDef> {
+    folder
+        .handles
+        .iter()
+        .filter_map(|handle| {
+            let path = asset_server.get_path(handle.id())?;
+            let name = path.path().file_name()?.to_str()?;
+            if !name.ends_with(".ability.ron") {
+                return None;
+            }
+            let typed = handle.clone().typed::<AbilityDef>();
+            let def = ability_assets.get(&typed)?;
+            let id = ability_id_from_path(&path)?;
+            Some((id, def.clone()))
+        })
+        .collect()
 }
 
 fn load_default_ability_slots(

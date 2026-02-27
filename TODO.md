@@ -4,3 +4,4 @@
 - multiple map 'rooms?'
 - meaningful proc gen terrain
 - prefab world objects 'doodads?'
+- composable Character templates that are loadable Asset files. Character template asset files are composed of other ron asset files

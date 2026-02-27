@@ -6831,6 +6831,7 @@ dependencies = [
  "lightyear_raw_connection",
  "mock_instant",
  "protocol",
+ "ron 0.9.0",
  "serde",
  "test-log",
  "ui",

@@ -1,0 +1,10 @@
+#![enable(implicit_some)]
+(
+    startup_ticks: 4,
+    active_ticks: 4,
+    recovery_ticks: 8,
+    cooldown_ticks: 80,
+    effects: [
+        OnCast(Shield(absorb: 60.0)),
+    ],
+)

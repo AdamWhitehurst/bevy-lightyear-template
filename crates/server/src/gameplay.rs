@@ -22,6 +22,34 @@ impl Plugin for ServerGameplayPlugin {
                 expire_invulnerability,
             ),
         );
+        app.add_systems(Update, sync_ability_manifest);
+    }
+}
+
+const ABILITY_MANIFEST_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../assets/abilities.manifest.ron"
+);
+
+/// Writes `abilities.manifest.ron` whenever `AbilityDefs` changes, keeping the
+/// manifest in sync for WASM web builds.
+fn sync_ability_manifest(defs: Option<Res<AbilityDefs>>, mut last_len: Local<usize>) {
+    let Some(defs) = defs else { return };
+    if !defs.is_changed() && defs.abilities.len() == *last_len {
+        return;
+    }
+    *last_len = defs.abilities.len();
+
+    let mut ids: Vec<&str> = defs.abilities.keys().map(|id| id.0.as_str()).collect();
+    ids.sort_unstable();
+
+    match ron::to_string(&ids) {
+        Ok(content) => {
+            if let Err(e) = std::fs::write(ABILITY_MANIFEST_PATH, content) {
+                warn!("Failed to write ability manifest: {e}");
+            }
+        }
+        Err(e) => warn!("Failed to serialize ability manifest: {e}"),
     }
 }
 

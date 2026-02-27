@@ -1,0 +1,13 @@
+#![enable(implicit_some)]
+(
+    startup_ticks: 2,
+    active_ticks: 8,
+    recovery_ticks: 4,
+    cooldown_ticks: 32,
+    effects: [
+        WhileActive(SetVelocity(
+            speed: 15.0,
+            target: Caster,
+        )),
+    ],
+)

@@ -1,0 +1,13 @@
+#![enable(implicit_some)]
+(
+    startup_ticks: 4,
+    active_ticks: 20,
+    recovery_ticks: 0,
+    cooldown_ticks: 0,
+    effects: [
+        OnCast(Melee()),
+        OnHit(Damage(amount: 6.0, target: Victim)),
+        OnHit(ApplyForce(force: (0.0, 1.05, 3.32), frame: RelativePosition, target: Victim)),
+        OnInput(action: Ability1, effect: Ability(id: "punch3", target: Caster)),
+    ],
+)

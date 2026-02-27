@@ -1,0 +1,13 @@
+#![enable(implicit_some)]
+(
+    startup_ticks: 3,
+    active_ticks: 4,
+    recovery_ticks: 10,
+    cooldown_ticks: 28,
+    effects: [
+        OnCast(Teleport(distance: 6.0)),
+        OnCast(Melee()),
+        OnHit(Damage(amount: 18.0, target: Victim)),
+        OnHit(ApplyForce(force: (0.0, 1.2, 4.0), frame: RelativePosition, target: Victim)),
+    ],
+)

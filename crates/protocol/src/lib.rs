@@ -14,7 +14,7 @@ pub mod map;
 
 pub use ability::{
     ability_action_to_slot, AbilityBulletOf, AbilityBullets, AbilityCooldowns, AbilityDef,
-    AbilityDefs, AbilityDefsAsset, AbilityEffect, AbilityId, AbilityPhase, AbilityPlugin,
+    AbilityDefs, AbilityEffect, AbilityId, AbilityManifest, AbilityPhase, AbilityPlugin,
     AbilityProjectileSpawn, AbilitySlots, ActiveAbility, ActiveBuff, ActiveBuffs, ActiveShield,
     EffectTarget, EffectTrigger, ForceFrame, OnHitEffects, ProjectileSpawnEffect,
 };
