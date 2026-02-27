@@ -387,10 +387,19 @@ struct AbilityManifestHandle(Handle<AbilityManifest>);
 #[derive(Resource)]
 struct PendingAbilityHandles(Vec<Handle<AbilityDef>>);
 
-/// Resource holding the handle for the global default ability slots asset.
-/// Consumers resolve the current value via `Assets<AbilitySlots>`.
+/// Internal handle for the default ability slots asset — used only for loading and hot-reload.
+///
+/// Note: Separation of DefaultAbilitySlotsHandle and DefaultAbilitySlots enables testing without AssetsPlugin
 #[derive(Resource)]
-pub struct DefaultAbilitySlots(pub Handle<AbilitySlots>);
+struct DefaultAbilitySlotsHandle(Handle<AbilitySlots>);
+
+/// The resolved global default ability slots, populated once the asset finishes loading.
+///
+/// Systems read this directly; consumers do not need to touch `Assets<AbilitySlots>`.
+///
+/// Note: Separation of DefaultAbilitySlotsHandle and DefaultAbilitySlots enables testing without AssetsPlugin
+#[derive(Resource, Clone, Default)]
+pub struct DefaultAbilitySlots(pub AbilitySlots);
 
 pub struct AbilityPlugin;
 
@@ -412,7 +421,14 @@ impl Plugin for AbilityPlugin {
             trigger_individual_ability_loads.run_if(in_state(crate::app_state::AppState::Loading)),
         );
 
-        app.add_systems(Update, (insert_ability_defs, reload_ability_defs));
+        app.add_systems(
+            Update,
+            (
+                insert_ability_defs,
+                reload_ability_defs,
+                sync_default_ability_slots,
+            ),
+        );
     }
 }
 
@@ -618,7 +634,36 @@ fn load_default_ability_slots(
 ) {
     let handle = asset_server.load::<AbilitySlots>("default.ability_slots.ron");
     tracked.add(handle.clone());
-    commands.insert_resource(DefaultAbilitySlots(handle));
+    commands.insert_resource(DefaultAbilitySlotsHandle(handle));
+}
+
+fn sync_default_ability_slots(
+    mut commands: Commands,
+    handle: Option<Res<DefaultAbilitySlotsHandle>>,
+    ability_slots_assets: Res<Assets<AbilitySlots>>,
+    mut events: MessageReader<AssetEvent<AbilitySlots>>,
+) {
+    let Some(handle) = handle else {
+        events.clear();
+        return;
+    };
+    let id = handle.0.id();
+    let is_relevant = |e: &AssetEvent<AbilitySlots>| {
+        matches!(e,
+            AssetEvent::LoadedWithDependencies { id: eid } |
+            AssetEvent::Modified { id: eid }
+            if *eid == id
+        )
+    };
+    if !events.read().any(is_relevant) {
+        return;
+    }
+    let Some(slots) = ability_slots_assets.get(&handle.0) else {
+        warn!("default.ability_slots.ron event fired but asset not available");
+        return;
+    };
+    info!("Synced default ability slots");
+    commands.insert_resource(DefaultAbilitySlots(slots.clone()));
 }
 
 /// Maps a `PlayerActions` ability variant to a slot index (0-3).
@@ -636,7 +681,6 @@ pub fn ability_activation(
     mut commands: Commands,
     ability_defs: Res<AbilityDefs>,
     default_slots: Res<DefaultAbilitySlots>,
-    ability_slots_assets: Res<Assets<AbilitySlots>>,
     timeline: Single<&LocalTimeline, Without<ClientOf>>,
     mut query: Query<(
         Entity,
@@ -648,12 +692,9 @@ pub fn ability_activation(
     server_query: Query<&ControlledBy>,
 ) {
     let tick = timeline.tick();
-    let default = ability_slots_assets
-        .get(&default_slots.0)
-        .expect("default.ability_slots.ron not loaded");
 
     for (entity, action_state, slots_opt, mut cooldowns, player_id) in &mut query {
-        let slots = slots_opt.unwrap_or(default);
+        let slots = slots_opt.unwrap_or(&default_slots.0);
         for (slot_idx, action) in ABILITY_ACTIONS.iter().enumerate() {
             if !action_state.just_pressed(action) {
                 continue;

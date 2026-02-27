@@ -164,6 +164,7 @@ fn test_app() -> App {
     app.insert_resource(AbilityDefs {
         abilities: test_defs(),
     });
+    app.insert_resource(DefaultAbilitySlots::default());
     app.add_systems(
         Update,
         (
