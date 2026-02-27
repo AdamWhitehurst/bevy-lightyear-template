@@ -5,7 +5,7 @@
     recovery_ticks: 6,
     cooldown_ticks: 60,
     effects: [
-        OnCast(Buff(stat: "speed", multiplier: 2.5, duration_ticks: 60, target: Caster)),
+        OnTick(effect: Buff(stat: "speed", multiplier: 2.5, duration_ticks: 60, target: Caster)),
         WhileActive(SetVelocity(speed: 20.0, target: Caster)),
     ],
 )

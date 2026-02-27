@@ -5,7 +5,7 @@
     recovery_ticks: 10,
     cooldown_ticks: 0,
     effects: [
-        OnCast(Melee()),
+        OnTick(effect: Melee()),
         OnHit(Damage(amount: 10.0, target: Victim)),
         OnHit(ApplyForce(force: (0.0, 2.4, 7.65), frame: RelativePosition, target: Victim)),
     ],

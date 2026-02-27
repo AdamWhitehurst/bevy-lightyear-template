@@ -6,7 +6,7 @@
     cooldown_ticks: 24,
     effects: [
         WhileActive(SetVelocity(speed: 18.0, target: Caster)),
-        OnCast(Melee()),
+        OnTick(effect: Melee()),
         OnHit(Damage(amount: 14.0, target: Victim)),
         OnHit(ApplyForce(force: (0.0, 0.5, 3.0), frame: RelativePosition, target: Victim)),
     ],

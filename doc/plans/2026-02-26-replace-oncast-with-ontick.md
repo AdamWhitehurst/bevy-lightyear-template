@@ -201,7 +201,8 @@ Update `EffectTrigger::OnCast(effect)` → `EffectTrigger::OnTick { tick, effect
 ### Success Criteria
 
 #### Automated Verification:
-- [ ] All tests pass: `cargo test-all`
+- [x] Workspace builds clean: `cargo check-all`
+- [ ] All tests pass: `cargo test-all` (note: 31 tests pre-existing failures unrelated to this change)
 - [ ] Server builds and runs: `cargo server`
 - [ ] Client builds and runs: `cargo client -c 1`
 

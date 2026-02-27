@@ -5,8 +5,8 @@
     recovery_ticks: 10,
     cooldown_ticks: 28,
     effects: [
-        OnCast(Teleport(distance: 6.0)),
-        OnCast(Melee()),
+        OnTick(effect: Teleport(distance: 6.0)),
+        OnTick(tick: 1, effect: Melee()),
         OnHit(Damage(amount: 18.0, target: Victim)),
         OnHit(ApplyForce(force: (0.0, 1.2, 4.0), frame: RelativePosition, target: Victim)),
     ],

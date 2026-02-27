@@ -5,7 +5,7 @@
     recovery_ticks: 0,
     cooldown_ticks: 16,
     effects: [
-        OnCast(Melee()),
+        OnTick(effect: Melee()),
         OnHit(Damage(amount: 5.0, target: Victim)),
         OnHit(ApplyForce(force: (0.0, 0.9, 2.85), frame: RelativePosition, target: Victim)),
         OnInput(action: Ability1, effect: Ability(id: "punch2", target: Caster)),

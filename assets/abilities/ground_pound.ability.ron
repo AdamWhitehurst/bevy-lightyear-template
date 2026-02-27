@@ -5,7 +5,9 @@
     recovery_ticks: 8,
     cooldown_ticks: 42,
     effects: [
-        OnCast(AreaOfEffect(target: Victim, radius: 5.0, duration_ticks: 10)),
+        OnTick(effect: AreaOfEffect(target: Victim, radius: 3.0, duration_ticks: 10)),
+        OnTick(tick: 3, effect: AreaOfEffect(target: Victim, radius: 5.0, duration_ticks: 10)),
+        OnTick(tick: 5, effect: AreaOfEffect(target: Victim, radius: 10.0, duration_ticks: 10)),
         OnHit(Damage(amount: 25.0, target: Victim)),
         OnHit(ApplyForce(force: (0.0, 8.0, 0.0), frame: World, target: Victim)),
     ],

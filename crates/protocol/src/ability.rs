@@ -156,8 +156,13 @@ pub enum AbilityEffect {
 /// tick if they share the same offset — use different offsets to sequence them.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
 pub enum EffectTrigger {
-    /// Fires once when ability enters Active phase.
-    OnCast(AbilityEffect),
+    /// Fires once on the specified Active-phase tick offset (0-indexed from phase start).
+    /// Defaults to tick 0 (first Active tick) when `tick` is omitted in RON.
+    OnTick {
+        #[serde(default)]
+        tick: u16,
+        effect: AbilityEffect,
+    },
     /// Fires every tick during Active phase.
     WhileActive(AbilityEffect),
     /// Fires when a hitbox/projectile spawned by this ability hits a target.
@@ -270,7 +275,7 @@ impl AbilityCooldowns {
     }
 }
 
-/// One-shot: inserted by apply_on_cast_effects when processing Projectile.
+/// One-shot: inserted by apply_on_tick_effects when processing Projectile.
 /// Consumed by ability_projectile_spawn.
 #[derive(Component, Clone, Debug, PartialEq)]
 pub struct ProjectileSpawnEffect {
@@ -313,9 +318,9 @@ pub struct OnHitEffects {
     pub depth: u8,
 }
 
-/// One-shot: inserted on first Active tick; consumed by apply_on_cast_effects.
+/// One-shot: inserted on matching Active tick offset; consumed by apply_on_tick_effects.
 #[derive(Component)]
-pub struct OnCastEffects(pub Vec<AbilityEffect>);
+pub struct OnTickEffects(pub Vec<AbilityEffect>);
 
 /// Persistent: present every Active tick; removed when phase exits Active.
 #[derive(Component)]
@@ -780,20 +785,25 @@ fn dispatch_active_phase_markers(
     tick: Tick,
 ) {
     let first_active_tick = active.phase_start_tick == tick;
+    let active_offset = (tick - active.phase_start_tick) as u16;
 
-    if first_active_tick {
-        let on_cast: Vec<AbilityEffect> = def
+    {
+        let on_tick: Vec<AbilityEffect> = def
             .effects
             .iter()
             .filter_map(|t| match t {
-                EffectTrigger::OnCast(e) => Some(e.clone()),
+                EffectTrigger::OnTick { tick: t, effect } if *t == active_offset => {
+                    Some(effect.clone())
+                }
                 _ => None,
             })
             .collect();
-        if !on_cast.is_empty() {
-            commands.entity(entity).insert(OnCastEffects(on_cast));
+        if !on_tick.is_empty() {
+            commands.entity(entity).insert(OnTickEffects(on_tick));
         }
+    }
 
+    if first_active_tick {
         let on_hit: Vec<AbilityEffect> = def
             .effects
             .iter()
@@ -840,7 +850,7 @@ fn dispatch_active_phase_markers(
 }
 
 fn remove_active_phase_markers(commands: &mut Commands, entity: Entity) {
-    commands.entity(entity).remove::<OnCastEffects>();
+    commands.entity(entity).remove::<OnTickEffects>();
     commands.entity(entity).remove::<WhileActiveEffects>();
     commands.entity(entity).remove::<OnHitEffects>();
     commands.entity(entity).remove::<OnInputEffects>();
@@ -942,8 +952,8 @@ pub(crate) fn spawn_sub_ability(
     }
 }
 
-/// Process OnCast effects: spawn hitbox entities, projectiles, or sub-abilities.
-pub fn apply_on_cast_effects(
+/// Process OnTick effects: spawn hitbox entities, projectiles, or sub-abilities.
+pub fn apply_on_tick_effects(
     mut commands: Commands,
     ability_defs: Res<AbilityDefs>,
     timeline: Single<&LocalTimeline, Without<ClientOf>>,
@@ -951,7 +961,7 @@ pub fn apply_on_cast_effects(
     player_id_query: Query<&PlayerId>,
     query: Query<(
         Entity,
-        &OnCastEffects,
+        &OnTickEffects,
         &ActiveAbility,
         Option<&OnHitEffects>,
     )>,
@@ -1035,11 +1045,11 @@ pub fn apply_on_cast_effects(
                     );
                 }
                 _ => {
-                    warn!("Unhandled OnCast effect: {:?}", effect);
+                    warn!("Unhandled OnTick effect: {:?}", effect);
                 }
             }
         }
-        commands.entity(entity).remove::<OnCastEffects>();
+        commands.entity(entity).remove::<OnTickEffects>();
     }
 }
 
@@ -1327,7 +1337,7 @@ pub fn cleanup_effect_markers_on_removal(
     mut commands: Commands,
 ) {
     if let Ok(mut cmd) = commands.get_entity(trigger.entity) {
-        cmd.try_remove::<OnCastEffects>();
+        cmd.try_remove::<OnTickEffects>();
         cmd.try_remove::<WhileActiveEffects>();
         cmd.try_remove::<OnHitEffects>();
         cmd.try_remove::<OnEndEffects>();

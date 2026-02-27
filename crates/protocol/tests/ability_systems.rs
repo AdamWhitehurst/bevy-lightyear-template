@@ -21,10 +21,13 @@ fn test_defs() -> HashMap<AbilityId, AbilityDef> {
             recovery_ticks: 0,
             cooldown_ticks: 16,
             effects: vec![
-                EffectTrigger::OnCast(AbilityEffect::Melee {
-                    id: None,
-                    target: EffectTarget::Caster,
-                }),
+                EffectTrigger::OnTick {
+                    tick: 0,
+                    effect: AbilityEffect::Melee {
+                        id: None,
+                        target: EffectTarget::Caster,
+                    },
+                },
                 EffectTrigger::OnHit(AbilityEffect::Damage {
                     amount: 5.0,
                     target: EffectTarget::Victim,
@@ -52,10 +55,13 @@ fn test_defs() -> HashMap<AbilityId, AbilityDef> {
             recovery_ticks: 0,
             cooldown_ticks: 0,
             effects: vec![
-                EffectTrigger::OnCast(AbilityEffect::Melee {
-                    id: None,
-                    target: EffectTarget::Caster,
-                }),
+                EffectTrigger::OnTick {
+                    tick: 0,
+                    effect: AbilityEffect::Melee {
+                        id: None,
+                        target: EffectTarget::Caster,
+                    },
+                },
                 EffectTrigger::OnHit(AbilityEffect::Damage {
                     amount: 6.0,
                     target: EffectTarget::Victim,
@@ -83,10 +89,13 @@ fn test_defs() -> HashMap<AbilityId, AbilityDef> {
             recovery_ticks: 10,
             cooldown_ticks: 0,
             effects: vec![
-                EffectTrigger::OnCast(AbilityEffect::Melee {
-                    id: None,
-                    target: EffectTarget::Caster,
-                }),
+                EffectTrigger::OnTick {
+                    tick: 0,
+                    effect: AbilityEffect::Melee {
+                        id: None,
+                        target: EffectTarget::Caster,
+                    },
+                },
                 EffectTrigger::OnHit(AbilityEffect::Damage {
                     amount: 10.0,
                     target: EffectTarget::Victim,
@@ -120,11 +129,14 @@ fn test_defs() -> HashMap<AbilityId, AbilityDef> {
             recovery_ticks: 8,
             cooldown_ticks: 96,
             effects: vec![
-                EffectTrigger::OnCast(AbilityEffect::Projectile {
-                    id: None,
-                    speed: 20.0,
-                    lifetime_ticks: 192,
-                }),
+                EffectTrigger::OnTick {
+                    tick: 0,
+                    effect: AbilityEffect::Projectile {
+                        id: None,
+                        speed: 20.0,
+                        lifetime_ticks: 192,
+                    },
+                },
                 EffectTrigger::OnHit(AbilityEffect::Damage {
                     amount: 25.0,
                     target: EffectTarget::Victim,
@@ -158,7 +170,7 @@ fn test_app() -> App {
             ability::ability_activation,
             ability::update_active_abilities,
             ability::dispatch_effect_markers,
-            ability::apply_on_cast_effects,
+            ability::apply_on_tick_effects,
             ability::apply_while_active_effects,
             ability::apply_on_end_effects,
             ability::apply_on_input_effects,
@@ -669,10 +681,13 @@ fn sub_ability_spawned_on_cast() {
                 active_ticks: 4,
                 recovery_ticks: 2,
                 cooldown_ticks: 0,
-                effects: vec![EffectTrigger::OnCast(AbilityEffect::Ability {
-                    id: "punch".into(),
-                    target: EffectTarget::Caster,
-                })],
+                effects: vec![EffectTrigger::OnTick {
+                    tick: 0,
+                    effect: AbilityEffect::Ability {
+                        id: "punch".into(),
+                        target: EffectTarget::Caster,
+                    },
+                }],
             },
         );
 
@@ -717,10 +732,13 @@ fn sub_ability_depth_limited() {
                 active_ticks: 4,
                 recovery_ticks: 2,
                 cooldown_ticks: 0,
-                effects: vec![EffectTrigger::OnCast(AbilityEffect::Ability {
-                    id: "punch".into(),
-                    target: EffectTarget::Caster,
-                })],
+                effects: vec![EffectTrigger::OnTick {
+                    tick: 0,
+                    effect: AbilityEffect::Ability {
+                        id: "punch".into(),
+                        target: EffectTarget::Caster,
+                    },
+                }],
             },
         );
 
@@ -873,7 +891,7 @@ fn test_app_with_hit_detection() -> App {
             hit_detection::cleanup_hitbox_entities,
         )
             .chain()
-            .after(ability::apply_on_cast_effects),
+            .after(ability::apply_on_tick_effects),
     );
     app
 }
@@ -908,12 +926,15 @@ fn aoe_hitbox_damages_target() {
                 recovery_ticks: 4,
                 cooldown_ticks: 0,
                 effects: vec![
-                    EffectTrigger::OnCast(AbilityEffect::AreaOfEffect {
-                        id: None,
-                        target: EffectTarget::Caster,
-                        radius: 5.0,
-                        duration_ticks: None,
-                    }),
+                    EffectTrigger::OnTick {
+                        tick: 0,
+                        effect: AbilityEffect::AreaOfEffect {
+                            id: None,
+                            target: EffectTarget::Caster,
+                            radius: 5.0,
+                            duration_ticks: None,
+                        },
+                    },
                     EffectTrigger::OnHit(AbilityEffect::Damage {
                         amount: 25.0,
                         target: EffectTarget::Victim,
@@ -979,9 +1000,10 @@ fn teleport_moves_caster() {
                 active_ticks: 4,
                 recovery_ticks: 2,
                 cooldown_ticks: 0,
-                effects: vec![EffectTrigger::OnCast(AbilityEffect::Teleport {
-                    distance: 10.0,
-                })],
+                effects: vec![EffectTrigger::OnTick {
+                    tick: 0,
+                    effect: AbilityEffect::Teleport { distance: 10.0 },
+                }],
             },
         );
 
@@ -1039,10 +1061,13 @@ fn shield_absorbs_damage() {
                 recovery_ticks: 2,
                 cooldown_ticks: 0,
                 effects: vec![
-                    EffectTrigger::OnCast(AbilityEffect::Melee {
-                        id: None,
-                        target: EffectTarget::Caster,
-                    }),
+                    EffectTrigger::OnTick {
+                        tick: 0,
+                        effect: AbilityEffect::Melee {
+                            id: None,
+                            target: EffectTarget::Caster,
+                        },
+                    },
                     EffectTrigger::OnHit(AbilityEffect::Damage {
                         amount: 30.0,
                         target: EffectTarget::Victim,
@@ -1121,10 +1146,13 @@ fn shield_overflow_damages_health() {
                 recovery_ticks: 2,
                 cooldown_ticks: 0,
                 effects: vec![
-                    EffectTrigger::OnCast(AbilityEffect::Melee {
-                        id: None,
-                        target: EffectTarget::Caster,
-                    }),
+                    EffectTrigger::OnTick {
+                        tick: 0,
+                        effect: AbilityEffect::Melee {
+                            id: None,
+                            target: EffectTarget::Caster,
+                        },
+                    },
                     EffectTrigger::OnHit(AbilityEffect::Damage {
                         amount: 50.0,
                         target: EffectTarget::Victim,
@@ -1190,12 +1218,15 @@ fn buff_inserted_on_target() {
                 active_ticks: 4,
                 recovery_ticks: 2,
                 cooldown_ticks: 0,
-                effects: vec![EffectTrigger::OnCast(AbilityEffect::Buff {
-                    stat: "speed".into(),
-                    multiplier: 1.5,
-                    duration_ticks: 100,
-                    target: EffectTarget::Caster,
-                })],
+                effects: vec![EffectTrigger::OnTick {
+                    tick: 0,
+                    effect: AbilityEffect::Buff {
+                        stat: "speed".into(),
+                        multiplier: 1.5,
+                        duration_ticks: 100,
+                        target: EffectTarget::Caster,
+                    },
+                }],
             },
         );
 
@@ -1283,10 +1314,13 @@ fn buff_increases_damage() {
                 recovery_ticks: 2,
                 cooldown_ticks: 0,
                 effects: vec![
-                    EffectTrigger::OnCast(AbilityEffect::Melee {
-                        id: None,
-                        target: EffectTarget::Caster,
-                    }),
+                    EffectTrigger::OnTick {
+                        tick: 0,
+                        effect: AbilityEffect::Melee {
+                            id: None,
+                            target: EffectTarget::Caster,
+                        },
+                    },
                     EffectTrigger::OnHit(AbilityEffect::Damage {
                         amount: 10.0,
                         target: EffectTarget::Victim,
@@ -1372,12 +1406,15 @@ fn run_force_test(
                 recovery_ticks: 4,
                 cooldown_ticks: 0,
                 effects: vec![
-                    EffectTrigger::OnCast(AbilityEffect::AreaOfEffect {
-                        id: None,
-                        target: EffectTarget::Caster,
-                        radius: 10.0,
-                        duration_ticks: None,
-                    }),
+                    EffectTrigger::OnTick {
+                        tick: 0,
+                        effect: AbilityEffect::AreaOfEffect {
+                            id: None,
+                            target: EffectTarget::Caster,
+                            radius: 10.0,
+                            duration_ticks: None,
+                        },
+                    },
                     EffectTrigger::OnHit(AbilityEffect::ApplyForce {
                         force,
                         frame,

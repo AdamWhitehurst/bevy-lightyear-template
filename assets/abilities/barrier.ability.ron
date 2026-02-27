@@ -5,6 +5,6 @@
     recovery_ticks: 8,
     cooldown_ticks: 80,
     effects: [
-        OnCast(Shield(absorb: 60.0)),
+        OnTick(effect: Shield(absorb: 60.0)),
     ],
 )

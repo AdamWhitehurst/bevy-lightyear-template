@@ -253,7 +253,7 @@ impl Plugin for SharedGameplayPlugin {
                 ability::ability_activation,
                 ability::update_active_abilities,
                 ability::dispatch_effect_markers,
-                ability::apply_on_cast_effects,
+                ability::apply_on_tick_effects,
                 ability::apply_while_active_effects,
                 ability::apply_on_end_effects,
                 ability::apply_on_input_effects,
@@ -272,7 +272,7 @@ impl Plugin for SharedGameplayPlugin {
                 hit_detection::cleanup_hitbox_entities,
             )
                 .chain()
-                .after(ability::apply_on_cast_effects)
+                .after(ability::apply_on_tick_effects)
                 .run_if(ready.clone()),
         );
 

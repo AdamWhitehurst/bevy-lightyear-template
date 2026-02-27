@@ -5,7 +5,7 @@
     recovery_ticks: 8,
     cooldown_ticks: 42,
     effects: [
-        OnCast(Projectile(speed: 20.0, lifetime_ticks: 192)),
+        OnTick(effect: Projectile(speed: 20.0, lifetime_ticks: 192)),
         OnHit(Damage(amount: 25.0, target: Victim)),
         OnHit(ApplyForce(force: (0.0, 2.4, 7.65), frame: RelativePosition, target: Victim)),
     ],
