@@ -1,6 +1,5 @@
 use bevy::app::AppExit;
 use bevy::prelude::*;
-use bevy_voxel_world::prelude::*;
 use lightyear::prelude::{
     Connected, MessageReceiver, MessageSender, NetworkTarget, Server, ServerMultiMessageSender,
 };
@@ -13,7 +12,6 @@ use serde::{Deserialize, Serialize};
 pub struct ServerMapPlugin;
 
 fn load_voxel_world(
-    mut voxel_world: VoxelWorld<MapWorld>,
     mut modifications: ResMut<VoxelModifications>,
     map_world: Res<MapWorld>,
     save_path: Res<VoxelSavePath>,
@@ -24,16 +22,10 @@ fn load_voxel_world(
         return;
     }
 
-    // Apply to VoxelModifications resource (for network sync)
     modifications.modifications = loaded_mods.clone();
 
-    // Apply to VoxelWorld (populates bevy_voxel_world's internal ModifiedVoxels)
-    for (pos, voxel_type) in &loaded_mods {
-        voxel_world.set_voxel(*pos, (*voxel_type).into());
-    }
-
     info!(
-        "Applied {} loaded modifications to voxel world",
+        "Loaded {} voxel modifications (engine not yet integrated)",
         loaded_mods.len()
     );
 }
@@ -92,20 +84,15 @@ pub fn save_voxel_world_on_shutdown(
 
 impl Plugin for ServerMapPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(VoxelWorldPlugin::<MapWorld>::with_config(
-            MapWorld::default(),
-        ))
-        .init_resource::<VoxelModifications>()
-        .init_resource::<VoxelDirtyState>()
-        .init_resource::<VoxelSavePath>()
-        .add_systems(Startup, load_voxel_world)
-        .add_systems(
-            Update,
-            (handle_voxel_edit_requests, protocol::attach_chunk_colliders),
-        )
-        .add_systems(Update, save_voxel_world_debounced)
-        .add_systems(Last, save_voxel_world_on_shutdown)
-        .add_observer(send_initial_voxel_state);
+        app.init_resource::<MapWorld>()
+            .init_resource::<VoxelModifications>()
+            .init_resource::<VoxelDirtyState>()
+            .init_resource::<VoxelSavePath>()
+            .add_systems(Startup, load_voxel_world)
+            .add_systems(Update, handle_voxel_edit_requests)
+            .add_systems(Update, save_voxel_world_debounced)
+            .add_systems(Last, save_voxel_world_on_shutdown)
+            .add_observer(send_initial_voxel_state);
     }
 }
 
@@ -281,49 +268,10 @@ fn handle_voxel_edit_requests(
     mut modifications: ResMut<VoxelModifications>,
     mut dirty_state: ResMut<VoxelDirtyState>,
     time: Res<Time>,
-    mut voxel_world: VoxelWorld<MapWorld>,
-    chunks: Query<(&Chunk<MapWorld>, &Transform, Option<&Mesh3d>)>,
-    chunk_targets: Query<&Transform, With<ChunkRenderTarget<MapWorld>>>,
 ) {
     let server_ref = server.into_inner();
     for mut message_receiver in receiver.iter_mut() {
         for request in message_receiver.receive() {
-            eprintln!("✓ Server received and processing voxel edit: {:?}", request);
-
-            // DEBUG: Check chunk spawning
-            let chunk_pos = (request.position.as_vec3() / 32.0).floor().as_ivec3();
-
-            if let Some((_, transform, mesh)) =
-                chunks.iter().find(|(c, _, _)| c.position == chunk_pos)
-            {
-                eprintln!(
-                    "  → Chunk {:?} EXISTS at y={}, has_mesh={}",
-                    chunk_pos,
-                    transform.translation.y,
-                    mesh.is_some()
-                );
-            } else {
-                eprintln!("  → Chunk {:?} DOES NOT EXIST on server!", chunk_pos);
-
-                // Check if ANY ChunkRenderTarget exists
-                let target_count = chunk_targets.iter().count();
-                eprintln!("  → ChunkRenderTarget count: {}", target_count);
-
-                for (i, target_transform) in chunk_targets.iter().enumerate() {
-                    let target_chunk = (target_transform.translation / 32.0).floor().as_ivec3();
-                    let dist = chunk_pos.distance_squared(target_chunk);
-                    eprintln!(
-                        "  → Target {}: at chunk {:?}, distance_sq={}",
-                        i, target_chunk, dist
-                    );
-                }
-            }
-
-            // TODO: Add admin permission check here
-
-            // Apply voxel change
-            voxel_world.set_voxel(request.position, request.voxel.into());
-
             // Track modification
             modifications
                 .modifications

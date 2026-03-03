@@ -1,0 +1,16 @@
+[package]
+name = "voxel_map_engine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = { workspace = true }
+ndshape = { path = "../../git/ndshape-rs" }
+ndcopy = { path = "../../git/ndcopy-rs" }
+grid-tree = { path = "../../git/grid-tree-rs" }
+fast-surface-nets = { path = "../../git/fast-surface-nets-rs" }
+block-mesh = { path = "../../git/block-mesh-rs" }
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+approx = { workspace = true }

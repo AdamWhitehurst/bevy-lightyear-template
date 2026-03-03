@@ -1,7 +1,6 @@
 use avian3d::prelude::*;
 use bevy::color::palettes::css;
 use bevy::prelude::*;
-use bevy_voxel_world::prelude::ChunkRenderTarget;
 use leafwing_input_manager::prelude::*;
 use lightyear::connection::client::Connected;
 use lightyear::prelude::server::ClientOf;
@@ -65,7 +64,6 @@ fn spawn_dummy_target(mut commands: Commands) {
         CharacterMarker,
         Health::new(100.0),
         DummyTarget,
-        ChunkRenderTarget::<MapWorld>::default(),
     ));
 }
 
@@ -197,7 +195,6 @@ fn handle_connected(
         ColorComponent(color.into()),
         CharacterMarker,
         Health::new(100.0),
-        ChunkRenderTarget::<MapWorld>::default(),
         AbilityCooldowns::default(),
     ));
 }

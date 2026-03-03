@@ -9,7 +9,7 @@ Multi-transport networked game template using Bevy and Lightyear.
 - **Server**: Authoritative server supporting UDP, WebTransport, and WebSocket
 - **Native Client**: Desktop client connecting via UDP
 - **WASM Client**: Browser client connecting via WebTransport/WebSocket
-- **Voxel Map System**: Networked voxel terrain with bevy_voxel_world integration
+- **Voxel Map System**: Networked voxel terrain (voxel_map_engine, in progress)
 - **Ability System**: Data-driven abilities loaded from RON assets with networked replication
 
 ## Quick Start
@@ -66,7 +66,8 @@ bevy-lightyear-template/
 ├── certificates/       # TLS certificates (generated)
 ├── scripts/            # Build and run scripts
 ├── doc/                # Documentation and plans
-└── git/                # Git submodules (bevy_voxel_world, lightyear)
+├── crates/voxel_map_engine/ # Custom voxel engine (replacing bevy_voxel_world)
+└── git/                # Git submodules (lightyear, etc.)
 ```
 
 ## Development

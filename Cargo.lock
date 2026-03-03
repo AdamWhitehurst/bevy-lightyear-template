@@ -191,17 +191,6 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.7.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "891477e0c6a8957309ee5c45a6368af3ae14bb510732d2684ffa19af310920f9"
-dependencies = [
- "getrandom 0.2.16",
- "once_cell",
- "version_check",
-]
-
-[[package]]
-name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a15f179cd60c4584b8a8c596927aadc462e27f2ca70c04e0071964a73ba7a75"
@@ -1851,22 +1840,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_voxel_world"
-version = "0.14.0"
-dependencies = [
- "ahash 0.8.12",
- "bevy",
- "bevy_shader",
- "block-mesh",
- "futures-lite",
- "hashbrown 0.16.1",
- "ndshape",
- "rand",
- "serde",
- "weak-table",
-]
-
-[[package]]
 name = "bevy_web_keepalive"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2033,10 +2006,8 @@ dependencies = [
 [[package]]
 name = "block-mesh"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c0345520b5aa77d7d154bd578a18e7a974350931b5f41f641a7844e951b978f"
 dependencies = [
- "ilattice",
+ "glam 0.30.9",
  "ndcopy",
  "ndshape",
 ]
@@ -2252,7 +2223,6 @@ dependencies = [
  "approx",
  "avian3d",
  "bevy",
- "bevy_voxel_world",
  "leafwing-input-manager",
  "lightyear",
  "mock_instant",
@@ -2260,6 +2230,7 @@ dependencies = [
  "render",
  "test-log",
  "ui",
+ "voxel_map_engine",
 ]
 
 [[package]]
@@ -2953,6 +2924,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fast-surface-nets"
+version = "0.2.1"
+dependencies = [
+ "glam 0.29.3",
+ "ndshape",
+]
+
+[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3575,6 +3554,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36119f3a540b086b4e436bb2b588cf98a68863470e0e880f4d0842f112a3183a"
 
 [[package]]
+name = "grid-tree"
+version = "0.2.0"
+dependencies = [
+ "ahash",
+ "glam 0.30.9",
+ "ndshape",
+ "slab",
+ "smallvec",
+]
+
+[[package]]
 name = "guillotiere"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3816,15 +3806,6 @@ checksum = "3acae9609540aa318d1bc588455225fb2085b9ed0c4f6bd0d9d5bcd86f1a0344"
 dependencies = [
  "icu_normalizer",
  "icu_properties",
-]
-
-[[package]]
-name = "ilattice"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3db9046391c0e0658a18e23877706d16e48cc8b4711702b9f703776410c2b84"
-dependencies = [
- "glam 0.19.0",
 ]
 
 [[package]]
@@ -4841,7 +4822,7 @@ version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25dea7ac8057892855ec285c440160265225438c3c45072613c25a4b26e98ef5"
 dependencies = [
- "ahash 0.8.12",
+ "ahash",
  "portable-atomic",
 ]
 
@@ -5010,8 +4991,6 @@ dependencies = [
 [[package]]
 name = "ndcopy"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24f4e41b81e3f7a4b742755be1bb368a6faafc43af555fe135c36b0efe095c59"
 dependencies = [
  "ndshape",
 ]
@@ -5072,8 +5051,6 @@ dependencies = [
 [[package]]
 name = "ndshape"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "975bce586ad637e27f6dc26ee907c07050686a588695bfd64b7873a9d48a700c"
 dependencies = [
  "static_assertions",
 ]
@@ -6008,7 +5985,6 @@ dependencies = [
  "avian3d",
  "bevy",
  "bevy_common_assets",
- "bevy_voxel_world",
  "leafwing-input-manager",
  "lightyear",
  "lightyear_replication",
@@ -6016,6 +5992,7 @@ dependencies = [
  "ron 0.9.0",
  "serde",
  "serde_json",
+ "voxel_map_engine",
 ]
 
 [[package]]
@@ -6309,7 +6286,6 @@ version = "0.1.0"
 dependencies = [
  "avian3d",
  "bevy",
- "bevy_voxel_world",
  "lightyear",
  "protocol",
 ]
@@ -6720,7 +6696,6 @@ dependencies = [
  "async-compat",
  "avian3d",
  "bevy",
- "bevy_voxel_world",
  "bincode 1.3.3",
  "client",
  "leafwing-input-manager",
@@ -6733,6 +6708,7 @@ dependencies = [
  "serde",
  "test-log",
  "ui",
+ "voxel_map_engine",
 ]
 
 [[package]]
@@ -7636,6 +7612,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "voxel_map_engine"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "bevy",
+ "block-mesh",
+ "fast-surface-nets",
+ "grid-tree",
+ "ndcopy",
+ "ndshape",
+ "serde",
+]
+
+[[package]]
 name = "walkdir"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7848,15 +7838,6 @@ dependencies = [
  "dlib",
  "log",
  "pkg-config",
-]
-
-[[package]]
-name = "weak-table"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "323f4da9523e9a669e1eaf9c6e763892769b1d38c623913647bfdc1532fe4549"
-dependencies = [
- "ahash 0.7.8",
 ]
 
 [[package]]
@@ -8602,7 +8583,7 @@ version = "0.30.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c66d4b9ed69c4009f6321f762d6e61ad8a2389cd431b97cb1e146812e9e6c732"
 dependencies = [
- "ahash 0.8.12",
+ "ahash",
  "android-activity",
  "atomic-waker",
  "bitflags 2.10.0",

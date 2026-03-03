@@ -241,9 +241,9 @@ impl From<WorldVoxel> for VoxelType {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all` passes (all crates compile)
-- [ ] `cargo test-all` passes (persistence tests pass, integration tests pass or are skipped)
-- [ ] `grid-tree`, `fast-surface-nets`, `block-mesh` compile with glam 0.30
+- [x] `cargo check-all` passes (all crates compile)
+- [x] `cargo test-all` passes (persistence tests pass, integration tests pass or are skipped)
+- [x] `grid-tree`, `fast-surface-nets`, `block-mesh` compile with glam 0.30
 
 #### Manual Verification:
 - [ ] `cargo server` starts without crash (no terrain visible — expected, voxel systems stubbed)

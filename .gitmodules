@@ -7,6 +7,12 @@
 [submodule "git/avian"]
 	path = git/avian
 	url = https://github.com/Jondolf/avian.git
+[submodule "git/ndcopy-rs"]
+	path = git/ndcopy-rs
+	url = https://github.com/bonsairobo/ndcopy-rs
+[submodule "git/ndshape-rs"]
+	path = git/ndshape-rs
+	url = https://github.com/bonsairobo/ndshape-rs
 [submodule "git/grid-tree-rs"]
 	path = git/grid-tree-rs
 	url = https://github.com/AdamWhitehurst/grid-tree-rs.git

@@ -1,6 +1,5 @@
 use avian3d::prelude::{forces::ForcesItem, *};
 use bevy::prelude::*;
-use bevy_voxel_world::prelude::ChunkRenderTarget;
 use leafwing_input_manager::prelude::*;
 use lightyear::input::config::InputConfig;
 use lightyear::prelude::input::leafwing::InputPlugin;
@@ -164,7 +163,6 @@ impl Plugin for ProtocolPlugin {
         app.register_event::<TestTrigger>()
             .add_direction(NetworkDirection::Bidirectional);
 
-        app.register_component::<ChunkRenderTarget<MapWorld>>();
         // Marker components
         app.register_component::<PlayerId>();
         app.register_component::<ColorComponent>().add_prediction();
