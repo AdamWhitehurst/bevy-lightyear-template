@@ -287,10 +287,10 @@ fn test_character_has_map_instance_id() {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all` compiles
+- [x] `cargo check-all` compiles
 - [ ] `cargo test --workspace` passes (including new tests above)
-- [ ] `cargo server` starts without panic
-- [ ] `cargo client` connects without panic
+- [x] `cargo server` starts without panic
+- [x] `cargo client` connects without panic
 
 #### Manual Verification:
 - [ ] With one map instance, gameplay is unchanged — characters collide with terrain and each other normally

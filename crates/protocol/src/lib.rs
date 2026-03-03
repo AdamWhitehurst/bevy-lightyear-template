@@ -10,6 +10,7 @@ pub mod ability;
 pub mod app_state;
 pub mod hit_detection;
 pub mod map;
+pub mod physics;
 
 pub use ability::{
     ability_action_to_slot, AbilityBulletOf, AbilityBullets, AbilityCooldowns, AbilityDef,
@@ -24,8 +25,8 @@ pub use hit_detection::{
     terrain_collision_layers, GameLayer,
 };
 pub use map::{
-    attach_chunk_colliders, ChunkTarget, MapWorld, VoxelChannel, VoxelChunk, VoxelEditBroadcast,
-    VoxelEditRequest, VoxelStateSync, VoxelType,
+    attach_chunk_colliders, ChunkTarget, MapInstanceId, MapWorld, VoxelChannel, VoxelChunk,
+    VoxelEditBroadcast, VoxelEditRequest, VoxelStateSync, VoxelType,
 };
 
 pub const PROTOCOL_ID: u64 = 0;
@@ -165,6 +166,9 @@ impl Plugin for ProtocolPlugin {
 
         // Voxel map components
         app.register_component::<ChunkTarget>().add_map_entities();
+        app.register_component::<map::MapInstanceId>()
+            .add_prediction()
+            .add_map_entities();
 
         // Marker components
         app.register_component::<PlayerId>();
@@ -241,6 +245,7 @@ impl Plugin for SharedGameplayPlugin {
 
         app.add_plugins(
             PhysicsPlugins::default()
+                .with_collision_hooks::<physics::MapCollisionHooks>()
                 .build()
                 .disable::<PhysicsTransformPlugin>()
                 .disable::<PhysicsInterpolationPlugin>()

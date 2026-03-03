@@ -69,6 +69,7 @@ fn spawn_dummy_target(mut commands: Commands, overworld: Res<OverworldMap>) {
         CharacterMarker,
         Health::new(100.0),
         ChunkTarget::new(overworld.0, 1),
+        MapInstanceId(overworld.0),
         DummyTarget,
     ));
 }
@@ -204,5 +205,6 @@ fn handle_connected(
         Health::new(100.0),
         AbilityCooldowns::default(),
         ChunkTarget::new(overworld.0, 4),
+        MapInstanceId(overworld.0),
     ));
 }

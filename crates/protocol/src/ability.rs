@@ -21,6 +21,7 @@ use bevy::asset::LoadedFolder;
 use crate::hit_detection::{
     hitbox_collision_layers, MELEE_HITBOX_HALF_EXTENTS, MELEE_HITBOX_OFFSET,
 };
+use crate::map::MapInstanceId;
 use crate::{PlayerActions, PlayerId};
 
 const PROJECTILE_SPAWN_OFFSET: f32 = 3.0;
@@ -1007,9 +1008,11 @@ pub fn apply_on_tick_effects(
         Option<&OnHitEffects>,
     )>,
     mut caster_query: Query<(&mut Position, &Rotation)>,
+    map_id_query: Query<&MapInstanceId>,
 ) {
     let tick = timeline.tick();
     for (entity, effects, active, on_hit_effects) in &query {
+        let caster_map_id = map_id_query.get(active.caster).ok();
         for effect in &effects.0 {
             match effect {
                 AbilityEffect::Melee { .. } => {
@@ -1019,6 +1022,7 @@ pub fn apply_on_tick_effects(
                         active,
                         on_hit_effects,
                         &caster_query,
+                        caster_map_id,
                     );
                 }
                 AbilityEffect::AreaOfEffect {
@@ -1035,6 +1039,7 @@ pub fn apply_on_tick_effects(
                         *radius,
                         tick,
                         duration_ticks.unwrap_or(1),
+                        caster_map_id,
                     );
                 }
                 AbilityEffect::Projectile {
@@ -1100,6 +1105,7 @@ fn spawn_melee_hitbox(
     active: &ActiveAbility,
     on_hit_effects: Option<&OnHitEffects>,
     caster_query: &Query<(&mut Position, &Rotation)>,
+    caster_map_id: Option<&MapInstanceId>,
 ) {
     let Ok((caster_pos, caster_rot)) = caster_query.get(active.caster) else {
         warn!(
@@ -1133,6 +1139,9 @@ fn spawn_melee_hitbox(
     if let Some(on_hit) = on_hit_effects {
         cmd.insert(on_hit.clone());
     }
+    if let Some(map_id) = caster_map_id {
+        cmd.insert(map_id.clone());
+    }
 }
 
 fn spawn_aoe_hitbox(
@@ -1144,6 +1153,7 @@ fn spawn_aoe_hitbox(
     radius: f32,
     spawn_tick: Tick,
     duration_ticks: u16,
+    caster_map_id: Option<&MapInstanceId>,
 ) {
     info!("Spawning AoE hitbox with {duration_ticks:?} lifetime");
     let Ok((caster_pos, caster_rot)) = caster_query.get(active.caster) else {
@@ -1174,6 +1184,9 @@ fn spawn_aoe_hitbox(
     ));
     if let Some(on_hit) = on_hit_effects {
         cmd.insert(on_hit.clone());
+    }
+    if let Some(map_id) = caster_map_id {
+        cmd.insert(map_id.clone());
     }
 }
 
@@ -1399,6 +1412,7 @@ pub fn ability_projectile_spawn(
     )>,
     caster_query: Query<(&Position, &Rotation)>,
     server_query: Query<&ControlledBy>,
+    map_id_query: Query<&MapInstanceId>,
 ) {
     let tick = timeline.tick();
 
@@ -1432,6 +1446,10 @@ pub fn ability_projectile_spawn(
             cmd.insert(on_hit.clone());
         }
 
+        if let Ok(map_id) = map_id_query.get(active.caster) {
+            cmd.insert(map_id.clone());
+        }
+
         if let Ok(controlled_by) = server_query.get(active.caster) {
             cmd.insert((
                 Replicate::to_clients(NetworkTarget::All),
@@ -1450,11 +1468,16 @@ pub fn ability_projectile_spawn(
 pub fn handle_ability_projectile_spawn(
     mut commands: Commands,
     spawn_query: Query<
-        (Entity, &AbilityProjectileSpawn, Option<&OnHitEffects>),
+        (
+            Entity,
+            &AbilityProjectileSpawn,
+            Option<&OnHitEffects>,
+            Option<&MapInstanceId>,
+        ),
         Without<AbilityBullets>,
     >,
 ) {
-    for (spawn_entity, spawn_info, on_hit_effects) in &spawn_query {
+    for (spawn_entity, spawn_info, on_hit_effects, map_id) in &spawn_query {
         info!("Spawning ability bullet from {:?}", spawn_info.ability_id);
         let mut bullet_cmd = commands.spawn((
             Position(spawn_info.position),
@@ -1472,6 +1495,9 @@ pub fn handle_ability_projectile_spawn(
         ));
         if let Some(on_hit) = on_hit_effects {
             bullet_cmd.insert(on_hit.clone());
+        }
+        if let Some(map_id) = map_id {
+            bullet_cmd.insert(map_id.clone());
         }
     }
 }

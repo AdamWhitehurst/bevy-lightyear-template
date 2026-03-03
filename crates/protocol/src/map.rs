@@ -1,4 +1,5 @@
 use avian3d::prelude::*;
+use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 pub use voxel_map_engine::prelude::{ChunkTarget, VoxelChunk, VoxelType};
@@ -42,16 +43,28 @@ pub struct VoxelStateSync {
     pub modifications: Vec<(IVec3, VoxelType)>,
 }
 
+/// Identifies which map instance a physics entity belongs to.
+/// The inner Entity points to the VoxelMapInstance entity.
+#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
+#[require(ActiveCollisionHooks::FILTER_PAIRS)]
+pub struct MapInstanceId(pub Entity);
+
+impl MapEntities for MapInstanceId {
+    fn map_entities<M: EntityMapper>(&mut self, entity_mapper: &mut M) {
+        self.0 = entity_mapper.get_mapped(self.0);
+    }
+}
+
 /// Attaches trimesh colliders to voxel chunks whenever their mesh changes.
 pub fn attach_chunk_colliders(
     mut commands: Commands,
     chunks: Query<
-        (Entity, &Mesh3d, Option<&Collider>),
+        (Entity, &Mesh3d, &ChildOf, Option<&Collider>),
         (With<VoxelChunk>, Or<(Changed<Mesh3d>, Added<Mesh3d>)>),
     >,
     meshes: Res<Assets<Mesh>>,
 ) {
-    for (entity, mesh_handle, existing_collider) in chunks.iter() {
+    for (entity, mesh_handle, child_of, existing_collider) in chunks.iter() {
         let Some(mesh) = meshes.get(&mesh_handle.0) else {
             warn!("Chunk entity {entity:?} has Mesh3d but mesh asset not found");
             continue;
@@ -67,6 +80,7 @@ pub fn attach_chunk_colliders(
             collider,
             RigidBody::Static,
             crate::hit_detection::terrain_collision_layers(),
+            MapInstanceId(child_of.parent()),
         ));
     }
 }
