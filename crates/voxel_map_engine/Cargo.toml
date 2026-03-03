@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { workspace = true, features = ["bevy_mesh"] }
+bevy = { workspace = true, features = ["bevy_mesh", "bevy_pbr", "bevy_log", "bevy_asset", "bevy_render", "bevy_image", "bevy_color"] }
 ndshape = { path = "../../git/ndshape-rs" }
 ndcopy = { path = "../../git/ndcopy-rs" }
 grid-tree = { path = "../../git/grid-tree-rs" }

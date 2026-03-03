@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use grid_tree::OctreeI32;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::types::{ChunkData, WorldVoxel};
 
@@ -10,6 +10,8 @@ pub struct VoxelMapInstance {
     pub tree: OctreeI32<Option<ChunkData>>,
     pub modified_voxels: HashMap<IVec3, WorldVoxel>,
     pub write_buffer: Vec<(IVec3, WorldVoxel)>,
+    pub loaded_chunks: HashSet<IVec3>,
+    pub debug_colors: bool,
 }
 
 impl VoxelMapInstance {
@@ -18,6 +20,8 @@ impl VoxelMapInstance {
             tree: OctreeI32::new(tree_height as u8),
             modified_voxels: HashMap::new(),
             write_buffer: Vec::new(),
+            loaded_chunks: HashSet::new(),
+            debug_colors: false,
         }
     }
 }

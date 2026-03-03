@@ -450,9 +450,9 @@ Update to use VoxelPlugin, spawn a map entity with `VoxelMapInstance` + `VoxelMa
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all` passes
-- [ ] `cargo test -p voxel_map_engine` passes (lifecycle unit tests: chunk spawn within range, despawn outside range)
-- [ ] `cargo test-all` passes
+- [x] `cargo check-all` passes
+- [x] `cargo test -p voxel_map_engine` passes (lifecycle unit tests: chunk spawn within range, despawn outside range)
+- [x] `cargo test-all` passes
 
 #### Manual Verification:
 - [ ] `cargo run --example terrain -p voxel_map_engine` shows terrain generating around a moving camera

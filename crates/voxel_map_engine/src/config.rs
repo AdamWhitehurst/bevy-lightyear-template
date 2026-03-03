@@ -1,7 +1,8 @@
 use bevy::prelude::*;
+use std::sync::Arc;
 
 /// Generation function: given chunk position, returns SDF values for the padded 18^3 array.
-pub type SdfGenerator = Box<dyn Fn(IVec3) -> Vec<f32> + Send + Sync>;
+pub type SdfGenerator = Arc<dyn Fn(IVec3) -> Vec<f32> + Send + Sync>;
 
 /// Configuration for a map instance.
 #[derive(Component)]

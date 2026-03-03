@@ -1,58 +1,45 @@
+use std::sync::Arc;
+
 use bevy::prelude::*;
 use voxel_map_engine::prelude::*;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugins(VoxelPlugin)
         .add_systems(Startup, setup)
+        .add_systems(Update, move_camera)
         .run();
 }
 
-fn setup(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let material = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.3, 0.6, 0.2),
-        perceptual_roughness: 0.9,
-        ..default()
-    });
+fn setup(mut commands: Commands) {
+    let generator: SdfGenerator = Arc::new(flat_terrain_sdf);
 
-    let mesher = SurfaceNetsMesher;
-    let map_entity = commands.spawn(VoxelMapInstance::new(4)).id();
+    let mut instance = VoxelMapInstance::new(5);
+    instance.debug_colors = true;
 
-    let chunk_size = CHUNK_SIZE as i32;
-
-    for x in -8..=8 {
-        for z in -8..=8 {
-            for y in [-1, 0] {
-                let chunk_pos = IVec3::new(x, y, z);
-                let sdf = flat_terrain_sdf(chunk_pos);
-
-                if let Some(mesh) = mesher.mesh_chunk(&sdf) {
-                    let offset = Vec3::new(
-                        (x * chunk_size) as f32,
-                        (y * chunk_size) as f32,
-                        (z * chunk_size) as f32,
-                    );
-                    let mesh_handle = meshes.add(mesh);
-                    let child = commands
-                        .spawn((
-                            Mesh3d(mesh_handle),
-                            MeshMaterial3d(material.clone()),
-                            Transform::from_translation(offset),
-                        ))
-                        .id();
-                    commands.entity(map_entity).add_child(child);
-                }
-            }
-        }
-    }
+    let map_entity = commands
+        .spawn((
+            instance,
+            VoxelMapConfig {
+                seed: 0,
+                spawning_distance: 5,
+                bounds: None,
+                tree_height: 5,
+                generator,
+            },
+            PendingChunks::default(),
+            Transform::default(),
+        ))
+        .id();
 
     commands.spawn((
         Camera3d::default(),
         Transform::from_translation(Vec3::new(30.0, 20.0, 30.0)).looking_at(Vec3::ZERO, Vec3::Y),
+        ChunkTarget {
+            map_entity,
+            distance: 5,
+        },
     ));
 
     commands.spawn((
@@ -63,4 +50,37 @@ fn setup(
         },
         Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.5, 0.5, 0.0)),
     ));
+}
+
+fn move_camera(
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut query: Query<&mut Transform, With<Camera3d>>,
+) {
+    let Ok(mut transform) = query.single_mut() else {
+        return;
+    };
+
+    let speed = 40.0 * time.delta_secs();
+    let forward = Vec3::new(transform.forward().x, 0.0, transform.forward().z).normalize_or_zero();
+    let right = Vec3::new(transform.right().x, 0.0, transform.right().z).normalize_or_zero();
+
+    if keys.pressed(KeyCode::KeyW) {
+        transform.translation += forward * speed;
+    }
+    if keys.pressed(KeyCode::KeyS) {
+        transform.translation -= forward * speed;
+    }
+    if keys.pressed(KeyCode::KeyA) {
+        transform.translation -= right * speed;
+    }
+    if keys.pressed(KeyCode::KeyD) {
+        transform.translation += right * speed;
+    }
+    if keys.pressed(KeyCode::Space) {
+        transform.translation.y += speed;
+    }
+    if keys.pressed(KeyCode::ShiftLeft) {
+        transform.translation.y -= speed;
+    }
 }
