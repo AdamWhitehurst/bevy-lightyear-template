@@ -17,6 +17,7 @@ impl Plugin for VoxelPlugin {
         app.add_systems(
             Update,
             (
+                lifecycle::ensure_pending_chunks,
                 lifecycle::update_chunks,
                 lifecycle::poll_chunk_tasks,
                 lifecycle::despawn_out_of_range_chunks,

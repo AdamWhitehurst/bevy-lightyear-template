@@ -27,6 +27,16 @@ pub fn init_default_material(
     commands.insert_resource(DefaultVoxelMaterial(handle));
 }
 
+/// Auto-insert `PendingChunks` on map entities that lack it.
+pub fn ensure_pending_chunks(
+    mut commands: Commands,
+    query: Query<Entity, (With<VoxelMapInstance>, Without<PendingChunks>)>,
+) {
+    for entity in &query {
+        commands.entity(entity).insert(PendingChunks::default());
+    }
+}
+
 /// Determine which chunk positions should be loaded based on all targets for a map.
 /// Spawn async generation tasks for missing chunks and mark out-of-range chunks for removal.
 pub fn update_chunks(
@@ -136,6 +146,11 @@ pub fn poll_chunk_tasks(
         while i < pending.tasks.len() {
             if let Some(result) = check_ready(&mut pending.tasks[i]) {
                 let _ = pending.tasks.swap_remove(i);
+                debug_assert!(
+                    pending.pending_positions.contains(&result.position),
+                    "poll_chunk_tasks: completed chunk at {:?} was not in pending_positions",
+                    result.position
+                );
                 pending.pending_positions.remove(&result.position);
                 handle_completed_chunk(
                     &mut commands,
@@ -215,6 +230,13 @@ pub fn despawn_out_of_range_chunks(
     map_query: Query<&VoxelMapInstance>,
 ) {
     for (entity, chunk, child_of) in &chunk_query {
+        debug_assert!(
+            map_query.get(child_of.0).is_ok(),
+            "VoxelChunk {:?} at {:?} is child of {:?} which has no VoxelMapInstance",
+            entity,
+            chunk.position,
+            child_of.0
+        );
         let Ok(instance) = map_query.get(child_of.0) else {
             warn!(
                 "VoxelChunk entity {:?} has ChildOf pointing to non-map entity {:?}",
@@ -242,6 +264,11 @@ pub fn flush_write_buffer(mut map_query: Query<&mut VoxelMapInstance>) {
         for (world_pos, voxel) in buffer {
             instance.modified_voxels.insert(world_pos, voxel);
             let chunk_pos = voxel_to_chunk_pos(world_pos);
+            debug_assert_eq!(
+                voxel_to_chunk_pos(chunk_pos * CHUNK_SIZE as i32),
+                chunk_pos,
+                "flush_write_buffer: world→chunk conversion not reversible for {world_pos}"
+            );
             invalidated.insert(chunk_pos);
             invalidate_neighbors(world_pos, chunk_pos, &mut invalidated);
         }

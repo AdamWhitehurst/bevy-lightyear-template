@@ -13,3 +13,32 @@ pub struct VoxelMapConfig {
     pub tree_height: u32,
     pub generator: SdfGenerator,
 }
+
+impl VoxelMapConfig {
+    pub fn new(
+        seed: u64,
+        spawning_distance: u32,
+        bounds: Option<IVec3>,
+        tree_height: u32,
+        generator: SdfGenerator,
+    ) -> Self {
+        debug_assert!(tree_height > 0, "VoxelMapConfig: tree_height must be > 0");
+        debug_assert!(
+            spawning_distance > 0,
+            "VoxelMapConfig: spawning_distance must be > 0"
+        );
+        if let Some(b) = bounds {
+            debug_assert!(
+                b.x > 0 && b.y > 0 && b.z > 0,
+                "VoxelMapConfig: bounded maps must have all-positive bounds, got {b}"
+            );
+        }
+        Self {
+            seed,
+            spawning_distance,
+            bounds,
+            tree_height,
+            generator,
+        }
+    }
+}

@@ -14,6 +14,19 @@ pub struct ChunkTarget {
     pub distance: u32,
 }
 
+impl ChunkTarget {
+    pub fn new(map_entity: Entity, distance: u32) -> Self {
+        debug_assert!(
+            map_entity != Entity::PLACEHOLDER,
+            "ChunkTarget::new called with Entity::PLACEHOLDER — must point to a real map entity"
+        );
+        Self {
+            map_entity,
+            distance,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
