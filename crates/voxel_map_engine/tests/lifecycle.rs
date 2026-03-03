@@ -142,6 +142,79 @@ fn bounded_map_respects_bounds() {
 }
 
 #[test]
+fn chunk_target_routes_to_correct_map() {
+    let mut app = test_app();
+    let map_a = spawn_map(&mut app, 1);
+    let map_b = spawn_map(&mut app, 1);
+
+    // Target only points at map_a
+    spawn_target(&mut app, map_a, Vec3::ZERO, 0);
+
+    tick(&mut app, 20);
+
+    let loaded_a = loaded_chunk_count(&app, map_a);
+    let loaded_b = loaded_chunk_count(&app, map_b);
+
+    assert_eq!(loaded_a, 1, "map_a should have 1 loaded chunk (distance=0)");
+    assert_eq!(
+        loaded_b, 0,
+        "map_b should have 0 loaded chunks (no target pointing to it)"
+    );
+}
+
+#[test]
+fn switching_chunk_target_between_maps() {
+    let mut app = test_app();
+    let map_a = spawn_map(&mut app, 1);
+    let map_b = spawn_map(&mut app, 1);
+
+    let target = spawn_target(&mut app, map_a, Vec3::ZERO, 0);
+
+    // Let map_a chunks generate
+    tick(&mut app, 20);
+    assert_eq!(loaded_chunk_count(&app, map_a), 1);
+    assert_eq!(loaded_chunk_count(&app, map_b), 0);
+
+    // Switch target to map_b
+    app.world_mut().entity_mut(target).insert(ChunkTarget {
+        map_entity: map_b,
+        distance: 0,
+    });
+
+    tick(&mut app, 20);
+
+    assert_eq!(
+        loaded_chunk_count(&app, map_a),
+        0,
+        "map_a should unload after target switched away"
+    );
+    assert_eq!(
+        loaded_chunk_count(&app, map_b),
+        1,
+        "map_b should load after target switched to it"
+    );
+}
+
+#[test]
+fn multiple_targets_on_different_maps() {
+    let mut app = test_app();
+    let map_a = spawn_map(&mut app, 1);
+    let map_b = spawn_map(&mut app, 1);
+
+    // Target A at origin → map_a, Target B at origin → map_b
+    spawn_target(&mut app, map_a, Vec3::ZERO, 1);
+    spawn_target(&mut app, map_b, Vec3::ZERO, 0);
+
+    tick(&mut app, 20);
+
+    let loaded_a = loaded_chunk_count(&app, map_a);
+    let loaded_b = loaded_chunk_count(&app, map_b);
+
+    assert_eq!(loaded_a, 27, "map_a should have 3^3=27 chunks (distance=1)");
+    assert_eq!(loaded_b, 1, "map_b should have 1 chunk (distance=0)");
+}
+
+#[test]
 fn chunk_entities_are_children_of_map() {
     let mut app = test_app();
     let map = spawn_map(&mut app, 1);

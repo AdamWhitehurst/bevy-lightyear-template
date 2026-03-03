@@ -768,13 +768,13 @@ This is preparation only — full portal/transition systems are out of scope for
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all` passes
-- [ ] `cargo test -p voxel_map_engine` passes:
+- [x] `cargo check-all` passes
+- [x] `cargo test -p voxel_map_engine` passes:
   - Multiple VoxelMapInstance entities coexist
   - ChunkTarget routing is correct (chunks only spawn for targeted map)
   - Bounded maps don't spawn chunks outside bounds
   - VoxelWorld API operations are instance-isolated
-- [ ] `cargo test-all` passes
+- [x] `cargo test-all` passes
 
 #### Manual Verification:
 - [ ] `cargo run --example multi_instance -p voxel_map_engine` shows three distinct terrain instances

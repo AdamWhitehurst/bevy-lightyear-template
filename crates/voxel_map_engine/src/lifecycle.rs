@@ -45,11 +45,12 @@ pub fn update_chunks(
         &mut VoxelMapInstance,
         &VoxelMapConfig,
         &mut PendingChunks,
+        &GlobalTransform,
     )>,
     target_query: Query<(&ChunkTarget, &GlobalTransform)>,
 ) {
-    for (map_entity, mut instance, config, mut pending) in &mut map_query {
-        let desired = collect_desired_positions(map_entity, config, &target_query);
+    for (map_entity, mut instance, config, mut pending, map_transform) in &mut map_query {
+        let desired = collect_desired_positions(map_entity, map_transform, config, &target_query);
 
         remove_out_of_range_chunks(&mut instance, &desired);
         spawn_missing_chunks(&mut instance, &mut pending, config, &desired);
@@ -58,16 +59,20 @@ pub fn update_chunks(
 
 fn collect_desired_positions(
     map_entity: Entity,
+    map_transform: &GlobalTransform,
     config: &VoxelMapConfig,
     target_query: &Query<(&ChunkTarget, &GlobalTransform)>,
 ) -> HashSet<IVec3> {
     let mut desired = HashSet::new();
+    // invert the map transform to get the local transform of the target
+    let map_inv = map_transform.affine().inverse();
 
     for (target, transform) in target_query.iter() {
         if target.map_entity != map_entity {
             continue;
         }
-        let center = world_to_chunk_pos(transform.translation());
+        let local_pos = map_inv.transform_point3(transform.translation());
+        let center = world_to_chunk_pos(local_pos);
         let dist = target.distance as i32;
 
         for x in -dist..=dist {

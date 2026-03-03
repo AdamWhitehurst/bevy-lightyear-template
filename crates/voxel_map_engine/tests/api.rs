@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
+use ndshape::ConstShape;
 use voxel_map_engine::prelude::*;
 
 fn test_app() -> App {
@@ -15,7 +16,10 @@ fn test_app() -> App {
 }
 
 fn spawn_map(app: &mut App, spawning_distance: u32) -> Entity {
-    let generator: SdfGenerator = Arc::new(flat_terrain_sdf);
+    spawn_map_with(app, spawning_distance, Arc::new(flat_terrain_sdf))
+}
+
+fn spawn_map_with(app: &mut App, spawning_distance: u32, generator: SdfGenerator) -> Entity {
     app.world_mut()
         .spawn((
             VoxelMapInstance::new(5),
@@ -272,6 +276,107 @@ fn raycast_misses_empty_space() {
             let ray = Ray3d::new(Vec3::new(0.5, 10.0, 0.5), Dir3::X);
             let result = vw.raycast(map, ray, 20.0, |v| matches!(v, WorldVoxel::Solid(_)));
             assert!(result.is_none(), "should not hit anything above terrain");
+        })
+        .unwrap();
+}
+
+/// Test: get_voxel returns independent data per map instance.
+#[test]
+fn get_voxel_independent_between_instances() {
+    let mut app = test_app();
+    let map_a = spawn_map(&mut app, 1);
+    let map_b = spawn_map(&mut app, 1);
+    spawn_target(&mut app, map_a, Vec3::ZERO, 0);
+    spawn_target(&mut app, map_b, Vec3::ZERO, 0);
+    tick(&mut app, 1);
+
+    let edit_pos = IVec3::new(3, 5, 7);
+    app.world_mut()
+        .run_system_once(move |mut vw: VoxelWorld| {
+            vw.set_voxel(map_a, edit_pos, WorldVoxel::Solid(42));
+        })
+        .unwrap();
+
+    tick(&mut app, 1);
+
+    app.world_mut()
+        .run_system_once(move |vw: VoxelWorld| {
+            assert_eq!(
+                vw.get_voxel(map_a, edit_pos),
+                WorldVoxel::Solid(42),
+                "map_a should have the written voxel"
+            );
+            assert_eq!(
+                vw.get_voxel(map_b, edit_pos),
+                WorldVoxel::Air,
+                "map_b should be unaffected (y=5 is air in flat terrain)"
+            );
+        })
+        .unwrap();
+}
+
+/// Test: set_voxel on one instance does not modify another instance's state.
+#[test]
+fn set_voxel_isolated_between_instances() {
+    let mut app = test_app();
+    let map_a = spawn_map(&mut app, 1);
+    let map_b = spawn_map(&mut app, 1);
+    spawn_target(&mut app, map_a, Vec3::ZERO, 0);
+    spawn_target(&mut app, map_b, Vec3::ZERO, 0);
+    tick(&mut app, 1);
+
+    let edit_pos = IVec3::new(2, 3, 4);
+    app.world_mut()
+        .run_system_once(move |mut vw: VoxelWorld| {
+            vw.set_voxel(map_b, edit_pos, WorldVoxel::Solid(7));
+        })
+        .unwrap();
+
+    tick(&mut app, 1);
+
+    let instance_a = app.world().get::<VoxelMapInstance>(map_a).unwrap();
+    assert!(
+        instance_a.modified_voxels.is_empty(),
+        "map_a should have no modified voxels after editing map_b"
+    );
+
+    let instance_b = app.world().get::<VoxelMapInstance>(map_b).unwrap();
+    assert_eq!(
+        instance_b.modified_voxels.get(&edit_pos),
+        Some(&WorldVoxel::Solid(7)),
+        "map_b should contain the edit"
+    );
+}
+
+/// Returns an SDF generator that produces all-air chunks (positive values everywhere).
+fn all_air_sdf(_chunk_pos: IVec3) -> Vec<f32> {
+    vec![1.0f32; PaddedChunkShape::USIZE]
+}
+
+/// Test: raycast on one map does not see another map's voxels.
+#[test]
+fn raycast_isolated_between_instances() {
+    let mut app = test_app();
+    let map_a = spawn_map(&mut app, 1);
+    let map_b = spawn_map_with(&mut app, 1, Arc::new(all_air_sdf));
+    tick(&mut app, 1);
+
+    app.world_mut()
+        .run_system_once(move |vw: VoxelWorld| {
+            let ray = Ray3d::new(Vec3::new(0.5, 10.0, 0.5), Dir3::NEG_Y);
+            let filter = |v: WorldVoxel| matches!(v, WorldVoxel::Solid(_));
+
+            let hit_a = vw.raycast(map_a, ray, 50.0, &filter);
+            assert!(
+                hit_a.is_some(),
+                "map_a (flat terrain) should be hit by downward ray"
+            );
+
+            let hit_b = vw.raycast(map_b, ray, 50.0, &filter);
+            assert!(
+                hit_b.is_none(),
+                "map_b (all air) should not be hit by any ray"
+            );
         })
         .unwrap();
 }
