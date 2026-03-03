@@ -119,7 +119,7 @@ fn spawn_missing_chunks(
             continue;
         }
 
-        spawn_chunk_gen_task(pending, pos, &config.generator);
+        spawn_chunk_gen_task(pending, pos, &config.generator, &instance.modified_voxels);
         spawned += 1;
     }
 }

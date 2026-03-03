@@ -1,3 +1,4 @@
+pub mod api;
 pub mod chunk;
 pub mod config;
 pub mod generation;
@@ -5,6 +6,7 @@ pub mod instance;
 pub mod lifecycle;
 pub mod mesh_cache;
 pub mod meshing;
+pub mod raycast;
 pub mod types;
 
 use bevy::prelude::*;
@@ -30,6 +32,7 @@ impl Plugin for VoxelPlugin {
 
 pub mod prelude {
     pub use crate::VoxelPlugin;
+    pub use crate::api::*;
     pub use crate::chunk::*;
     pub use crate::config::*;
     pub use crate::generation::*;
@@ -37,5 +40,6 @@ pub mod prelude {
     pub use crate::lifecycle::DefaultVoxelMaterial;
     pub use crate::mesh_cache::*;
     pub use crate::meshing::*;
+    pub use crate::raycast::*;
     pub use crate::types::*;
 }

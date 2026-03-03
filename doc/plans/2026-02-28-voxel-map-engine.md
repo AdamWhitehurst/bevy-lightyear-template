@@ -542,18 +542,18 @@ Bevy app that:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all` passes
-- [ ] `cargo test -p voxel_map_engine` passes:
+- [x] `cargo check-all` passes
+- [x] `cargo test -p voxel_map_engine` passes:
   - `get_voxel`/`set_voxel` round-trip
   - Raycast against known geometry (flat plane at y=0, ray from above hits at y=0)
   - Write buffer flush triggers remesh
   - Modified voxels survive chunk despawn/respawn cycle
-- [ ] `cargo test-all` passes
+- [x] `cargo test-all` passes
 
 #### Manual Verification:
-- [ ] `cargo run --example editing -p voxel_map_engine` allows placing/removing voxels
-- [ ] Edits are visible immediately (chunk remeshes within 1-2 frames)
-- [ ] Edits persist when moving away and returning (modified_voxels survives chunk cycle)
+- [x] `cargo run --example editing -p voxel_map_engine` allows placing/removing voxels
+- [x] Edits are visible immediately (chunk remeshes within 1-2 frames)
+- [x] Edits persist when moving away and returning (modified_voxels survives chunk cycle)
 
 ---
 
