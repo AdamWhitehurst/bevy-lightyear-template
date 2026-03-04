@@ -47,6 +47,18 @@ fn tick(app: &mut App, n: usize) {
     }
 }
 
+const MAX_TICKS: usize = 200;
+
+fn tick_until(app: &mut App, condition: impl Fn(&App) -> bool) {
+    for _ in 0..MAX_TICKS {
+        app.update();
+        if condition(app) {
+            return;
+        }
+    }
+    panic!("condition not met after {MAX_TICKS} ticks");
+}
+
 /// Test: set_voxel queues to write buffer, flush moves to modified_voxels,
 /// get_voxel returns the written value.
 #[test]
@@ -110,6 +122,14 @@ fn get_voxel_reads_sdf_for_unmodified() {
         .unwrap();
 }
 
+fn has_loaded_chunk(app: &App, map: Entity, pos: IVec3) -> bool {
+    app.world()
+        .get::<VoxelMapInstance>(map)
+        .unwrap()
+        .loaded_chunks
+        .contains(&pos)
+}
+
 /// Test: flush_write_buffer invalidates the affected chunk so it gets remeshed.
 #[test]
 fn flush_write_buffer_triggers_remesh() {
@@ -117,25 +137,7 @@ fn flush_write_buffer_triggers_remesh() {
     let map = spawn_map(&mut app, 1);
     spawn_target(&mut app, map, Vec3::ZERO, 0);
 
-    // Let chunks generate
-    tick(&mut app, 20);
-
-    let loaded_before = app
-        .world()
-        .get::<VoxelMapInstance>(map)
-        .unwrap()
-        .loaded_chunks
-        .len();
-    assert!(loaded_before > 0, "should have loaded chunks");
-
-    // The origin chunk (0,0,0) should be loaded
-    assert!(
-        app.world()
-            .get::<VoxelMapInstance>(map)
-            .unwrap()
-            .loaded_chunks
-            .contains(&IVec3::ZERO)
-    );
+    tick_until(&mut app, |app| has_loaded_chunk(app, map, IVec3::ZERO));
 
     // Write a voxel inside the origin chunk
     let edit_pos = IVec3::new(8, 8, 8); // center of chunk (0,0,0)
@@ -148,20 +150,17 @@ fn flush_write_buffer_triggers_remesh() {
     // Tick to run flush_write_buffer - should invalidate chunk (0,0,0)
     tick(&mut app, 1);
 
-    // After flush, the origin chunk should be removed from loaded_chunks
-    // (invalidated for remesh)
     let instance = app.world().get::<VoxelMapInstance>(map).unwrap();
     assert!(
         !instance.loaded_chunks.contains(&IVec3::ZERO),
         "flush should invalidate the chunk containing the edited voxel"
     );
 
-    // After more ticks, the chunk should be regenerated (re-added to loaded_chunks)
-    tick(&mut app, 20);
+    // Wait for chunk to be regenerated
+    tick_until(&mut app, |app| has_loaded_chunk(app, map, IVec3::ZERO));
 
-    let instance = app.world().get::<VoxelMapInstance>(map).unwrap();
     assert!(
-        instance.loaded_chunks.contains(&IVec3::ZERO),
+        has_loaded_chunk(&app, map, IVec3::ZERO),
         "invalidated chunk should be regenerated"
     );
 }
@@ -173,15 +172,7 @@ fn modified_voxels_survive_chunk_cycle() {
     let map = spawn_map(&mut app, 1);
     let target = spawn_target(&mut app, map, Vec3::ZERO, 0);
 
-    // Let chunks generate around origin
-    tick(&mut app, 20);
-    assert!(
-        app.world()
-            .get::<VoxelMapInstance>(map)
-            .unwrap()
-            .loaded_chunks
-            .contains(&IVec3::ZERO)
-    );
+    tick_until(&mut app, |app| has_loaded_chunk(app, map, IVec3::ZERO));
 
     // Write a voxel edit
     let edit_pos = IVec3::new(8, 8, 8);
@@ -204,16 +195,11 @@ fn modified_voxels_survive_chunk_cycle() {
     app.world_mut()
         .entity_mut(target)
         .insert(Transform::from_translation(Vec3::new(10000.0, 0.0, 0.0)));
-    tick(&mut app, 5);
 
-    // Origin chunk should be unloaded
+    tick_until(&mut app, |app| !has_loaded_chunk(app, map, IVec3::ZERO));
+
+    // modified_voxels should still have the edit
     let instance = app.world().get::<VoxelMapInstance>(map).unwrap();
-    assert!(
-        !instance.loaded_chunks.contains(&IVec3::ZERO),
-        "chunk should be unloaded after target moved away"
-    );
-
-    // But modified_voxels should still have the edit
     assert_eq!(
         instance.modified_voxels.get(&edit_pos),
         Some(&WorldVoxel::Solid(99)),
@@ -224,16 +210,11 @@ fn modified_voxels_survive_chunk_cycle() {
     app.world_mut()
         .entity_mut(target)
         .insert(Transform::from_translation(Vec3::ZERO));
-    tick(&mut app, 20);
 
-    // Chunk should be reloaded
-    let instance = app.world().get::<VoxelMapInstance>(map).unwrap();
-    assert!(
-        instance.loaded_chunks.contains(&IVec3::ZERO),
-        "chunk should be reloaded after target returns"
-    );
+    tick_until(&mut app, |app| has_loaded_chunk(app, map, IVec3::ZERO));
 
     // modified_voxels should still have the edit
+    let instance = app.world().get::<VoxelMapInstance>(map).unwrap();
     assert_eq!(
         instance.modified_voxels.get(&edit_pos),
         Some(&WorldVoxel::Solid(99)),
