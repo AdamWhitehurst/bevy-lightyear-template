@@ -16,9 +16,7 @@ use voxel_map_engine::prelude::{
 /// Plugin managing server-side voxel map functionality
 pub struct ServerMapPlugin;
 
-/// Resource tracking the primary overworld map entity.
-#[derive(Resource)]
-pub struct OverworldMap(pub Entity);
+use protocol::OverworldMap;
 
 pub fn spawn_overworld(mut commands: Commands, map_world: Res<MapWorld>) {
     let map = commands

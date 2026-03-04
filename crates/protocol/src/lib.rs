@@ -26,7 +26,7 @@ pub use hit_detection::{
 };
 pub use map::{
     attach_chunk_colliders, ChunkTarget, MapChannel, MapInstanceId, MapSwitchTarget,
-    MapTransitionStart, MapWorld, PlayerMapSwitchRequest, VoxelChannel, VoxelChunk,
+    MapTransitionStart, MapWorld, OverworldMap, PlayerMapSwitchRequest, VoxelChannel, VoxelChunk,
     VoxelEditBroadcast, VoxelEditRequest, VoxelStateSync, VoxelType,
 };
 

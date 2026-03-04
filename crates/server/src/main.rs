@@ -1,10 +1,12 @@
 pub mod gameplay;
 pub mod map;
+pub mod map_transition;
 pub mod network;
 
 use bevy::prelude::*;
 use gameplay::ServerGameplayPlugin;
 use map::ServerMapPlugin;
+use map_transition::ServerMapTransitionPlugin;
 use network::ServerNetworkPlugin;
 use protocol::*;
 use std::time::Duration;
@@ -34,5 +36,6 @@ fn main() {
         .add_plugins(ServerNetworkPlugin::default())
         .add_plugins(ServerGameplayPlugin)
         .add_plugins(ServerMapPlugin)
+        .add_plugins(ServerMapTransitionPlugin)
         .run();
 }

@@ -872,8 +872,8 @@ Note: `find_or_spawn_homebase` and `initiate_map_transition` must be `pub` (or `
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all` compiles
-- [ ] `cargo test --workspace` passes (including transition logic tests)
+- [x] `cargo check-all` compiles
+- [x] `cargo test --workspace` passes (including transition logic tests)
 - [ ] `cargo server` starts without panic
 
 #### Manual Verification:

@@ -7,7 +7,8 @@ use lightyear::prelude::server::ClientOf;
 use lightyear::prelude::*;
 use protocol::*;
 
-use crate::map::{spawn_overworld, OverworldMap};
+use crate::map::spawn_overworld;
+use protocol::OverworldMap;
 
 pub struct ServerGameplayPlugin;
 

@@ -76,6 +76,10 @@ impl MapEntities for MapInstanceId {
     }
 }
 
+/// Resource tracking the primary overworld map entity.
+#[derive(Resource)]
+pub struct OverworldMap(pub Entity);
+
 /// Attaches trimesh colliders to voxel chunks whenever their mesh changes.
 pub fn attach_chunk_colliders(
     mut commands: Commands,
