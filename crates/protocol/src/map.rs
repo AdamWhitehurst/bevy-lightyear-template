@@ -43,6 +43,27 @@ pub struct VoxelStateSync {
     pub modifications: Vec<(IVec3, VoxelType)>,
 }
 
+/// Channel for map transition messages
+pub struct MapChannel;
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
+pub enum MapSwitchTarget {
+    Overworld,
+    Homebase,
+}
+
+/// Client requests to switch maps
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+pub struct PlayerMapSwitchRequest {
+    pub target: MapSwitchTarget,
+}
+
+/// Server notifies client that a map transition is starting
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+pub struct MapTransitionStart {
+    pub target: MapSwitchTarget,
+}
+
 /// Identifies which map instance a physics entity belongs to.
 /// The inner Entity points to the VoxelMapInstance entity.
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]

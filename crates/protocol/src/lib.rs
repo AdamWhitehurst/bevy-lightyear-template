@@ -25,7 +25,8 @@ pub use hit_detection::{
     terrain_collision_layers, GameLayer,
 };
 pub use map::{
-    attach_chunk_colliders, ChunkTarget, MapInstanceId, MapWorld, VoxelChannel, VoxelChunk,
+    attach_chunk_colliders, ChunkTarget, MapChannel, MapInstanceId, MapSwitchTarget,
+    MapTransitionStart, MapWorld, PlayerMapSwitchRequest, VoxelChannel, VoxelChunk,
     VoxelEditBroadcast, VoxelEditRequest, VoxelStateSync, VoxelType,
 };
 
@@ -158,6 +159,19 @@ impl Plugin for ProtocolPlugin {
         app.register_message::<VoxelEditBroadcast>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<VoxelStateSync>()
+            .add_direction(NetworkDirection::ServerToClient);
+
+        // Map transition channel
+        app.add_channel::<MapChannel>(ChannelSettings {
+            mode: ChannelMode::OrderedReliable(ReliableSettings::default()),
+            ..default()
+        })
+        .add_direction(NetworkDirection::Bidirectional);
+
+        // Map transition messages
+        app.register_message::<PlayerMapSwitchRequest>()
+            .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<MapTransitionStart>()
             .add_direction(NetworkDirection::ServerToClient);
 
         #[cfg(feature = "test_utils")]

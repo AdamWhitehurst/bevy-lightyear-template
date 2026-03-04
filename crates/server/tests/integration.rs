@@ -749,6 +749,96 @@ fn test_crossbeam_server_to_client_messages() {
     info!("✓ Server-to-client message test passed!");
 }
 
+/// PlayerMapSwitchRequest sent from client is received by server.
+#[test]
+fn test_map_switch_request_round_trip() {
+    let mut stepper = CrossbeamTestStepper::new();
+    stepper
+        .server_app
+        .init_resource::<MessageBuffer<PlayerMapSwitchRequest>>();
+    stepper
+        .server_app
+        .add_systems(Update, collect_messages::<PlayerMapSwitchRequest>);
+    stepper.init();
+    assert!(stepper.wait_for_connection());
+
+    let request = PlayerMapSwitchRequest {
+        target: MapSwitchTarget::Homebase,
+    };
+    stepper
+        .client_app
+        .world_mut()
+        .entity_mut(stepper.client_entity)
+        .get_mut::<MessageSender<PlayerMapSwitchRequest>>()
+        .expect("Client should have MessageSender")
+        .send::<MapChannel>(request.clone());
+
+    stepper.tick_step(3);
+
+    let buffer = stepper
+        .server_app
+        .world()
+        .resource::<MessageBuffer<PlayerMapSwitchRequest>>();
+    assert_eq!(
+        buffer.messages.len(),
+        1,
+        "Server should receive exactly one message"
+    );
+    assert_eq!(
+        buffer.messages[0].1, request,
+        "Received message should match sent message"
+    );
+    assert_eq!(
+        buffer.messages[0].0, stepper.client_of_entity,
+        "Source entity should be server's client representation"
+    );
+}
+
+/// MapTransitionStart sent from server is received by client.
+#[test]
+fn test_map_transition_start_round_trip() {
+    let mut stepper = CrossbeamTestStepper::new();
+    stepper
+        .client_app
+        .init_resource::<MessageBuffer<MapTransitionStart>>();
+    stepper
+        .client_app
+        .add_systems(Update, collect_messages::<MapTransitionStart>);
+    stepper.init();
+    assert!(stepper.wait_for_connection());
+
+    let msg = MapTransitionStart {
+        target: MapSwitchTarget::Homebase,
+    };
+    stepper
+        .server_app
+        .world_mut()
+        .entity_mut(stepper.client_of_entity)
+        .get_mut::<MessageSender<MapTransitionStart>>()
+        .expect("ClientOf should have MessageSender")
+        .send::<MapChannel>(msg.clone());
+
+    stepper.tick_step(3);
+
+    let buffer = stepper
+        .client_app
+        .world()
+        .resource::<MessageBuffer<MapTransitionStart>>();
+    assert_eq!(
+        buffer.messages.len(),
+        1,
+        "Client should receive exactly one message"
+    );
+    assert_eq!(
+        buffer.messages[0].1, msg,
+        "Received message should match sent message"
+    );
+    assert_eq!(
+        buffer.messages[0].0, stepper.client_entity,
+        "Message should be received by client entity"
+    );
+}
+
 /// Test sending events/triggers from client to server via crossbeam
 #[test]
 fn test_crossbeam_event_triggers() {

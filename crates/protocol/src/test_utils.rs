@@ -30,3 +30,12 @@ pub fn assert_message_registered<M: Message>(app: &App) {
         std::any::type_name::<M>()
     );
 }
+
+pub fn assert_map_channel_registered(app: &App) {
+    assert_channel_registered::<crate::map::MapChannel>(app);
+}
+
+pub fn assert_map_messages_registered(app: &App) {
+    assert_message_registered::<crate::map::PlayerMapSwitchRequest>(app);
+    assert_message_registered::<crate::map::MapTransitionStart>(app);
+}

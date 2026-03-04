@@ -591,8 +591,8 @@ pub fn assert_map_messages_registered(app: &App) {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all` compiles
-- [ ] `cargo test --workspace` passes (including message round-trip tests)
+- [x] `cargo check-all` compiles
+- [x] `cargo test --workspace` passes (including message round-trip tests)
 
 ---
 
