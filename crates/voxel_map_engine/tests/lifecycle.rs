@@ -42,10 +42,16 @@ fn spawn_target(app: &mut App, map_entity: Entity, position: Vec3, distance: u32
         .id()
 }
 
-fn tick(app: &mut App, n: usize) {
-    for _ in 0..n {
+const MAX_TICKS: usize = 200;
+
+fn tick_until(app: &mut App, condition: impl Fn(&App) -> bool) {
+    for _ in 0..MAX_TICKS {
         app.update();
+        if condition(app) {
+            return;
+        }
     }
+    panic!("condition not met after {MAX_TICKS} ticks");
 }
 
 fn loaded_chunk_count(app: &App, map_entity: Entity) -> usize {
@@ -73,12 +79,12 @@ fn chunks_spawn_within_range() {
     // Target at origin with distance=1 -> 3x3x3 = 27 chunk positions
     spawn_target(&mut app, map, Vec3::ZERO, 1);
 
-    // Several ticks to let ensure_pending_chunks run, then async tasks complete
-    tick(&mut app, 20);
+    // Poll until async chunk generation tasks complete
+    tick_until(&mut app, |app| loaded_chunk_count(app, map) == 27);
 
-    let loaded = loaded_chunk_count(&app, map);
     assert_eq!(
-        loaded, 27,
+        loaded_chunk_count(&app, map),
+        27,
         "distance=1 around origin should load 3^3=27 chunks"
     );
 }
@@ -89,23 +95,27 @@ fn chunks_despawn_outside_range() {
     let map = spawn_map(&mut app, 1);
     let target = spawn_target(&mut app, map, Vec3::ZERO, 1);
 
-    // Let chunks generate
-    tick(&mut app, 20);
-    let initial_loaded = loaded_chunk_count(&app, map);
-    assert!(initial_loaded > 0, "should have loaded some chunks");
+    tick_until(&mut app, |app| loaded_chunk_count(app, map) > 0);
 
     // Move target far away - all original chunks should unload
     app.world_mut()
         .entity_mut(target)
         .insert(Transform::from_translation(Vec3::new(10000.0, 0.0, 0.0)));
 
-    tick(&mut app, 5);
+    tick_until(&mut app, |app| {
+        !app.world()
+            .get::<VoxelMapInstance>(map)
+            .unwrap()
+            .loaded_chunks
+            .contains(&IVec3::ZERO)
+    });
 
-    // Original chunks at origin should be unloaded (no longer in loaded set)
-    let instance = app.world().get::<VoxelMapInstance>(map).unwrap();
-    let has_origin = instance.loaded_chunks.contains(&IVec3::ZERO);
     assert!(
-        !has_origin,
+        !app.world()
+            .get::<VoxelMapInstance>(map)
+            .unwrap()
+            .loaded_chunks
+            .contains(&IVec3::ZERO),
         "origin chunk should be unloaded after target moved away"
     );
 }
@@ -132,11 +142,11 @@ fn bounded_map_respects_bounds() {
     // Target at origin with distance=5 but bounds=2 -> only -1..1 per axis = 3^3 = 27
     spawn_target(&mut app, map, Vec3::ZERO, 5);
 
-    tick(&mut app, 30);
+    tick_until(&mut app, |app| loaded_chunk_count(app, map) == 27);
 
-    let loaded = loaded_chunk_count(&app, map);
     assert_eq!(
-        loaded, 27,
+        loaded_chunk_count(&app, map),
+        27,
         "bounded map with bounds=2 should limit to 3^3=27 chunks (range -1..1)"
     );
 }
@@ -150,14 +160,16 @@ fn chunk_target_routes_to_correct_map() {
     // Target only points at map_a
     spawn_target(&mut app, map_a, Vec3::ZERO, 0);
 
-    tick(&mut app, 20);
+    tick_until(&mut app, |app| loaded_chunk_count(app, map_a) == 1);
 
-    let loaded_a = loaded_chunk_count(&app, map_a);
-    let loaded_b = loaded_chunk_count(&app, map_b);
-
-    assert_eq!(loaded_a, 1, "map_a should have 1 loaded chunk (distance=0)");
     assert_eq!(
-        loaded_b, 0,
+        loaded_chunk_count(&app, map_a),
+        1,
+        "map_a should have 1 loaded chunk (distance=0)"
+    );
+    assert_eq!(
+        loaded_chunk_count(&app, map_b),
+        0,
         "map_b should have 0 loaded chunks (no target pointing to it)"
     );
 }
@@ -170,9 +182,7 @@ fn switching_chunk_target_between_maps() {
 
     let target = spawn_target(&mut app, map_a, Vec3::ZERO, 0);
 
-    // Let map_a chunks generate
-    tick(&mut app, 20);
-    assert_eq!(loaded_chunk_count(&app, map_a), 1);
+    tick_until(&mut app, |app| loaded_chunk_count(app, map_a) == 1);
     assert_eq!(loaded_chunk_count(&app, map_b), 0);
 
     // Switch target to map_b
@@ -181,7 +191,9 @@ fn switching_chunk_target_between_maps() {
         distance: 0,
     });
 
-    tick(&mut app, 20);
+    tick_until(&mut app, |app| {
+        loaded_chunk_count(app, map_a) == 0 && loaded_chunk_count(app, map_b) == 1
+    });
 
     assert_eq!(
         loaded_chunk_count(&app, map_a),
@@ -205,13 +217,20 @@ fn multiple_targets_on_different_maps() {
     spawn_target(&mut app, map_a, Vec3::ZERO, 1);
     spawn_target(&mut app, map_b, Vec3::ZERO, 0);
 
-    tick(&mut app, 20);
+    tick_until(&mut app, |app| {
+        loaded_chunk_count(app, map_a) == 27 && loaded_chunk_count(app, map_b) == 1
+    });
 
-    let loaded_a = loaded_chunk_count(&app, map_a);
-    let loaded_b = loaded_chunk_count(&app, map_b);
-
-    assert_eq!(loaded_a, 27, "map_a should have 3^3=27 chunks (distance=1)");
-    assert_eq!(loaded_b, 1, "map_b should have 1 chunk (distance=0)");
+    assert_eq!(
+        loaded_chunk_count(&app, map_a),
+        27,
+        "map_a should have 3^3=27 chunks (distance=1)"
+    );
+    assert_eq!(
+        loaded_chunk_count(&app, map_b),
+        1,
+        "map_b should have 1 chunk (distance=0)"
+    );
 }
 
 #[test]
@@ -220,11 +239,13 @@ fn chunk_entities_are_children_of_map() {
     let map = spawn_map(&mut app, 1);
     spawn_target(&mut app, map, Vec3::ZERO, 0);
 
-    tick(&mut app, 20);
+    tick_until(&mut app, |app| loaded_chunk_count(app, map) == 1);
 
-    // distance=0 -> 1 chunk position at origin
-    let loaded = loaded_chunk_count(&app, map);
-    assert_eq!(loaded, 1, "distance=0 should load exactly 1 chunk");
+    assert_eq!(
+        loaded_chunk_count(&app, map),
+        1,
+        "distance=0 should load exactly 1 chunk"
+    );
 
     // Any mesh entities that exist should be children of the map
     let orphan_count: usize = app
