@@ -55,6 +55,7 @@ fn handle_new_character(
 fn handle_character_movement(
     time: Res<Time>,
     spatial_query: SpatialQuery,
+    map_ids: Query<&MapInstanceId>,
     mut query: Query<
         (
             Entity,
@@ -62,11 +63,12 @@ fn handle_character_movement(
             &ComputedMass,
             &Position,
             Forces,
+            Option<&MapInstanceId>,
         ),
         (With<Predicted>, With<CharacterMarker>),
     >,
 ) {
-    for (entity, action_state, mass, position, mut forces) in &mut query {
+    for (entity, action_state, mass, position, mut forces, map_id) in &mut query {
         apply_movement(
             entity,
             mass,
@@ -75,6 +77,8 @@ fn handle_character_movement(
             action_state,
             position,
             &mut forces,
+            map_id,
+            &map_ids,
         );
     }
 }

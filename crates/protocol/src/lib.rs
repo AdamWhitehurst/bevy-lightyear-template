@@ -306,20 +306,32 @@ pub fn apply_movement(
     action_state: &ActionState<PlayerActions>,
     position: &Position,
     forces: &mut ForcesItem,
+    map_id: Option<&MapInstanceId>,
+    map_ids: &Query<&MapInstanceId>,
 ) {
     const MAX_SPEED: f32 = 10.0;
     const MAX_ACCELERATION: f32 = 40.0;
 
     let max_velocity_delta_per_tick = MAX_ACCELERATION * delta_secs;
 
-    // Jump with raycast ground detection
+    // Jump with raycast ground detection (filtered by map instance)
     if action_state.just_pressed(&PlayerActions::Jump) {
         let ray_cast_origin = position.0;
 
-        let filter = &SpatialQueryFilter::from_excluded_entities([entity]);
+        let filter = SpatialQueryFilter::from_excluded_entities([entity]);
 
         if spatial_query
-            .cast_ray(ray_cast_origin, Dir3::NEG_Y, 4.0, false, filter)
+            .cast_ray_predicate(
+                ray_cast_origin,
+                Dir3::NEG_Y,
+                4.0,
+                false,
+                &filter,
+                &|hit_entity| match (map_id, map_ids.get(hit_entity).ok()) {
+                    (Some(a), Some(b)) => a.0 == b.0,
+                    _ => true,
+                },
+            )
             .is_some()
         {
             forces.apply_linear_impulse(Vec3::new(0.0, 400.0, 0.0));

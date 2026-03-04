@@ -288,7 +288,7 @@ fn test_character_has_map_instance_id() {
 
 #### Automated Verification:
 - [x] `cargo check-all` compiles
-- [ ] `cargo test --workspace` passes (including new tests above)
+- [x] `cargo test --workspace` passes (including new tests above)
 - [x] `cargo server` starts without panic
 - [x] `cargo client` connects without panic
 
@@ -458,8 +458,8 @@ fn raycast_ignores_different_map_terrain() {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all` compiles
-- [ ] `cargo test --workspace` passes (including raycast isolation test)
+- [x] `cargo check-all` compiles
+- [x] `cargo test --workspace` passes (including raycast isolation test)
 
 #### Manual Verification:
 - [ ] Character still jumps normally on terrain (single map)
