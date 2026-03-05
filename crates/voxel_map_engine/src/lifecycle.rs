@@ -54,6 +54,7 @@ pub fn update_chunks(
 
         remove_out_of_range_chunks(&mut instance, &desired);
         spawn_missing_chunks(&mut instance, &mut pending, config, &desired);
+        instance.desired_chunks = desired;
     }
 }
 

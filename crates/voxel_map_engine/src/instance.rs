@@ -28,6 +28,7 @@ pub struct VoxelMapInstance {
     pub modified_voxels: HashMap<IVec3, WorldVoxel>,
     pub write_buffer: Vec<(IVec3, WorldVoxel)>,
     pub loaded_chunks: HashSet<IVec3>,
+    pub desired_chunks: HashSet<IVec3>,
     pub debug_colors: bool,
 }
 
@@ -38,6 +39,7 @@ impl VoxelMapInstance {
             modified_voxels: HashMap::new(),
             write_buffer: Vec::new(),
             loaded_chunks: HashSet::new(),
+            desired_chunks: HashSet::new(),
             debug_colors: false,
         }
     }
@@ -150,6 +152,7 @@ mod tests {
         assert_eq!(config.spawning_distance, 10);
         assert!(config.bounds.is_none());
         assert!(instance.loaded_chunks.is_empty());
+        assert!(instance.desired_chunks.is_empty());
     }
 
     #[test]
@@ -164,6 +167,7 @@ mod tests {
         assert_eq!(config.bounds, Some(bounds));
         assert_eq!(marker.owner, owner);
         assert!(instance.loaded_chunks.is_empty());
+        assert!(instance.desired_chunks.is_empty());
     }
 
     #[test]
@@ -177,6 +181,7 @@ mod tests {
         assert_eq!(config.bounds, Some(bounds));
         assert_eq!(marker.id, 99);
         assert!(instance.loaded_chunks.is_empty());
+        assert!(instance.desired_chunks.is_empty());
     }
 
     #[test]

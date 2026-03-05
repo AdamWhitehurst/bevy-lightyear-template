@@ -1125,8 +1125,8 @@ fn test_transition_overlay_lifecycle() {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all` compiles
-- [ ] `cargo test --workspace` passes (including SubState and overlay tests)
+- [x] `cargo check-all` compiles
+- [x] `cargo test --workspace` passes (including SubState and overlay tests)
 
 #### Manual Verification:
 - [ ] (Deferred to Phase 6 when UI button exists)

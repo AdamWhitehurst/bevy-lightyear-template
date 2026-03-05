@@ -11,3 +11,12 @@ pub enum ClientState {
     /// Connected and in-game
     InGame,
 }
+
+/// Map transition state — only exists while `ClientState::InGame`.
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, SubStates)]
+#[source(ClientState = ClientState::InGame)]
+pub enum MapTransitionState {
+    #[default]
+    Playing,
+    Transitioning,
+}

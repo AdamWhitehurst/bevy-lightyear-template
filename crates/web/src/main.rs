@@ -36,6 +36,7 @@ fn main() {
         })
         .add_plugins(ClientGameplayPlugin)
         .add_plugins(ClientMapPlugin)
+        .add_plugins(client::map_transition::ClientMapTransitionPlugin)
         .add_plugins(RenderPlugin)
         .add_plugins(UiPlugin)
         .add_plugins(PhysicsDebugPlugin::default())

@@ -1,4 +1,5 @@
 pub mod components;
+pub mod map_transition_ui;
 pub mod state;
 
 use bevy::ecs::message::MessageWriter;
@@ -8,7 +9,7 @@ use lightyear::netcode::Key;
 use lightyear::prelude::client::*;
 use lightyear::prelude::Authentication;
 use protocol::{PRIVATE_KEY, PROTOCOL_ID};
-pub use state::ClientState;
+pub use state::{ClientState, MapTransitionState};
 use std::net::SocketAddr;
 
 /// Lightweight client config for UI - mirrors essential fields from client::ClientNetworkConfig
@@ -43,6 +44,8 @@ impl Plugin for UiPlugin {
 
         // Initialize state management
         app.init_state::<ClientState>();
+        app.add_sub_state::<MapTransitionState>();
+        app.add_plugins(map_transition_ui::MapTransitionUiPlugin);
 
         // State transition systems
         app.add_systems(

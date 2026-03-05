@@ -3,6 +3,8 @@ use bevy::state::app::StatesPlugin;
 use lightyear::prelude::client::*;
 use protocol::*;
 use std::time::Duration;
+use ui::map_transition_ui::MapTransitionOverlay;
+use ui::state::MapTransitionState;
 use ui::*;
 
 #[test]
@@ -231,5 +233,111 @@ fn test_state_cleanup() {
         connecting_ui.iter(app.world()).count(),
         1,
         "Connecting UI should exist"
+    );
+}
+
+#[test]
+fn test_map_transition_state_defaults_to_playing() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.add_plugins(StatesPlugin);
+    app.add_plugins(UiPlugin);
+    app.update();
+
+    // Enter InGame state
+    app.world_mut()
+        .resource_mut::<NextState<ClientState>>()
+        .set(ClientState::InGame);
+    app.update();
+
+    let state = app.world().resource::<State<MapTransitionState>>();
+    assert_eq!(*state.get(), MapTransitionState::Playing);
+}
+
+#[test]
+fn test_map_transition_state_removed_on_leave_ingame() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.add_plugins(StatesPlugin);
+    app.add_plugins(UiPlugin);
+    app.update();
+
+    // Enter InGame, then Transitioning
+    app.world_mut()
+        .resource_mut::<NextState<ClientState>>()
+        .set(ClientState::InGame);
+    app.update();
+    app.world_mut()
+        .resource_mut::<NextState<MapTransitionState>>()
+        .set(MapTransitionState::Transitioning);
+    app.update();
+
+    // Leave InGame
+    app.world_mut()
+        .resource_mut::<NextState<ClientState>>()
+        .set(ClientState::MainMenu);
+    app.update();
+
+    // SubState resource should no longer exist
+    assert!(
+        app.world()
+            .get_resource::<State<MapTransitionState>>()
+            .is_none(),
+        "MapTransitionState should be removed when leaving InGame"
+    );
+}
+
+#[test]
+fn test_transition_overlay_lifecycle() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.add_plugins(StatesPlugin);
+    app.add_plugins(UiPlugin);
+    app.update();
+
+    // Enter InGame -> Playing
+    app.world_mut()
+        .resource_mut::<NextState<ClientState>>()
+        .set(ClientState::InGame);
+    app.update();
+
+    // No overlay yet
+    let overlay_count = app
+        .world_mut()
+        .query_filtered::<Entity, With<MapTransitionOverlay>>()
+        .iter(app.world())
+        .count();
+    assert_eq!(overlay_count, 0);
+
+    // Enter Transitioning
+    app.world_mut()
+        .resource_mut::<NextState<MapTransitionState>>()
+        .set(MapTransitionState::Transitioning);
+    app.update();
+
+    let overlay_count = app
+        .world_mut()
+        .query_filtered::<Entity, With<MapTransitionOverlay>>()
+        .iter(app.world())
+        .count();
+    assert_eq!(
+        overlay_count, 1,
+        "Overlay should spawn during Transitioning"
+    );
+
+    // Return to Playing
+    app.world_mut()
+        .resource_mut::<NextState<MapTransitionState>>()
+        .set(MapTransitionState::Playing);
+    app.update();
+
+    let overlay_count = app
+        .world_mut()
+        .query_filtered::<Entity, With<MapTransitionOverlay>>()
+        .iter(app.world())
+        .count();
+    assert_eq!(
+        overlay_count, 0,
+        "Overlay should despawn when Playing resumes"
     );
 }
