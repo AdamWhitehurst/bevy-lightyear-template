@@ -6,10 +6,10 @@ branch: master
 repository: bevy-lightyear-template
 topic: "Physics isolation via Avian CollisionHooks for multi-instance maps"
 tags: [research, physics, avian3d, collision-hooks, map-instances, spatial-query, map-transition, lightyear-rooms]
-status: complete
-last_updated: 2026-03-03
+status: revised
+last_updated: 2026-03-06
 last_updated_by: Claude
-last_updated_note: "Added map switch button and PlayerMapSwitchRequest message research"
+last_updated_note: "Revised MapInstanceId from Entity-based to semantic enum; fixed entity mapping flaws per critique in 2026-03-06-entity-mapping-map-transition-critique.md"
 ---
 
 # Research: Physics Isolation via Avian CollisionHooks
@@ -24,10 +24,13 @@ Arena) that share a single Avian physics world.
 
 ## Summary
 
-The proposed approach is sound for **contact pair filtering** but has a critical gap: **`filter_pairs` does not affect `SpatialQuery` operations**.
-The ground-detection raycast in `apply_movement` will still hit terrain from other map instances. This requires a separate solution using
-`cast_ray_predicate` or equivalent. All other aspects of the proposal — the `MapInstanceId` component, `SystemParam`-based hooks,
-`ActiveCollisionHooks` opt-in, and the single-hooks-impl constraint — are confirmed correct against avian3d 0.4.1's API.
+The proposed approach is sound for **contact pair filtering** but has two critical issues:
+
+1. **`filter_pairs` does not affect `SpatialQuery` operations**. The ground-detection raycast in `apply_movement` will still hit terrain from other map instances. This requires `cast_ray_predicate` or equivalent.
+
+2. **~~`MapInstanceId(Entity)` is fundamentally broken for client-side use.~~** The original design stored a raw `Entity` reference to a `VoxelMapInstance` entity. VoxelMapInstance entities are independently spawned on server and client (never replicated), so lightyear's entity mapping produces `Entity::PLACEHOLDER` on the client. This was revised to use a **semantic enum** instead. See [critique](doc/research/2026-03-06-entity-mapping-map-transition-critique.md) for full analysis.
+
+The CollisionHooks API aspects — `SystemParam`-based hooks, `ActiveCollisionHooks` opt-in, and the single-hooks-impl constraint — are confirmed correct against avian3d 0.4.1's API.
 
 ## Detailed Findings
 
@@ -146,17 +149,19 @@ Without additional filtering, a character in the Overworld could detect ground f
 **Solution**: Use `SpatialQuery::cast_ray_predicate` which accepts a closure for per-entity filtering:
 
 ```rust
-let map_id = map_ids.get(entity).map(|m| m.0);
+let map_id = map_ids.get(entity).ok();
 let filter = SpatialQueryFilter::from_excluded_entities([entity]);
 if spatial_query
     .cast_ray_predicate(ray_cast_origin, Dir3::NEG_Y, 4.0, false, &filter, &|hit_entity| {
-        match (map_id, map_ids.get(hit_entity).map(|m| m.0)) {
-            (Some(a), Ok(b)) => a == b,
+        match (map_id, map_ids.get(hit_entity).ok()) {
+            (Some(a), Some(b)) => a == b,
             _ => true,
         }
     })
     .is_some()
 ```
+
+Since `MapInstanceId` is now an enum (not an Entity wrapper), the `==` comparison is a straightforward `PartialEq` on enum variants — works identically on server and client with no entity mapping involved.
 
 This requires passing the `MapInstanceId` query into `apply_movement`, which currently takes `SpatialQuery` as a parameter.
 
@@ -165,35 +170,57 @@ This requires passing the `MapInstanceId` query into `apply_movement`, which cur
 The voxel map engine already provides the entity-based multiplexing needed:
 
 - **`VoxelMapInstance`** component on map entities ([instance.rs:25-32](crates/voxel_map_engine/src/instance.rs#L25-L32))
-- **`ChunkTarget.map_entity: Entity`** tracks which map a player drives chunk loading for
-  ([chunk.rs:13-17](crates/voxel_map_engine/src/chunk.rs#L13-L17))
+- **`ChunkTarget.map_entity: Entity`** tracks which map an entity drives chunk loading for
+  ([chunk.rs:13-17](crates/voxel_map_engine/src/chunk.rs#L13-L17)) — local-only on each side, not replicated (see Resolved Decision 5)
 - **Chunks are children** of their map entity ([lifecycle.rs:224](crates/voxel_map_engine/src/lifecycle.rs#L224))
 - **Marker components**: `Overworld`, `Homebase { owner }`, `Arena { id }` ([instance.rs:8-22](crates/voxel_map_engine/src/instance.rs#L8-L22))
 
 `MapInstanceId` value for each entity type:
 
-- **Terrain chunks**: Parent map entity (already known via `ChildOf` hierarchy)
-- **Characters**: `ChunkTarget.map_entity` (already set at spawn: [server/gameplay.rs:206](crates/server/src/gameplay.rs#L206))
+- **Terrain chunks**: Inserted in `attach_chunk_colliders` ([protocol/map.rs:46-72](crates/protocol/src/map.rs#L46-L72)) by looking up the parent map entity's `MapInstanceId` via `ChildOf`
+- **Characters**: Set at spawn based on which map they're joining
 - **Hitboxes/Projectiles**: Copy from caster's `MapInstanceId` at spawn time
 
-### 7. Proposed Approach Evaluation
+> **Revised**: `MapInstanceId` is now a semantic enum (not an Entity reference). See section 7 for details.
 
-The `MapInstanceId` + `filter_pairs` approach from [doc/plans/2026-02-28-voxel-map-engine.md:868-919](doc/plans/2026-02-28-voxel-map-engine.md) is
-correct with one addition:
+### 7. Proposed Approach Evaluation (Revised)
 
-**What works as proposed:**
+The original `MapInstanceId(Entity)` + `filter_pairs` approach from [doc/plans/2026-02-28-voxel-map-engine.md:868-919](doc/plans/2026-02-28-voxel-map-engine.md) had a **fatal entity mapping flaw** (see [critique](doc/research/2026-03-06-entity-mapping-map-transition-critique.md)): VoxelMapInstance entities are not replicated, so Entity references to them become `Entity::PLACEHOLDER` on the client.
 
-- `MapInstanceId(Entity)` component — maps directly to the `VoxelMapInstance` entity
+**Revised design**: `MapInstanceId` is a **semantic enum**, not an Entity wrapper:
+
+```rust
+#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, Reflect)]
+pub enum MapInstanceId {
+    Overworld,
+    Homebase { owner: ClientId },
+    Arena { id: u32 },
+}
+```
+
+Both server and client resolve the enum to their local map entity via a **`MapRegistry`** resource:
+
+```rust
+#[derive(Resource, Default)]
+pub struct MapRegistry(pub HashMap<MapInstanceId, Entity>);
+```
+
+Each side populates this when spawning map instances. No `MapEntities` impl needed — no Entity references cross the network.
+
+**What works:**
+
 - `SystemParam`-based `MapCollisionHooks` with read-only query — confirmed valid pattern
-- `filter_pairs` returning `false` for mismatched IDs — skips narrow phase, efficient
+- `filter_pairs` returning `false` for mismatched `MapInstanceId` enum variants — skips narrow phase, efficient
 - Fallthrough `_ => true` for entities without `MapInstanceId` — allows global physics entities
 - `ActiveCollisionHooks::FILTER_PAIRS` opt-in — only filtered entities pay the cost
+- Enum comparison works identically on server and client (no entity mapping involved)
 
 **What needs addition:**
 
 - `SpatialQuery` filtering — must use `cast_ray_predicate` or equivalent for ground detection
 - `apply_movement` signature change — needs access to `MapInstanceId` query
 - Future hooks (one-way platforms, conveyors) must be added to the same `MapCollisionHooks` SystemParam since only one hooks impl is allowed per app
+- `MapRegistry` resource on both server and client, populated when map instances are spawned
 
 ### 8. Entity Insertion Points
 
@@ -201,13 +228,13 @@ Where `MapInstanceId` + `ActiveCollisionHooks::FILTER_PAIRS` must be inserted:
 
 | Entity                        | Current Spawn                                                         | Component Source                                            |
 | ----------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------- |
-| Character (server)            | [server/gameplay.rs:189-207](crates/server/src/gameplay.rs#L189-L207) | `ChunkTarget.map_entity` (already available at spawn)       |
-| Character (client prediction) | [client/gameplay.rs:46-52](crates/client/src/gameplay.rs#L46-L52)     | Must replicate `MapInstanceId` or derive from `ChunkTarget` |
-| Terrain chunk                 | [protocol/map.rs:46-72](crates/protocol/src/map.rs#L46-L72)           | Parent map entity via `ChildOf`                             |
-| Melee hitbox                  | [ability.rs:1097-1136](crates/protocol/src/ability.rs#L1097-L1136)    | Caster's `MapInstanceId`                                    |
-| AoE hitbox                    | [ability.rs:1138-1178](crates/protocol/src/ability.rs#L1138-L1178)    | Caster's `MapInstanceId`                                    |
-| Projectile                    | [ability.rs:1449-1477](crates/protocol/src/ability.rs#L1449-L1477)    | Caster's `MapInstanceId`                                    |
-| Dummy target                  | [server/gameplay.rs:60-74](crates/server/src/gameplay.rs#L60-L74)     | `OverworldMap` resource                                     |
+| Character (server)            | [server/gameplay.rs:189-207](crates/server/src/gameplay.rs#L189-L207) | `MapInstanceId::Overworld` (or target map variant)          |
+| Character (client prediction) | [client/gameplay.rs:46-52](crates/client/src/gameplay.rs#L46-L52)     | Replicated from server (enum, no entity mapping needed)     |
+| Terrain chunk                 | [protocol/map.rs:46-72](crates/protocol/src/map.rs#L46-L72)           | Inserted in `attach_chunk_colliders` by looking up parent map's `MapInstanceId` via `ChildOf` |
+| Melee hitbox                  | [ability.rs:1097-1136](crates/protocol/src/ability.rs#L1097-L1136)    | Caster's `MapInstanceId` (clone the enum)                   |
+| AoE hitbox                    | [ability.rs:1138-1178](crates/protocol/src/ability.rs#L1138-L1178)    | Caster's `MapInstanceId` (clone the enum)                   |
+| Projectile                    | [ability.rs:1449-1477](crates/protocol/src/ability.rs#L1449-L1477)    | Caster's `MapInstanceId` (clone the enum)                   |
+| Dummy target                  | [server/gameplay.rs:60-74](crates/server/src/gameplay.rs#L60-L74)     | `MapInstanceId::Overworld`                                  |
 
 ## Code References
 
@@ -227,8 +254,7 @@ Where `MapInstanceId` + `ActiveCollisionHooks::FILTER_PAIRS` must be inserted:
 **Single physics world**: All entities share one Avian physics world. Isolation is currently type-based only (CollisionLayers). The proposed approach
 adds instance-based isolation via broad-phase hook filtering.
 
-**Existing entity-map association**: `ChunkTarget.map_entity` and chunk-parent hierarchy already track which map an entity belongs to. `MapInstanceId`
-formalizes this for physics specifically.
+**Map identity split**: `MapInstanceId` (semantic enum) is the network-safe identity — replicated, works on both sides. `ChunkTarget.map_entity` is the local-only entity reference — each side derives it from `MapInstanceId` + `MapRegistry`. Chunk-parent hierarchy tracks map membership for terrain entities.
 
 **Hook extensibility constraint**: Only one `CollisionHooks` impl per app. The `MapCollisionHooks` SystemParam must be designed to accommodate future
 hook needs (one-way platforms, etc.) by adding more queries to the same struct.
@@ -241,6 +267,7 @@ hook needs (one-way platforms, etc.) by adding more queries to the same struct.
 
 ## Related Research
 
+- [doc/research/2026-03-06-entity-mapping-map-transition-critique.md](doc/research/2026-03-06-entity-mapping-map-transition-critique.md) — Critique that identified the entity mapping flaws leading to this revision
 - [doc/research/2026-02-27-bonsairobo-stack-multi-instance-voxel-replacement.md](doc/research/2026-02-27-bonsairobo-stack-multi-instance-voxel-replacement.md)
 - [doc/research/2026-02-13-hit-detection-system.md](doc/research/2026-02-13-hit-detection-system.md)
 - [doc/research/2026-01-09-raycast-chunk-collider-detection.md](doc/research/2026-01-09-raycast-chunk-collider-detection.md)
@@ -256,17 +283,36 @@ hook needs (one-way platforms, etc.) by adding more queries to the same struct.
 
 ## Resolved Design Decisions
 
-1. **Lightyear replication of MapInstanceId**: Replicate via lightyear. Requires `MapEntities` impl since it holds an `Entity`, same pattern as `ChunkTarget` ([chunk.rs:26-36](crates/voxel_map_engine/src/chunk.rs#L26-L36)).
+1. **~~Lightyear replication of MapInstanceId via MapEntities~~**: ~~Replicate via lightyear. Requires `MapEntities` impl since it holds an `Entity`.~~ **Revised**: `MapInstanceId` is now a semantic enum (`Overworld`, `Homebase { owner }`, `Arena { id }`). No `MapEntities` impl needed — no Entity references cross the network. Standard lightyear component replication suffices. See [critique](doc/research/2026-03-06-entity-mapping-map-transition-critique.md) for why the Entity-based approach fails.
 
-2. **`ActiveCollisionHooks` via required component**: Use `#[require(ActiveCollisionHooks::FILTER_PAIRS)]` on `MapInstanceId` so inserting `MapInstanceId` automatically adds the hooks opt-in. No manual insertion at spawn sites needed.
+2. **`ActiveCollisionHooks` via required component**: Use `#[require(ActiveCollisionHooks::FILTER_PAIRS)]` on `MapInstanceId` so inserting `MapInstanceId` automatically adds the hooks opt-in. No manual insertion at spawn sites needed. (Still valid with enum-based MapInstanceId.)
 
 3. **Map transition protocol**: Use a client-side loading state with physics pausing. See follow-up research below.
+
+4. **MapRegistry resource**: Both server and client maintain a `MapRegistry(HashMap<MapInstanceId, Entity>)` resource mapping semantic IDs to local VoxelMapInstance entities. Populated when map instances are spawned. Used to resolve `MapInstanceId` → local entity for chunk loading, SpatialQuery filtering, etc.
+
+5. **ChunkTarget is local-only, not replicated**: `ChunkTarget` should be removed from lightyear registration entirely (remove `register_component::<ChunkTarget>().add_map_entities()` at [lib.rs:167](crates/protocol/src/lib.rs#L167)). It serves different roles on each side — server puts it on the player entity, client puts it on the player entity too (moved from camera) — but each side creates it locally pointing to its own `VoxelMapInstance` entity via `MapRegistry`. Replicating it is harmful: `map_entity` becomes `Entity::PLACEHOLDER` on the client since VoxelMapInstance entities aren't replicated. Instead, each side derives `ChunkTarget` from `MapInstanceId` + `MapRegistry`:
+   - **Server**: inserts `ChunkTarget::new(map_registry.get(&map_id), radius)` on the player entity at spawn and during transitions
+   - **Client**: inserts `ChunkTarget::new(map_registry.get(&map_id), radius)` on the player entity locally, driven by observing `MapInstanceId` changes on the predicted entity
+   - The client's camera no longer needs its own `ChunkTarget` — chunk loading follows the player entity on both sides
+
+6. **MapInstanceId replication — no rollback**: Register with `register_component::<MapInstanceId>()` only (no `add_prediction()`). In current lightyear, `Predicted` is a marker on the same entity that receives replicated components, so `Query<&MapInstanceId, With<Predicted>>` matches without prediction registration. Map transitions are server-authoritative and must not be rolled back.
+
+7. **Homebase.owner uses ClientId**: `Homebase { owner: Entity }` in [instance.rs:14-16](crates/voxel_map_engine/src/instance.rs#L14-L16) must be changed to `Homebase { owner: ClientId }` to match `MapInstanceId::Homebase { owner: ClientId }`. `ClientId` is consistent between server and client. `seed_from_entity` becomes `seed_from_client_id`.
+
+8. **Terrain chunk MapInstanceId via attach_chunk_colliders**: Chunks get `MapInstanceId` inserted in `attach_chunk_colliders` ([protocol/map.rs:46-72](crates/protocol/src/map.rs#L46-L72)) by looking up the parent map entity's `MapInstanceId` via `ChildOf`. This is where colliders are already inserted, so it's the natural place. The map entity itself needs `MapInstanceId` (inserted when the map is spawned and registered in `MapRegistry`).
+
+9. **Generator function implicit from map type**: The generator function (`flat_terrain_voxels`, etc.) is determined by the `MapInstanceId` variant. The client resolves it locally: `Overworld` → `overworld_gen`, `Homebase` → `homebase_gen`, etc. No need to serialize the generator function in `MapTransitionStart`.
+
+10. **Orphaned map cleanup**: A shared system despawns `VoxelMapInstance` entities that have no `ChunkTarget` pointing to them (except the Overworld, which persists always). Runs on both server and client. Server uses a cooldown to avoid despawning maps during momentary transitions.
 
 ## Follow-up Research: Map Transition Loading State
 
 ### Problem
 
-When a player transitions between maps, several things must update: `MapInstanceId`, `ChunkTarget.map_entity`, `Position`, and the new map's terrain chunks need to load. During this window, physics (raycasts, collisions) could interact with wrong-map terrain.
+When a player transitions between maps, several things must update: `MapInstanceId`, camera `ChunkTarget.map_entity` (client-side), player `ChunkTarget.map_entity` (server-side), `Position`, and the new map's terrain chunks need to load. During this window, physics (raycasts, collisions) could interact with wrong-map terrain.
+
+> **Note**: Currently the client drives chunk loading via the camera's `ChunkTarget` ([client/map.rs:56-65](crates/client/src/map.rs#L56-L65)). Per Resolved Decision 5, this will move to the player entity on both sides. `ChunkTarget` is local-only (not replicated) — each side creates it from `MapInstanceId` + `MapRegistry`. During transition, both sides update their local `ChunkTarget.map_entity` to the new map's local entity.
 
 ### Approach: SubState + RigidBodyDisabled + Lightyear Rooms
 
@@ -335,22 +381,28 @@ Room transitions move client+entity from old room to new room. The room system t
 
 No built-in auto-room mechanism exists in lightyear. Each `RoomEvent` is explicit. To automate:
 
-**Option A: Observer on `MapInstanceId` insert/change.** When `MapInstanceId` is inserted or changed, an observer fires `RoomEvent` to add the entity to the corresponding room. This requires a mapping from map entity → room entity (e.g. a `MapRoom(Entity)` component on the map entity, or a `HashMap<Entity, Entity>` resource).
+**Observer on `MapInstanceId` insert/change (server-side only).** When `MapInstanceId` is inserted or changed, an observer fires `RoomEvent` to add the entity to the corresponding room. This requires a `RoomRegistry` mapping `MapInstanceId` enum variants → room entities:
 
 ```rust
+#[derive(Resource, Default)]
+pub struct RoomRegistry(pub HashMap<MapInstanceId, Entity>);
+
 fn on_map_instance_id_added(
     trigger: On<Add, MapInstanceId>,
     map_ids: Query<&MapInstanceId>,
-    map_rooms: Query<&MapRoom>,
+    room_registry: Res<RoomRegistry>,
     mut commands: Commands,
 ) {
     let map_id = map_ids.get(trigger.target()).unwrap();
-    let room = map_rooms.get(map_id.0).unwrap().0;
+    let Some(&room) = room_registry.0.get(map_id) else {
+        warn!("No room for {:?}", map_id);
+        return;
+    };
     commands.trigger(RoomEvent { room, target: RoomTarget::AddEntity(trigger.target()) });
 }
 ```
 
-**Option B: Spawn Room as part of VoxelMapInstance.** When a map instance is spawned, also spawn a `Room` and store the room entity on the map (e.g. `MapRoom(Entity)` component). Then the observer above links any entity with `MapInstanceId` to the correct room automatically.
+Rooms are spawned alongside map instances and registered in `RoomRegistry`.
 
 **Chunks specifically**: Terrain chunks are children of the map entity. If the map entity is in a room and has `Replicate`, child chunks with `ReplicateLike` inherit visibility via the hierarchy fallback — no per-chunk room add needed. Player entities and hitboxes/projectiles (which are NOT children of the map entity) need explicit room membership via the observer approach.
 
@@ -364,21 +416,60 @@ fn on_map_instance_id_added(
 1. Insert `RigidBodyDisabled` + `DisableRollback` on player entity
 2. Remove client sender + player entity from old room
 3. Add client sender + player entity to new room
-4. Update `MapInstanceId` to new map entity
-5. Update `ChunkTarget.map_entity` to new map entity
+4. Update `MapInstanceId` to new map's enum variant (e.g. `MapInstanceId::Homebase { owner }`)
+5. Update `ChunkTarget.map_entity` to new server-local map entity
 6. Set `Position` to new map spawn point
 7. Zero `LinearVelocity`
-8. Send a custom "map transition" channel message to the client
+8. Send a `MapTransitionStart { target }` message to the client
 
 **Server-side (after client confirms chunks loaded, or after timeout):**
 1. Remove `RigidBodyDisabled` + `DisableRollback` from player entity
 
 **Client-side:**
-1. Receive transition message → set `MapTransitionState::Transitioning`
+1. Receive `MapTransitionStart` → set `MapTransitionState::Transitioning`
 2. `OnEnter(Transitioning)`: insert `RigidBodyDisabled` + `DisableRollback` on player, show loading UI
-3. Wait for new map's chunks to load (track via `TrackedAssets` or chunk count)
-4. When loaded → set `MapTransitionState::Playing`
-5. `OnExit(Transitioning)`: remove `RigidBodyDisabled` + `DisableRollback`, hide loading UI
+3. Spawn new client-local `VoxelMapInstance` for target map if not already spawned (for Homebase — Overworld already exists)
+4. Register new map in client's `MapRegistry`
+5. Update player entity's local `ChunkTarget.map_entity` to the new client-local map entity (resolved via `MapRegistry`)
+6. Wait for new map's chunks to load (check `desired ⊆ loaded_chunks && pending.tasks.is_empty()`)
+7. When loaded → set `MapTransitionState::Playing`
+8. `OnExit(Transitioning)`: remove `RigidBodyDisabled` + `DisableRollback`, hide loading UI
+
+#### Spatial Overlap Between Concurrent Maps
+
+Multiple maps may have terrain at overlapping world positions (e.g. Overworld and Homebase both near origin). Physics isolation via `filter_pairs` prevents cross-map collisions, but both maps' chunks would be visible simultaneously during the transition window.
+
+**Solution**: The loading screen (shown during `MapTransitionState::Transitioning`) hides the visual overlap. The sequence is:
+1. Loading screen appears → old map's `ChunkTarget` is removed → old chunks unload via `despawn_out_of_range_chunks`
+2. New map's chunks load
+3. Loading screen disappears → only new map's chunks are visible
+
+Since the loading screen covers both unloading and loading, the player never sees both maps simultaneously. No world-space offset needed.
+
+#### Orphaned Map Cleanup
+
+When a map has no `ChunkTarget` pointing to it (e.g. client left a Homebase), its chunks unload naturally. But the `VoxelMapInstance` entity persists, leaking memory (`OctreeI32`, `modified_voxels`, etc.).
+
+**Solution**: A shared cleanup system (runs on both server and client) that despawns `VoxelMapInstance` entities with no active `ChunkTarget`:
+
+```rust
+fn cleanup_orphaned_maps(
+    mut commands: Commands,
+    maps: Query<Entity, With<VoxelMapInstance>>,
+    targets: Query<&ChunkTarget>,
+    overworld: Res<OverworldMap>,
+) {
+    let targeted: HashSet<Entity> = targets.iter().map(|t| t.map_entity).collect();
+    for map_entity in &maps {
+        if map_entity == overworld.0 { continue; } // never clean up overworld
+        if !targeted.contains(&map_entity) {
+            commands.entity(map_entity).despawn_recursive();
+        }
+    }
+}
+```
+
+On the server, this should run with a delay/cooldown to avoid despawning maps that are momentarily between transitions. On the client, it can run immediately since the client only has `ChunkTarget` on its own player entity. The cleanup system also removes the entry from `MapRegistry`.
 
 ### Existing Infrastructure
 
@@ -386,7 +477,7 @@ fn on_map_instance_id_added(
 |-----------|----------|------|
 | `AppState::Loading/Ready` | [app_state.rs:4-9](crates/protocol/src/app_state.rs#L4-L9) | Initial asset loading gate |
 | `ClientState` | [ui/state.rs:3-13](crates/ui/src/state.rs#L3-L13) | Client UI state machine |
-| `ChunkTarget.map_entity` | [chunk.rs:13-36](crates/voxel_map_engine/src/chunk.rs#L13-L36) | Drives chunk loading per-map, already implements `MapEntities` |
+| `ChunkTarget.map_entity` | [chunk.rs:13-36](crates/voxel_map_engine/src/chunk.rs#L13-L36) | Drives chunk loading per-map. **Decision**: Do not replicate. Each side creates locally via `MapRegistry`. Currently on camera (client) and player (server); will move to player entity on both sides. |
 | `DisableRollback` | [ability.rs:1128](crates/protocol/src/ability.rs#L1128) | Already used on hitboxes/projectiles |
 | `TrackedAssets` | [app_state.rs](crates/protocol/src/app_state.rs) | Tracks asset loading completion |
 | `OverworldMap(Entity)` | [server/map.rs](crates/server/src/map.rs) | Single map reference (no multi-map yet) |
@@ -424,23 +515,29 @@ The reliable check is: `desired ⊆ loaded_chunks` AND `pending.tasks.is_empty()
 
 **Decision: Option A** — persist the desired set. Makes chunk readiness available for any consumer without recomputation.
 
-#### Proposed Transition Check System
+#### Proposed Transition Check System (Revised)
+
+The original version queried `ChunkTarget` from the `Predicted` player entity and used its `map_entity` to look up `VoxelMapInstance`. This fails because: (a) `ChunkTarget` lacks `add_prediction()` so it's not on the predicted entity, and (b) even if it were, the replicated `map_entity` would be `Entity::PLACEHOLDER` (see [critique](doc/research/2026-03-06-entity-mapping-map-transition-critique.md)).
+
+**Revised**: Use `MapInstanceId` (semantic enum) on the predicted player + `MapRegistry` to resolve to the client's local map entity:
 
 ```rust
 fn check_map_transition_complete(
+    map_registry: Res<MapRegistry>,
     maps: Query<(&VoxelMapInstance, &PendingChunks)>,
-    player: Query<&ChunkTarget, With<Predicted>>,
+    player: Query<&MapInstanceId, With<Predicted>>,
     mut next_state: ResMut<NextState<MapTransitionState>>,
 ) {
-    let Ok(target) = player.single() else { return };
-    let Ok((instance, pending)) = maps.get(target.map_entity) else { return };
+    let Ok(map_id) = player.single() else { return };
+    let Some(&map_entity) = map_registry.0.get(map_id) else { return };
+    let Ok((instance, pending)) = maps.get(map_entity) else { return };
     if pending.tasks.is_empty() && instance.desired_chunks.is_subset(&instance.loaded_chunks) {
         next_state.set(MapTransitionState::Playing);
     }
 }
 ```
 
-Runs in `Update` gated on `in_state(MapTransitionState::Transitioning)`.
+Runs in `Update` gated on `in_state(MapTransitionState::Transitioning)`. `MapInstanceId` is registered with `register_component::<MapInstanceId>()` only (no `add_prediction()`). In current lightyear, `Predicted` is a marker on the same entity that receives replicated components, so `Query<&MapInstanceId, With<Predicted>>` matches without prediction registration. Map transitions are server-authoritative and must not be rolled back.
 
 ## Resolved: Collider Attach During Transition
 
@@ -525,7 +622,7 @@ In `crates/ui/src/components.rs`, add:
 pub struct MapSwitchButton;
 ```
 
-The button text and target are dynamic — it shows the *other* map (the one you'd switch to). The client tracks which map the player is on via the replicated `MapInstanceId` component on the `Predicted` player entity.
+The button text and target are dynamic — it shows the *other* map (the one you'd switch to). The client tracks which map the player is on via the replicated `MapInstanceId` enum on the `Predicted` player entity. Since `MapInstanceId` is a semantic enum (not an Entity reference), direct pattern matching works on the client without any entity mapping concerns.
 
 In `crates/ui/src/map_switch.rs`:
 
@@ -558,19 +655,18 @@ fn setup_map_switch_button(mut commands: Commands, hud_root: Query<Entity, With<
 }
 ```
 
-#### 4. Button Interaction → Send Message (Toggle)
+#### 4. Button Interaction → Send Message (Toggle, Revised)
 
 ```rust
 fn handle_map_switch_button(
     button_query: Query<&Interaction, (Changed<Interaction>, With<MapSwitchButton>)>,
     mut message_sender: Query<&mut MessageSender<PlayerMapSwitchRequest>>,
     player_map: Query<&MapInstanceId, With<Predicted>>,
-    overworld: Res<OverworldMap>,
 ) {
     for interaction in button_query.iter() {
         if *interaction != Interaction::Pressed { continue; }
         let target = match player_map.single() {
-            Ok(map_id) if map_id.0 == overworld.0 => MapSwitchTarget::Homebase,
+            Ok(MapInstanceId::Overworld) => MapSwitchTarget::Homebase,
             _ => MapSwitchTarget::Overworld,
         };
         for mut sender in message_sender.iter_mut() {
@@ -581,12 +677,14 @@ fn handle_map_switch_button(
 
 fn update_map_switch_button_text(
     player_map: Query<&MapInstanceId, (With<Predicted>, Changed<MapInstanceId>)>,
-    overworld: Res<OverworldMap>,
     button: Query<&Children, With<MapSwitchButton>>,
     mut text: Query<&mut Text>,
 ) {
     let Ok(map_id) = player_map.single() else { return };
-    let label = if map_id.0 == overworld.0 { "Homebase" } else { "Overworld" };
+    let label = match map_id {
+        MapInstanceId::Overworld => "Homebase",
+        _ => "Overworld",
+    };
     let Ok(children) = button.single() else { return };
     for child in children.iter() {
         if let Ok(mut t) = text.get_mut(*child) {
@@ -596,7 +694,7 @@ fn update_map_switch_button_text(
 }
 ```
 
-The button label updates reactively when `MapInstanceId` changes on the predicted player entity. When on the overworld, it shows "Homebase"; when on any other map, it shows "Overworld".
+The button label updates reactively when `MapInstanceId` changes on the predicted player entity. Pattern matching on the enum works identically on server and client — no `OverworldMap` resource comparison needed.
 
 #### 5. Server-Side Handler
 
@@ -662,29 +760,30 @@ fn find_or_spawn_homebase(
 }
 ```
 
-`VoxelMapInstance::homebase()` ([instance.rs:56-74](crates/voxel_map_engine/src/instance.rs#L56-L74)) handles setup:
-- Seed derived deterministically from owner entity via `seed_from_entity` (reproducible across restarts if entity is stable)
+`VoxelMapInstance::homebase()` ([instance.rs:56-74](crates/voxel_map_engine/src/instance.rs#L56-L74)) handles setup. **Note**: `Homebase.owner` must be changed from `Entity` to `ClientId` to match `MapInstanceId::Homebase { owner: ClientId }`. `ClientId` is stable across the session and consistent between server and client. The `seed_from_entity` helper should become `seed_from_client_id` accordingly.
+- Seed derived deterministically from owner's `ClientId`.
 - Bounded map with `Some(bounds)` — chunks only spawn within bounds
 - `Homebase { owner }` marker for query-based lookup
 - `PendingChunks` auto-inserted by `ensure_pending_chunks` lifecycle system
 
-##### Transition Execution
+##### Transition Execution (Revised)
 
-Shared function for both client-requested and server-initiated transitions (e.g. portal entry):
+Shared function for both client-requested and server-initiated transitions (e.g. portal entry). Uses `MapInstanceId` enum and resolves to server-local entities via `MapRegistry`:
 
 ```rust
 fn initiate_map_transition(
     commands: &mut Commands,
     client_entity: Entity,
     player_entity: Entity,
-    target_map: Entity,
+    target_map_id: MapInstanceId,
+    target_map_entity: Entity, // server-local VoxelMapInstance entity
 ) {
     commands.entity(player_entity).insert((
         RigidBodyDisabled,
         DisableRollback,
-        MapInstanceId(target_map),
-        ChunkTarget::new(target_map, 4),
-        Position(Vec3::new(0.0, 30.0, 0.0)),  // map spawn point
+        target_map_id,                          // semantic enum, replicates cleanly
+        ChunkTarget::new(target_map_entity, 4), // server-local entity for server chunk loading
+        Position(Vec3::new(0.0, 30.0, 0.0)),
         LinearVelocity(Vec3::ZERO),
     ));
 
@@ -699,18 +798,29 @@ fn initiate_map_transition(
 }
 ```
 
+Note: `ChunkTarget` is not replicated (Resolved Decision 5). The server inserts it locally here pointing to the server-local map entity. The client independently inserts its own `ChunkTarget` on the player entity, pointing to the client-local map entity resolved via `MapRegistry`.
+
 For **server-initiated transitions** (portals, game events), the server calls `initiate_map_transition` directly without going through `PlayerMapSwitchRequest`. The same function handles both paths.
 
 ##### MapTransitionStart Message
 
-Server-to-client message notifying the client to enter its loading state:
+Server-to-client message notifying the client to enter its loading state. Includes generation config so the client can spawn a matching `VoxelMapInstance`:
 
 ```rust
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
 pub struct MapTransitionStart {
-    pub target: MapSwitchTarget,
+    pub target: MapInstanceId,
+    pub seed: u64,
+    pub generation_version: u32,
+    pub bounds: Option<IVec3>,
 }
 ```
+
+`target` is `MapInstanceId` (not `MapSwitchTarget`) so the client can construct the correct `MapRegistry` key — e.g. `MapInstanceId::Homebase { owner: client_id }` carries the owner, which `MapSwitchTarget::Homebase` does not. The generator function is implicit from the `MapInstanceId` variant (Overworld → `overworld_gen`, Homebase → `homebase_gen`, etc.).
+
+The server populates `seed`, `generation_version`, and `bounds` from the target map's `VoxelMapConfig`. The client uses them to spawn a local `VoxelMapInstance` with identical terrain generation. This is necessary because generation parameters (especially homebase seeds) are server-determined and cannot be derived from `MapInstanceId` alone.
+
+For `Overworld`, the client already has a matching instance (spawned at startup with the shared `MapWorld` seed). The config fields are still sent for consistency but the client skips spawning if the map already exists in `MapRegistry`.
 
 Sent to the specific client via `MessageSender<MapTransitionStart>` on the `ClientOf` entity, same pattern as `VoxelStateSync` ([server/map.rs:339-347](crates/server/src/map.rs#L339-L347)). The client receives it via `MessageReceiver<MapTransitionStart>` and enters `MapTransitionState::Transitioning`.
 
@@ -735,7 +845,8 @@ The `ui` crate already depends on `protocol` ([ui/Cargo.toml:9](crates/ui/Cargo.
 
 ### Resolved Design Decisions (Map Switch)
 
-1. **Toggle button**: Single button that toggles between "Homebase" and "Overworld" based on current `MapInstanceId` on the predicted player entity. No keyboard shortcut.
+1. **Toggle button**: Single button that toggles between "Homebase" and "Overworld" based on current `MapInstanceId` enum variant on the predicted player entity. No keyboard shortcut. No `OverworldMap` resource comparison needed.
 2. **Dedicated `MapChannel`**: Separate from `VoxelChannel`. Bidirectional for `PlayerMapSwitchRequest` (C→S) and `MapTransitionStart` (S→C).
 3. **UI module**: New `ui/src/map_switch.rs` module for button spawn, interaction, and text update systems.
 4. **Server-initiated transitions**: Server calls `initiate_map_transition` directly for portals/game events, bypassing `PlayerMapSwitchRequest`. Same function handles both paths.
+5. **Client-side map spawning via server-provided config**: `MapTransitionStart` includes `seed`, `generation_version`, and `bounds`. The client uses these to spawn a local `VoxelMapInstance` with matching terrain generation. This avoids the client needing to derive seeds independently (homebase seeds are server-determined, not derivable from `ClientId`). If the map already exists in `MapRegistry` (e.g. Overworld, or revisiting a Homebase), the client skips spawning.
