@@ -192,9 +192,7 @@ It implements `MapEntities` at [chunk.rs:19-23](crates/voxel_map_engine/src/chun
 
 Current client behavior: `ChunkTarget` is attached to the camera locally at [client/map.rs:56-66](crates/client/src/map.rs#L56-L66), pointing at the client's `OverworldMap.0` entity. The server attaches `ChunkTarget` to player entities at [gameplay.rs:207](crates/server/src/gameplay.rs#L207).
 
-%% ChunkTarget should also be moved from camera to player on clients
-
-`ChunkTarget` should become local-only. Each side derives it from `MapInstanceId` + `MapRegistry`. Remove `register_component::<ChunkTarget>().add_map_entities()` from lightyear registration.
+`ChunkTarget` should become local-only, and moved from camera to player entity on clients. Each side derives it from `MapInstanceId` + `MapRegistry`. Remove `register_component::<ChunkTarget>().add_map_entities()` from lightyear registration.
 
 ### 9. MapCollisionHooks Implementation
 
