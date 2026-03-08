@@ -234,6 +234,43 @@ fn multiple_targets_on_different_maps() {
 }
 
 #[test]
+fn player_entity_drives_chunk_loading() {
+    let mut app = test_app();
+    let map = spawn_map(&mut app, 1);
+
+    // Simulate player entity with ChunkTarget (instead of camera)
+    let player = app
+        .world_mut()
+        .spawn((
+            ChunkTarget {
+                map_entity: map,
+                distance: 1,
+            },
+            Transform::from_translation(Vec3::ZERO),
+        ))
+        .id();
+
+    tick_until(&mut app, |app| loaded_chunk_count(app, map) == 27);
+
+    assert_eq!(
+        loaded_chunk_count(&app, map),
+        27,
+        "player-driven ChunkTarget should load 3^3 chunks"
+    );
+
+    // Remove ChunkTarget — chunks should unload
+    app.world_mut().entity_mut(player).remove::<ChunkTarget>();
+
+    tick_until(&mut app, |app| loaded_chunk_count(app, map) == 0);
+
+    assert_eq!(
+        loaded_chunk_count(&app, map),
+        0,
+        "chunks should unload after ChunkTarget removed from player"
+    );
+}
+
+#[test]
 fn chunk_entities_are_children_of_map() {
     let mut app = test_app();
     let map = spawn_map(&mut app, 1);

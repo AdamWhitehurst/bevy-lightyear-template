@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use bevy::{prelude::*, window::PrimaryWindow};
 use leafwing_input_manager::prelude::*;
-use lightyear::prelude::{Controlled, MessageReceiver, MessageSender};
+use lightyear::prelude::{Controlled, MessageReceiver, MessageSender, Predicted};
 use protocol::{
-    MapInstanceId, MapRegistry, MapWorld, PlayerActions, VoxelChannel, VoxelEditBroadcast,
-    VoxelEditRequest, VoxelStateSync, VoxelType,
+    CharacterMarker, MapInstanceId, MapRegistry, MapWorld, PlayerActions, VoxelChannel,
+    VoxelEditBroadcast, VoxelEditRequest, VoxelStateSync, VoxelType,
 };
 use voxel_map_engine::prelude::{
     flat_terrain_voxels, ChunkTarget, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld,
@@ -26,7 +26,7 @@ impl Plugin for ClientMapPlugin {
             .add_systems(
                 Update,
                 (
-                    attach_chunk_target_to_camera,
+                    attach_chunk_target_to_player,
                     handle_voxel_broadcasts,
                     handle_state_sync,
                     protocol::attach_chunk_colliders,
@@ -60,15 +60,19 @@ fn spawn_overworld(
     registry.insert(MapInstanceId::Overworld, map);
 }
 
-fn attach_chunk_target_to_camera(
+fn attach_chunk_target_to_player(
     mut commands: Commands,
-    overworld: Res<OverworldMap>,
-    cameras: Query<Entity, (With<Camera3d>, Without<ChunkTarget>)>,
+    registry: Res<MapRegistry>,
+    players: Query<
+        (Entity, &MapInstanceId),
+        (With<Predicted>, With<CharacterMarker>, Without<ChunkTarget>),
+    >,
 ) {
-    for entity in &cameras {
+    for (entity, map_id) in &players {
+        let map_entity = registry.get(map_id);
         commands
             .entity(entity)
-            .insert(ChunkTarget::new(overworld.0, 4));
+            .insert(ChunkTarget::new(map_entity, 4));
     }
 }
 

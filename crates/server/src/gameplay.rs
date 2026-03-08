@@ -7,7 +7,8 @@ use lightyear::prelude::server::ClientOf;
 use lightyear::prelude::*;
 use protocol::*;
 
-use crate::map::{spawn_overworld, OverworldMap};
+use crate::map::spawn_overworld;
+use voxel_map_engine::prelude::ChunkTarget;
 
 pub struct ServerGameplayPlugin;
 
@@ -57,7 +58,7 @@ fn sync_ability_manifest(defs: Option<Res<AbilityDefs>>, mut last_len: Local<usi
     }
 }
 
-fn spawn_dummy_target(mut commands: Commands, overworld: Res<OverworldMap>) {
+fn spawn_dummy_target(mut commands: Commands, registry: Res<MapRegistry>) {
     commands.spawn((
         Name::new("DummyTarget"),
         Position(Vec3::new(3.0, 30.0, 0.0)),
@@ -69,7 +70,7 @@ fn spawn_dummy_target(mut commands: Commands, overworld: Res<OverworldMap>) {
         CharacterMarker,
         MapInstanceId::Overworld,
         Health::new(100.0),
-        ChunkTarget::new(overworld.0, 1),
+        ChunkTarget::new(registry.get(&MapInstanceId::Overworld), 1),
         DummyTarget,
     ));
 }
@@ -167,7 +168,7 @@ fn handle_connected(
     mut commands: Commands,
     character_query: Query<Entity, (With<CharacterMarker>, Without<DummyTarget>)>,
     remote_id_query: Query<&RemoteId, With<ClientOf>>,
-    overworld: Res<OverworldMap>,
+    registry: Res<MapRegistry>,
 ) {
     let client_entity = trigger.entity;
     let peer_id = remote_id_query
@@ -209,6 +210,6 @@ fn handle_connected(
         MapInstanceId::Overworld,
         Health::new(100.0),
         AbilityCooldowns::default(),
-        ChunkTarget::new(overworld.0, 4),
+        ChunkTarget::new(registry.get(&MapInstanceId::Overworld), 4),
     ));
 }

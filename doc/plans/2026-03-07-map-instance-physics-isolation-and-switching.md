@@ -448,7 +448,7 @@ fn chunk_colliders_inherit_map_instance_id() {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] All tests pass: `cargo test-native`
+- [x] All tests pass: `cargo test-native`
 - [x] `cargo check-all` passes
 - [ ] Server builds and runs: `cargo server`
 - [ ] Client builds and runs: `cargo client`
@@ -593,8 +593,8 @@ fn player_entity_drives_chunk_loading() {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] All tests pass: `cargo test-native`
-- [ ] `cargo check-all` passes
+- [x] All tests pass: `cargo test-native`
+- [x] `cargo check-all` passes
 - [ ] Server builds and runs: `cargo server`
 - [ ] Client builds and runs: `cargo client`
 

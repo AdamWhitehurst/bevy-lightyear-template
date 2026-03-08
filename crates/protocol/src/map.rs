@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-pub use voxel_map_engine::prelude::{ChunkTarget, VoxelChunk, VoxelType};
+pub use voxel_map_engine::prelude::{VoxelChunk, VoxelType};
 
 /// Channel for voxel editing messages
 pub struct VoxelChannel;
