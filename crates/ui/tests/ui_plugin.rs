@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 use lightyear::prelude::client::*;
+use lightyear::prelude::Predicted;
 use protocol::*;
 use std::time::Duration;
 use ui::*;
@@ -185,6 +186,98 @@ fn test_connecting_state_spawns_cancel_button() {
         cancel_query.iter(app.world()).count(),
         1,
         "Should have one Cancel button"
+    );
+}
+
+#[test]
+fn ingame_hud_spawns_map_switch_button() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.add_plugins(StatesPlugin);
+    app.add_plugins(UiPlugin);
+
+    app.world_mut()
+        .spawn((Name::new("Test Client"), Client::default()));
+
+    app.world_mut()
+        .resource_mut::<NextState<ClientState>>()
+        .set(ClientState::InGame);
+    app.update();
+
+    let mut query = app
+        .world_mut()
+        .query_filtered::<Entity, With<MapSwitchButton>>();
+    assert_eq!(
+        query.iter(app.world()).count(),
+        1,
+        "Should have one MapSwitchButton"
+    );
+}
+
+#[test]
+fn map_switch_button_label_shows_homebase_when_on_overworld() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.add_plugins(StatesPlugin);
+    app.add_plugins(UiPlugin);
+
+    app.world_mut()
+        .spawn((Name::new("Test Client"), Client::default()));
+
+    app.world_mut()
+        .resource_mut::<NextState<ClientState>>()
+        .set(ClientState::InGame);
+    app.update();
+
+    app.world_mut()
+        .spawn((CharacterMarker, Predicted, MapInstanceId::Overworld));
+    app.update();
+
+    let button_entity = app
+        .world_mut()
+        .query_filtered::<Entity, With<MapSwitchButton>>()
+        .single(app.world())
+        .expect("MapSwitchButton should exist");
+    let children = app.world().get::<Children>(button_entity).unwrap();
+    let text = app.world().get::<Text>(children[0]).unwrap();
+    assert_eq!(
+        text.0, "Homebase",
+        "Button should say 'Homebase' when player is on Overworld"
+    );
+}
+
+#[test]
+fn map_switch_button_label_shows_overworld_when_on_homebase() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.add_plugins(StatesPlugin);
+    app.add_plugins(UiPlugin);
+
+    app.world_mut()
+        .spawn((Name::new("Test Client"), Client::default()));
+
+    app.world_mut()
+        .resource_mut::<NextState<ClientState>>()
+        .set(ClientState::InGame);
+    app.update();
+
+    app.world_mut().spawn((
+        CharacterMarker,
+        Predicted,
+        MapInstanceId::Homebase { owner: 42 },
+    ));
+    app.update();
+
+    let button_entity = app
+        .world_mut()
+        .query_filtered::<Entity, With<MapSwitchButton>>()
+        .single(app.world())
+        .expect("MapSwitchButton should exist");
+    let children = app.world().get::<Children>(button_entity).unwrap();
+    let text = app.world().get::<Text>(children[0]).unwrap();
+    assert_eq!(
+        text.0, "Overworld",
+        "Button should say 'Overworld' when player is on Homebase"
     );
 }
 

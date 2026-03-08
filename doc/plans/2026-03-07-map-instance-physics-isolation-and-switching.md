@@ -1596,8 +1596,8 @@ fn map_switch_button_label_shows_overworld_when_on_homebase() {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] All tests pass: `cargo test-native`
-- [ ] `cargo check-all` passes
+- [x] All tests pass: `cargo test-native`
+- [x] `cargo check-all` passes
 - [ ] Server builds and runs: `cargo server`
 - [ ] Client builds and runs: `cargo client`
 
