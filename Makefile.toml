@@ -99,16 +99,24 @@ fi
 description = "Run all native tests (excludes WASM)"
 workspace = false
 command = "cargo"
-args = ["test", "--workspace", "--exclude", "web"]
+args = [
+    "test",
+    "--workspace",
+    "--exclude",
+    "web",
+    # "-j4",
+    # "--",
+    # "--test-threads=4",
+]
 
 [tasks.test-all]
-description = "Run all tests including WASM (WARNING: WASM compilation is very resource-intensive)"
+description = "Run all tests including WASM"
 workspace = false
 dependencies = ["ensure-certs"]
 run_task = { name = ["test-native", "test-wasm"], parallel = false }
 
 [tasks.test-wasm]
-description = "Run WASM tests (Optimized: ~4GB RAM, 5-10 minutes)"
+description = "Run WASM tests"
 workspace = false
 script = '''
 #!/bin/bash

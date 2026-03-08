@@ -20,9 +20,8 @@ jobs = 8
 rustflags = [
     "--cfg", "web_sys_unstable_apis",
     "-C", "target-feature=+reference-types",
-    "-C", "opt-level=z",             # Optimize for size to reduce memory pressure
 ]
 
-[target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "link-arg=-fuse-ld=mold"
-]
+# [target.x86_64-unknown-linux-gnu]
+# rustflags = ["-C", "link-arg=-fuse-ld=mold"
+# ]
