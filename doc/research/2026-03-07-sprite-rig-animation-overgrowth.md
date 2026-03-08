@@ -189,13 +189,17 @@ commands.spawn((
 Bevy's built-in animation system can animate **any component field** on any entity via `AnimatableCurve` + `animated_field!`. This works for 2D sprite rigs despite being designed for 3D.
 
 ```rust
-// Animate a bone's rotation over time
+// Animate a bone's rotation over time.
+// UnevenSampleAutoCurve::new takes (time, value) tuples — NOT separate time/value arrays.
 let curve = AnimatableCurve::new(
     animated_field!(Transform::rotation),
-    UnevenSampleAutoCurve::new(
-        [0.0, 0.25, 0.5, 0.75, 1.0],
-        [Quat::IDENTITY, rot_5deg, Quat::IDENTITY, rot_neg5deg, Quat::IDENTITY],
-    ).unwrap(),
+    UnevenSampleAutoCurve::new([
+        (0.0,  Quat::IDENTITY),
+        (0.25, rot_5deg),
+        (0.5,  Quat::IDENTITY),
+        (0.75, rot_neg5deg),
+        (1.0,  Quat::IDENTITY),
+    ]).unwrap(),
 );
 clip.add_curve_to_target(bone_target_id, curve);
 ```
@@ -362,6 +366,18 @@ Maps game states to animations for a specific rig, defining the animation graph 
 )
 ```
 
+### Animation Visual Descriptions
+
+What each animation state should communicate to a player:
+
+| State | Visual Feel |
+|---|---|
+| **idle** | Subtle breathing cycle — torso rises and falls slightly, head tilts a few degrees. Feet planted. Conveys readiness, not stiffness. |
+| **walk** | Arms swing opposite to legs. Torso bobs gently with each step. Relaxed, unhurried. |
+| **run** | Exaggerated arm/leg swing, torso leans slightly forward. More vertical bounce than walk. Feels propulsive. |
+| **attack_1** | Winds back briefly (startup lean), then a sharp forward drive through the strike (active). Body follows through, then settles (recovery). Should feel committed and impactful. |
+| **hit_react** | Short, sharp recoil away from the hit direction. Head snaps back. Arms flinch. Recovers quickly. Should not look floppy — controlled reaction, not ragdoll. |
+
 ---
 
 ## Part 6: ECS Architecture Sketch
@@ -391,8 +407,18 @@ Maps game states to animations for a specific rig, defining the animation graph 
 | `spawn_sprite_rig` | `Update` | Reacts to new `SpriteRig` components, spawns bone entities |
 | `update_animation_parameters` | `Update` | Reads velocity/combat state → sets blend weights on `AnimationGraph` |
 | `apply_skin_changes` | `Update` | Watches `ActiveSkin` changes → swaps sprite images on bone entities |
-| `handle_animation_events` | `Update` | Processes cosmetic events from animation clips (sounds, particles) |
+| `handle_animation_events` | `Update` | Observes typed events fired by `clip.add_event(time, MyEvent)` on the `AnimationPlayer` entity |
 | `apply_hit_reactions` | `Update` | Procedural additive transforms for hit reactions (Overgrowth-inspired) |
+
+### Hot-Reload Behavior for Rig Assets
+
+Two distinct cases when assets change on disk:
+
+**`*.anim.ron` changes** (animation keyframes tweaked): The derived `AnimationClip` is rebuilt in-place via `clips.insert(existing_id, new_clip)`. All existing bone entities and the `AnimationPlayer` are unaffected — they transparently pick up the new clip data. No respawning needed.
+
+**`*.rig.ron` changes** (bone hierarchy, slot definitions, or skin mappings changed): The bone entity hierarchy itself is stale. The correct approach: watch for `AssetEvent::Modified` on `SpriteRigAsset`, despawn all existing bone children of affected character roots, then respawn from the new rig definition. The character root entity itself stays; only the bone subtree is rebuilt.
+
+In practice, `*.rig.ron` changes only happen during development. At runtime (shipped game), asset hot-reload is disabled, so this is purely a dev workflow concern.
 
 ---
 
@@ -407,6 +433,28 @@ The sprite rig system directly enables VISION.md features:
 | Inherited phenotypes | Skin selection based on genetic data |
 | Body part customization | Per-slot attachment swapping (independent of skin) |
 | Training-based visual evolution | Gradual skin transitions as stats cross thresholds |
+
+### Bone Transform Variations (Proportions and Shape)
+
+Yes — bone offsets in `*.rig.ron` define default positions, but these are just starting values. A `BoneOverrides` component on the character root can carry per-bone transform adjustments applied at spawn time (or updated at runtime):
+
+```rust
+pub struct BoneOverrides {
+    pub offsets: HashMap<String, Vec2>,  // additive offset per bone name
+    pub scales:  HashMap<String, Vec2>,  // multiplicative scale per bone name
+}
+```
+
+Examples of what this enables:
+
+| Stat Effect | Bone Override |
+|---|---|
+| Tall/large body type | Root-to-torso offset scaled up |
+| Wide shoulders (high strength) | `arm_l`/`arm_r` x-offset increased |
+| Long legs (high agility) | `leg_l`/`leg_r` y-offset extended |
+| Large head (cosmetic trait) | `head` scale increased |
+
+Overrides compose additively onto the rig's defaults. Animations are authored against the default proportions and remain valid — stretching an arm bone longer means the arm sweeps through a larger arc, which looks natural without re-authoring the animation.
 
 ---
 
@@ -459,7 +507,7 @@ The sprite rig system directly enables VISION.md features:
 ### Option A: Build at Spawn Time (Per-Instance)
 
 Each time a character spawns:
-1. Spawn bone entities, each getting a unique `AnimationTargetId` (e.g., `AnimationTargetId::from_names(["character_42", "torso"])`)
+1. Spawn bone entities, each getting a unique `AnimationTargetId` (e.g., `["character_42", "torso"].into_iter().collect::<AnimationTargetId>()`)
 2. Build `AnimationClip` assets on the fly, populating curves keyed to those specific target IDs
 3. Build `AnimationGraph` referencing those clips
 4. Insert `AnimationPlayer` + `AnimationGraphHandle`
@@ -534,15 +582,23 @@ The `*.animset.ron` file is the bridge. It lives on the client/render side and m
 
 A client-side system observes replicated `ActiveAbility` entities:
 
-```
+```rs
 fn update_character_animations(
-    abilities: Query<(&ActiveAbility, &AbilityPhase)>,
-    characters: Query<(&AnimationPlayer, &AnimationSet), With<CharacterMarker>>,
+    // ActiveAbility lives on a SEPARATE standalone entity (not the character).
+    // The ActiveAbility component has a `caster` field pointing to the character entity.
+    abilities: Query<(&ActiveAbility, &AbilityPhase, &AbilityId)>,
+    mut characters: Query<(&mut AnimationPlayer, &AnimationSet), With<CharacterMarker>>,
 ) {
-    // For each character, check if they have an active ability
-    // Look up ability_animations[ability_id] in the AnimationSet
-    // If found, play that animation (with crossfade)
-    // If no active ability, fall back to locomotion blend tree
+    for (ability, phase, ability_id) in &abilities {
+        // Resolve caster -> character entity via ability.caster
+        if let Ok((mut player, anim_set)) = characters.get_mut(ability.caster) {
+            // Look up ability_animations[ability_id] in the AnimationSet
+            if let Some(clip) = anim_set.ability_animations.get(&ability_id.0) {
+                // Play the clip with a short crossfade
+            }
+        }
+    }
+    // Characters with no active ability default to the locomotion blend tree
 }
 ```
 
@@ -654,3 +710,88 @@ Sources:
 - [Bevy Cheat Book: Asset Events](https://bevy-cheatbook.github.io/assets/assetevent.html)
 - [Bevy Derived Assets Discussion #9296](https://github.com/bevyengine/bevy/discussions/9296)
 - [AssetChanged PR #16810](https://github.com/bevyengine/bevy/pull/16810)
+
+---
+
+## Verified Bevy 0.17 API Reference
+
+Signatures confirmed against docs.rs/bevy/0.17.3.
+
+### `AnimationTargetId`
+
+```rust
+// From a single &Name:
+pub fn from_name(name: &Name) -> AnimationTargetId
+
+// From a root-to-leaf path of &Name values (order matters — different paths → different IDs):
+pub fn from_names<'a>(names: impl Iterator<Item = &'a Name>) -> AnimationTargetId
+
+// FromIterator impl allows collecting string slices:
+impl<T: AsRef<str>> FromIterator<T> for AnimationTargetId
+// Usage: ["root", "torso", "head"].into_iter().collect::<AnimationTargetId>()
+```
+
+**Critical**: the UUID is derived from the **full path**, not just the leaf name. `from_name(&Name::new("torso"))` and `from_names([root_name, torso_name].iter())` produce **different IDs**. For the shared-clip strategy (Option B), use `from_name` with just the bone name — then all instances of the same rig type share target IDs, and `AnimationPlayer` scoping prevents cross-character interference.
+
+### `UnevenSampleAutoCurve::new`
+
+```rust
+pub fn new(
+    timed_samples: impl IntoIterator<Item = (f32, T)>,
+) -> Result<UnevenSampleAutoCurve<T>, UnevenCoreError>
+```
+
+- Input is **`(time, value)` tuples** — not separate arrays of times and values.
+- Returns `Err(UnevenCoreError)` if fewer than 2 samples are provided.
+- Samples need not be pre-sorted; infinite/NaN times are filtered out.
+- Interpolation uses `T: StableInterpolate` (lerp for `f32`/`Vec3`, nlerp for `Quat`).
+
+```rust
+// Correct usage:
+UnevenSampleAutoCurve::new([
+    (0.0, Vec3::ZERO),
+    (0.3, Vec3::new(0.0, 5.0, 0.0)),
+    (0.6, Vec3::ZERO),
+]).unwrap()
+```
+
+### Animation Events — `AnimationClip::add_event` (No `AnimationPlayer::animation_events`)
+
+`AnimationPlayer` has **no `animation_events()` method**. The mechanism is observer-based:
+
+```rust
+// 1. Define an event type:
+#[derive(Event, Clone, Reflect)]
+#[derive(AnimationEvent)]  // required
+struct FootstepEvent;
+
+// 2. Register on the clip at a timestamp (fires on the AnimationPlayer entity):
+clip.add_event(0.15, FootstepEvent);
+
+// Or target a specific bone entity:
+clip.add_event_to_target(bone_target_id, 0.15, FootstepEvent);
+
+// Or use a closure (no trait required):
+clip.add_event_fn(0.15, |commands, entity, _time, _weight| {
+    // entity is the AnimationPlayer entity
+});
+
+// 3. Observe the event on the player entity:
+commands.entity(player_entity).observe(|trigger: Trigger<FootstepEvent>| {
+    // play sound, spawn particle, etc.
+});
+```
+
+Full `AnimationClip` event method signatures:
+```rust
+pub fn add_event(&mut self, time: f32, event: impl AnimationEvent)
+pub fn add_event_to_target(&mut self, target: AnimationTargetId, time: f32, event: impl AnimationEvent)
+pub fn add_event_fn(&mut self, time: f32, func: impl Fn(&mut Commands, Entity, f32, f32) + Send + Sync + 'static)
+pub fn add_event_fn_to_target(&mut self, target: AnimationTargetId, time: f32, func: impl Fn(&mut Commands, Entity, f32, f32) + Send + Sync + 'static)
+```
+
+Sources:
+- [AnimationTargetId — docs.rs/bevy/0.17](https://docs.rs/bevy/0.17.3/bevy/animation/struct.AnimationTargetId.html)
+- [UnevenSampleAutoCurve — docs.rs/bevy](https://docs.rs/bevy/latest/bevy/math/curve/struct.UnevenSampleAutoCurve.html)
+- [AnimationClip — docs.rs/bevy/0.17](https://docs.rs/bevy/0.17.3/bevy/animation/struct.AnimationClip.html)
+- [AnimationPlayer — docs.rs/bevy](https://docs.rs/bevy/latest/bevy/animation/struct.AnimationPlayer.html)
