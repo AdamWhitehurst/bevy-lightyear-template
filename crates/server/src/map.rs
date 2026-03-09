@@ -8,7 +8,10 @@ use lightyear::prelude::{
     Connected, ControlledBy, DisableRollback, MessageReceiver, MessageSender, NetworkTarget,
     RemoteId, Room, RoomEvent, RoomTarget, Server, ServerMultiMessageSender,
 };
-use protocol::map::{MapChannel, MapSwitchTarget, MapTransitionStart, PlayerMapSwitchRequest};
+use protocol::map::{
+    MapChannel, MapSwitchTarget, MapTransitionEnd, MapTransitionReady, MapTransitionStart,
+    PlayerMapSwitchRequest,
+};
 use protocol::{
     CharacterMarker, MapInstanceId, MapRegistry, MapWorld, PendingTransition, VoxelChannel,
     VoxelEditBroadcast, VoxelEditRequest, VoxelStateSync, VoxelType,
@@ -35,10 +38,6 @@ impl RoomRegistry {
         })
     }
 }
-
-/// Timer-based unfreeze until client confirmation is implemented.
-#[derive(Component)]
-pub struct TransitionUnfreezeTimer(pub Timer);
 
 /// Resource tracking the primary overworld map entity.
 #[derive(Resource)]
@@ -168,7 +167,7 @@ impl Plugin for ServerMapPlugin {
                 (
                     handle_voxel_edit_requests,
                     handle_map_switch_requests,
-                    tick_transition_unfreeze,
+                    handle_map_transition_ready,
                     protocol::attach_chunk_colliders,
                 ),
             )
@@ -513,8 +512,9 @@ fn execute_server_transition(
         .entity(player_entity)
         .insert(ChunkTarget::new(map_entity, 4));
 
+    let spawn_position = Vec3::new(0.0, 5.0, 0.0);
     commands.entity(player_entity).insert((
-        avian3d::prelude::Position(Vec3::new(0.0, 30.0, 0.0)),
+        avian3d::prelude::Position(spawn_position),
         avian3d::prelude::LinearVelocity(Vec3::ZERO),
     ));
 
@@ -531,14 +531,8 @@ fn execute_server_transition(
         seed,
         generation_version: map_world.generation_version,
         bounds,
+        spawn_position,
     });
-
-    commands
-        .entity(player_entity)
-        .insert(TransitionUnfreezeTimer(Timer::from_seconds(
-            3.0,
-            TimerMode::Once,
-        )));
 }
 
 fn ensure_map_exists(
@@ -575,22 +569,38 @@ fn ensure_map_exists(
     }
 }
 
-pub fn tick_transition_unfreeze(
+pub fn handle_map_transition_ready(
     mut commands: Commands,
-    time: Res<Time>,
-    mut query: Query<(Entity, &mut TransitionUnfreezeTimer)>,
+    mut receivers: Query<(Entity, &mut MessageReceiver<MapTransitionReady>)>,
+    mut end_senders: Query<&mut MessageSender<MapTransitionEnd>>,
+    controlled_query: Query<
+        (Entity, &ControlledBy),
+        (With<CharacterMarker>, With<PendingTransition>),
+    >,
 ) {
-    for (entity, mut timer) in &mut query {
-        timer.0.tick(time.delta());
-        if timer.0.is_finished() {
-            info!("Unfreezing player {entity:?} after transition timer");
-            commands.entity(entity).remove::<(
+    for (client_entity, mut receiver) in &mut receivers {
+        for _ready in receiver.receive() {
+            let Some((player_entity, _)) = controlled_query
+                .iter()
+                .find(|(_, ctrl)| ctrl.owner == client_entity)
+            else {
+                warn!("Received MapTransitionReady but no transitioning player for client {client_entity:?}");
+                continue;
+            };
+
+            info!("Client confirmed transition ready for player {player_entity:?}, unfreezing");
+
+            commands.entity(player_entity).remove::<(
                 RigidBodyDisabled,
                 ColliderDisabled,
                 DisableRollback,
                 PendingTransition,
-                TransitionUnfreezeTimer,
             )>();
+
+            let mut sender = end_senders
+                .get_mut(client_entity)
+                .expect("Client entity must have MessageSender<MapTransitionEnd>");
+            sender.send::<MapChannel>(MapTransitionEnd);
         }
     }
 }

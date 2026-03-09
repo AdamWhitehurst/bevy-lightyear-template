@@ -26,8 +26,9 @@ pub use hit_detection::{
 };
 pub use map::{
     attach_chunk_colliders, MapChannel, MapInstanceId, MapRegistry, MapSwitchTarget,
-    MapTransitionStart, MapWorld, PendingTransition, PlayerMapSwitchRequest, VoxelChannel,
-    VoxelChunk, VoxelEditBroadcast, VoxelEditRequest, VoxelStateSync, VoxelType,
+    MapTransitionEnd, MapTransitionReady, MapTransitionStart, MapWorld, PendingTransition,
+    PlayerMapSwitchRequest, TransitionReadySent, VoxelChannel, VoxelChunk, VoxelEditBroadcast,
+    VoxelEditRequest, VoxelStateSync, VoxelType,
 };
 
 pub const PROTOCOL_ID: u64 = 0;
@@ -172,6 +173,10 @@ impl Plugin for ProtocolPlugin {
         app.register_message::<PlayerMapSwitchRequest>()
             .add_direction(NetworkDirection::ClientToServer);
         app.register_message::<MapTransitionStart>()
+            .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<MapTransitionReady>()
+            .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<MapTransitionEnd>()
             .add_direction(NetworkDirection::ServerToClient);
 
         #[cfg(feature = "test_utils")]

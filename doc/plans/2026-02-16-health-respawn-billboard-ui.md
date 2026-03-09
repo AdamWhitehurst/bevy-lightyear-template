@@ -318,7 +318,7 @@ app.add_systems(Startup, spawn_respawn_points);
 fn spawn_respawn_points(mut commands: Commands) {
     commands.spawn((
         RespawnPoint,
-        Position(Vec3::new(0.0, 30.0, 0.0)),
+        Position(Vec3::new(0.0, 5.0, 0.0)),
     ));
 }
 ```
@@ -359,7 +359,7 @@ fn find_nearest_respawn_point(
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
         .map(|p| p.0)
-        .unwrap_or(Vec3::new(0.0, 30.0, 0.0))
+        .unwrap_or(Vec3::new(0.0, 5.0, 0.0))
 }
 ```
 

@@ -3,8 +3,8 @@ use std::sync::Arc;
 use avian3d::prelude::{ColliderDisabled, RigidBodyDisabled};
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
-use client::map::check_transition_chunks_loaded;
 use lightyear::prelude::{Controlled, DisableRollback, Predicted};
+use protocol::map::TransitionReadySent;
 use protocol::PendingTransition;
 use protocol::{CharacterMarker, MapInstanceId, MapRegistry};
 use ui::{ClientState, MapTransitionState};
@@ -21,7 +21,8 @@ fn transition_test_app() -> App {
     app.add_sub_state::<MapTransitionState>();
     app.add_systems(
         Update,
-        check_transition_chunks_loaded.run_if(in_state(MapTransitionState::Transitioning)),
+        client::map::check_transition_chunks_loaded
+            .run_if(in_state(MapTransitionState::Transitioning)),
     );
     app
 }
@@ -85,10 +86,14 @@ fn stays_transitioning_while_chunks_loading() {
         MapTransitionState::Transitioning,
         "Should remain Transitioning while loaded_chunks is empty"
     );
+    assert!(
+        app.world().get::<TransitionReadySent>(player).is_none(),
+        "TransitionReadySent should not be inserted while chunks are still loading"
+    );
 }
 
 #[test]
-fn transitions_to_playing_after_chunks_load() {
+fn inserts_ready_sent_after_chunks_load() {
     let mut app = transition_test_app();
 
     let map = spawn_map(&mut app);
@@ -108,13 +113,20 @@ fn transitions_to_playing_after_chunks_load() {
         app.update();
     }
 
+    // With the confirmation protocol, check_transition_chunks_loaded sends
+    // MapTransitionReady and inserts TransitionReadySent, but does NOT
+    // transition to Playing (that requires MapTransitionEnd from server).
     assert_eq!(
         *app.world().resource::<State<MapTransitionState>>().get(),
-        MapTransitionState::Playing,
-        "Should transition to Playing when chunks are loaded"
+        MapTransitionState::Transitioning,
+        "Should stay Transitioning until MapTransitionEnd arrives from server"
     );
     assert!(
-        app.world().get::<PendingTransition>(player).is_none(),
-        "PendingTransition should be cleaned up"
+        app.world().get::<TransitionReadySent>(player).is_some(),
+        "TransitionReadySent should be inserted after chunks load"
+    );
+    assert!(
+        app.world().get::<PendingTransition>(player).is_some(),
+        "PendingTransition should remain until MapTransitionEnd"
     );
 }

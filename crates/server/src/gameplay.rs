@@ -107,7 +107,7 @@ fn handle_character_movement(
 }
 
 fn spawn_respawn_points(mut commands: Commands) {
-    commands.spawn((RespawnPoint, Position(Vec3::new(0.0, 30.0, 0.0))));
+    commands.spawn((RespawnPoint, Position(Vec3::new(0.0, 5.0, 0.0))));
 }
 
 fn check_death_and_respawn(
@@ -147,7 +147,7 @@ fn nearest_respawn_pos(
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
         .map(|p| p.0)
-        .unwrap_or(Vec3::new(0.0, 30.0, 0.0))
+        .unwrap_or(Vec3::new(0.0, 5.0, 0.0))
 }
 
 fn expire_invulnerability(

@@ -1,97 +1,14 @@
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
-use lightyear::prelude::{DisableRollback, Room, RoomEvent, RoomPlugin, RoomTarget};
+use lightyear::prelude::{Room, RoomEvent, RoomPlugin, RoomTarget};
 use protocol::map::{MapInstanceId, PendingTransition};
-use server::map::{RoomRegistry, TransitionUnfreezeTimer};
+use server::map::RoomRegistry;
 use voxel_map_engine::prelude::{VoxelMapInstance, WorldVoxel};
 
 use std::sync::Arc;
 
 fn dummy_generator() -> Arc<dyn Fn(IVec3) -> Vec<WorldVoxel> + Send + Sync> {
     Arc::new(|_| vec![WorldVoxel::Air; 1])
-}
-
-fn transition_test_app() -> App {
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.add_plugins(RoomPlugin);
-    app.init_resource::<RoomRegistry>();
-    app.add_systems(Update, server::map::tick_transition_unfreeze);
-    app
-}
-
-#[test]
-fn unfreeze_timer_removes_components_after_expiry() {
-    let mut app = transition_test_app();
-
-    let entity = app
-        .world_mut()
-        .spawn((
-            avian3d::prelude::RigidBodyDisabled,
-            DisableRollback,
-            PendingTransition(MapInstanceId::Overworld),
-            TransitionUnfreezeTimer(Timer::from_seconds(0.016, TimerMode::Once)),
-        ))
-        .id();
-
-    // MinimalPlugins uses real time; sleep enough for timer to expire
-    for _ in 0..10 {
-        std::thread::sleep(std::time::Duration::from_millis(5));
-        app.update();
-    }
-
-    assert!(
-        app.world()
-            .get::<avian3d::prelude::RigidBodyDisabled>(entity)
-            .is_none(),
-        "RigidBodyDisabled should be removed after timer expires"
-    );
-    assert!(
-        app.world().get::<DisableRollback>(entity).is_none(),
-        "DisableRollback should be removed after timer expires"
-    );
-    assert!(
-        app.world().get::<PendingTransition>(entity).is_none(),
-        "PendingTransition should be removed after timer expires"
-    );
-    assert!(
-        app.world().get::<TransitionUnfreezeTimer>(entity).is_none(),
-        "TransitionUnfreezeTimer should be removed after timer expires"
-    );
-}
-
-#[test]
-fn unfreeze_timer_preserves_components_before_expiry() {
-    let mut app = transition_test_app();
-
-    let entity = app
-        .world_mut()
-        .spawn((
-            avian3d::prelude::RigidBodyDisabled,
-            DisableRollback,
-            PendingTransition(MapInstanceId::Overworld),
-            TransitionUnfreezeTimer(Timer::from_seconds(999.0, TimerMode::Once)),
-        ))
-        .id();
-
-    for _ in 0..5 {
-        app.update();
-    }
-
-    assert!(
-        app.world().get::<PendingTransition>(entity).is_some(),
-        "PendingTransition should remain before timer expires"
-    );
-    assert!(
-        app.world()
-            .get::<avian3d::prelude::RigidBodyDisabled>(entity)
-            .is_some(),
-        "RigidBodyDisabled should remain before timer expires"
-    );
-    assert!(
-        app.world().get::<DisableRollback>(entity).is_some(),
-        "DisableRollback should remain before timer expires"
-    );
 }
 
 #[test]

@@ -869,7 +869,20 @@ pub struct MapTransitionStart {
     pub seed: u64,
     pub generation_version: u32,
     pub bounds: Option<IVec3>,
+    pub spawn_position: Vec3,
 }
+
+/// Client tells server that chunks are loaded and it's ready
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+pub struct MapTransitionReady;
+
+/// Server tells client the transition is complete, player is unfrozen
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+pub struct MapTransitionEnd;
+
+/// Marker: client has sent MapTransitionReady, awaiting MapTransitionEnd
+#[derive(Component)]
+pub struct TransitionReadySent;
 ```
 
 **File**: `crates/protocol/src/lib.rs`
@@ -885,6 +898,10 @@ app.add_channel::<MapChannel>(ChannelSettings {
 app.register_message::<PlayerMapSwitchRequest>()
     .add_direction(NetworkDirection::ClientToServer);
 app.register_message::<MapTransitionStart>()
+    .add_direction(NetworkDirection::ServerToClient);
+app.register_message::<MapTransitionReady>()
+    .add_direction(NetworkDirection::ClientToServer);
+app.register_message::<MapTransitionEnd>()
     .add_direction(NetworkDirection::ServerToClient);
 ```
 
@@ -1008,7 +1025,7 @@ fn execute_server_transition(
 
     // 5. Teleport to spawn point
     commands.entity(player_entity).insert((
-        Position(Vec3::new(0.0, 30.0, 0.0)),
+        Position(Vec3::new(0.0, 5.0, 0.0)),
         LinearVelocity(Vec3::ZERO),
     ));
 
@@ -1022,6 +1039,7 @@ fn execute_server_transition(
     };
 
     // 7. Send transition start to client
+    let spawn_position = Vec3::new(0.0, 5.0, 0.0);
     let mut sender = senders.get_mut(client_entity)
         .expect("Client entity must have MessageSender<MapTransitionStart>");
     sender.send::<MapChannel>(&MapTransitionStart {
@@ -1029,11 +1047,46 @@ fn execute_server_transition(
         seed,
         generation_version: map_world.generation_version,
         bounds,
+        spawn_position,
     });
 
-    // 8. Unfreeze after a short delay (or client confirmation — for now, fixed tick delay)
-    // TODO: Replace with client confirmation message. For now, use a timer component.
-    commands.entity(player_entity).insert(TransitionUnfreezeTimer(Timer::from_seconds(3.0, TimerMode::Once)));
+    // Server stays frozen until client confirms chunks loaded via MapTransitionReady.
+    // handle_map_transition_ready receives that confirmation, unfreezes the player,
+    // and sends MapTransitionEnd back to the client so it can dismiss the loading screen.
+}
+
+/// Receives MapTransitionReady from client, unfreezes the player on the server,
+/// and sends MapTransitionEnd back to the client.
+fn handle_map_transition_ready(
+    mut commands: Commands,
+    mut receivers: Query<(Entity, &mut MessageReceiver<MapTransitionReady>)>,
+    mut end_senders: Query<&mut MessageSender<MapTransitionEnd>>,
+    controlled_query: Query<
+        (Entity, &ControlledBy),
+        (With<CharacterMarker>, With<PendingTransition>),
+    >,
+) {
+    for (client_entity, mut receiver) in &mut receivers {
+        for _ready in receiver.receive() {
+            let Some((player_entity, _)) = controlled_query
+                .iter()
+                .find(|(_, ctrl)| ctrl.owner == client_entity)
+            else {
+                warn!("Received MapTransitionReady but no transitioning player for client {client_entity:?}");
+                continue;
+            };
+
+            info!("Client confirmed transition ready for player {player_entity:?}, unfreezing");
+            commands.entity(player_entity).remove::<(
+                RigidBodyDisabled, ColliderDisabled, DisableRollback, PendingTransition,
+            )>();
+
+            let mut sender = end_senders
+                .get_mut(client_entity)
+                .expect("Client entity must have MessageSender<MapTransitionEnd>");
+            sender.send::<MapChannel>(MapTransitionEnd);
+        }
+    }
 }
 
 /// Inserts RigidBodyDisabled + ColliderDisabled on entities that just gained PendingTransition.
@@ -1044,24 +1097,6 @@ fn freeze_on_map_transition(
 ) {
     for entity in &query {
         commands.entity(entity).insert((RigidBodyDisabled, ColliderDisabled));
-    }
-}
-
-/// Timer-based unfreeze until client confirmation is implemented.
-#[derive(Component)]
-pub struct TransitionUnfreezeTimer(pub Timer);
-
-fn tick_transition_unfreeze(
-    mut commands: Commands,
-    time: Res<Time>,
-    mut query: Query<(Entity, &mut TransitionUnfreezeTimer)>,
-) {
-    for (entity, mut timer) in &mut query {
-        timer.0.tick(time.delta());
-        if timer.0.finished() {
-            info!("Unfreezing player {entity:?} after transition timer");
-            commands.entity(entity).remove::<(RigidBodyDisabled, ColliderDisabled, DisableRollback, PendingTransition, TransitionUnfreezeTimer)>();
-        }
     }
 }
 ```
@@ -1154,34 +1189,75 @@ fn spawn_map_instance(
 }
 ```
 
-#### 5. Chunk loading completion check
+#### 5. Chunk loading completion check and transition end handler
 **File**: `crates/client/src/map.rs`
+
+When chunks finish loading, send `MapTransitionReady` to the server and insert `TransitionReadySent` to prevent duplicate sends. The loading screen stays up until the server responds with `MapTransitionEnd`.
 
 ```rust
 fn check_transition_chunks_loaded(
     mut commands: Commands,
+    player_query: Query<
+        (Entity, &PendingTransition),
+        (With<Predicted>, With<CharacterMarker>, Without<TransitionReadySent>),
+    >,
     registry: Res<MapRegistry>,
-    maps: Query<(&VoxelMapInstance, &PendingChunks)>,
-    player_query: Query<(Entity, &PendingTransition), (With<Predicted>, With<CharacterMarker>)>,
-    mut next_transition: ResMut<NextState<MapTransitionState>>,
+    maps: Query<(&VoxelMapInstance, Option<&PendingChunks>)>,
+    mut senders: Query<&mut MessageSender<MapTransitionReady>>,
 ) {
-    let Ok((player, pending)) = player_query.get_single() else { return };
+    let Ok((player, pending)) = player_query.single() else { return };
     let map_entity = registry.get(&pending.0);
     let (map, pending_chunks) = maps.get(map_entity)
         .expect("Pending transition map must exist in ECS");
 
+    let Some(pending_chunks) = pending_chunks else { return; };
+
     // Loaded if: has some chunks AND no pending generation tasks
-    if map.loaded_chunks.is_empty() || !pending_chunks.tasks.is_empty() || !pending_chunks.pending_positions.is_empty() {
+    if map.loaded_chunks.is_empty()
+        || !pending_chunks.tasks.is_empty()
+        || !pending_chunks.pending_positions.is_empty()
+    {
         return; // Still loading
     }
 
-    info!("Transition chunks loaded for {:?}, resuming play", pending.0);
+    info!("Transition chunks loaded for {:?}, sending ready to server", pending.0);
 
-    // Unfreeze player and remove transition marker
-    commands.entity(player).remove::<(RigidBodyDisabled, ColliderDisabled, DisableRollback, PendingTransition)>();
+    commands.entity(player).insert(TransitionReadySent);
 
-    // Return to playing
-    next_transition.set(MapTransitionState::Playing);
+    for mut sender in &mut senders {
+        sender.send::<MapChannel>(MapTransitionReady);
+    }
+}
+
+fn handle_map_transition_end(
+    mut commands: Commands,
+    mut receivers: Query<&mut MessageReceiver<MapTransitionEnd>>,
+    player_query: Query<
+        Entity,
+        (With<Predicted>, With<CharacterMarker>, With<PendingTransition>),
+    >,
+    mut next_transition: ResMut<NextState<MapTransitionState>>,
+) {
+    for mut receiver in &mut receivers {
+        for _end in receiver.receive() {
+            info!("Received MapTransitionEnd, resuming play");
+
+            let Ok(player) = player_query.single() else {
+                warn!("Received MapTransitionEnd but no transitioning player");
+                continue;
+            };
+
+            commands.entity(player).remove::<(
+                RigidBodyDisabled,
+                ColliderDisabled,
+                DisableRollback,
+                PendingTransition,
+                TransitionReadySent,
+            )>();
+
+            next_transition.set(MapTransitionState::Playing);
+        }
+    }
 }
 ```
 
@@ -1239,14 +1315,17 @@ app.add_systems(OnEnter(MapTransitionState::Transitioning), setup_transition_loa
 
 **Server** (`crates/server/src/map.rs` plugin):
 ```rust
-app.add_systems(Update, (handle_map_switch_requests, tick_transition_unfreeze));
+app.add_systems(Update, (handle_map_switch_requests, handle_map_transition_ready));
 app.add_systems(PostUpdate, freeze_on_map_transition);
 ```
 
 **Client** (`crates/client/src/map.rs` plugin):
 ```rust
 app.add_systems(Update, handle_map_transition_start);
-app.add_systems(Update, check_transition_chunks_loaded.run_if(in_state(MapTransitionState::Transitioning)));
+app.add_systems(Update,
+    (check_transition_chunks_loaded, handle_map_transition_end)
+        .run_if(in_state(MapTransitionState::Transitioning)),
+);
 app.add_observer(on_physics_frozen_added);
 app.add_observer(on_physics_frozen_removed);
 ```
@@ -1275,8 +1354,7 @@ fn map_switch_request_triggers_transition_start() {
     )).id();
     stepper.server_app.world_mut().resource_mut::<MapRegistry>()
         .insert(MapInstanceId::Overworld, server_overworld);
-    stepper.server_app.add_systems(Update, handle_map_switch_requests);
-    stepper.server_app.add_systems(Update, tick_transition_unfreeze);
+    stepper.server_app.add_systems(Update, (handle_map_switch_requests, handle_map_transition_ready));
 
     // Add client message collection
     stepper.client_app.init_resource::<MessageBuffer<MapTransitionStart>>();
@@ -1289,7 +1367,7 @@ fn map_switch_request_triggers_transition_start() {
     let player = stepper.server_app.world_mut().spawn((
         CharacterMarker,
         MapInstanceId::Overworld,
-        Position(Vec3::new(0.0, 30.0, 0.0)),
+        Position(Vec3::new(0.0, 5.0, 0.0)),
         ControlledBy { owner: stepper.client_of_entity, lifetime: Default::default() },
         ChunkTarget::new(server_overworld, 4),
     )).id();
@@ -1363,68 +1441,68 @@ fn duplicate_switch_request_ignored() {
 }
 ```
 
-#### Integration test: client chunk loading completion (`crates/client/tests/map_transition.rs`)
+#### Integration test: client chunk loading sends ready and stays transitioning (`crates/client/tests/map_transition.rs`)
 
-Tests the client-side transition state machine: receiving `MapTransitionStart` → entering `Transitioning` → chunks load → returning to `Playing`.
+Tests the client-side transition state machine: entering `Transitioning` → chunks load → `TransitionReadySent` inserted → state stays `Transitioning` (no server to send `MapTransitionEnd`).
 
 ```rust
 #[test]
-fn client_transitions_to_playing_after_chunks_load() {
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.add_plugins(StatesPlugin);
-    app.add_plugins(bevy::transform::TransformPlugin);
-    app.init_resource::<Assets<Mesh>>();
-    app.init_resource::<Assets<StandardMaterial>>();
-    app.add_plugins(VoxelPlugin);
-    app.init_resource::<MapRegistry>();
-    // Initialize states
-    app.insert_state(ClientState::InGame);
-    app.add_sub_state::<MapTransitionState>();
-    app.add_systems(Update, check_transition_chunks_loaded
-        .run_if(in_state(MapTransitionState::Transitioning)));
+fn stays_transitioning_while_chunks_loading() {
+    let mut app = transition_test_app();
 
-    // Register a map in the registry
-    let map = app.world_mut().spawn((
-        VoxelMapInstance::new(5),
-        VoxelMapConfig::new(0, 1, None, 5, Arc::new(flat_terrain_voxels)),
-        Transform::default(),
-        MapInstanceId::Overworld,
-    )).id();
-    app.world_mut().resource_mut::<MapRegistry>().insert(MapInstanceId::Overworld, map);
+    let map = spawn_map(&mut app);
+    let player = spawn_frozen_player(&mut app, map);
+    set_transitioning(&mut app, player);
 
-    // Spawn a fake predicted player with transition state already applied
-    let player = app.world_mut().spawn((
-        CharacterMarker,
-        Predicted,
-        MapInstanceId::Overworld,
-        RigidBodyDisabled,
-        ColliderDisabled,
-        DisableRollback,
-        PendingTransition(MapInstanceId::Overworld),
-        ChunkTarget { map_entity: map, distance: 0 },
-        Transform::default(),
-    )).id();
+    // loaded_chunks is empty — condition not met
+    for _ in 0..5 { app.update(); }
 
-    // Enter transitioning state
-    app.world_mut().resource_mut::<NextState<MapTransitionState>>()
-        .set(MapTransitionState::Transitioning);
+    assert_eq!(
+        *app.world().resource::<State<MapTransitionState>>().get(),
+        MapTransitionState::Transitioning,
+        "Should remain Transitioning while loaded_chunks is empty"
+    );
+    assert!(
+        app.world().get::<TransitionReadySent>(player).is_none(),
+        "TransitionReadySent should not be inserted while chunks are still loading"
+    );
+}
 
-    // Tick until chunks load
-    for _ in 0..30 { app.update(); }
+#[test]
+fn inserts_ready_sent_after_chunks_load() {
+    let mut app = transition_test_app();
 
-    // Should have transitioned back to Playing
-    let state = app.world().resource::<State<MapTransitionState>>();
-    assert_eq!(*state.get(), MapTransitionState::Playing,
-        "Should return to Playing after chunks load");
+    let map = spawn_map(&mut app);
+    let player = spawn_frozen_player(&mut app, map);
 
-    // PendingTransition component should be removed from player
-    assert!(app.world().get::<PendingTransition>(player).is_none(),
-        "PendingTransition should be cleaned up");
+    // Manually simulate loaded: insert a chunk coord, leave PendingChunks empty
+    app.world_mut()
+        .entity_mut(map)
+        .get_mut::<VoxelMapInstance>()
+        .unwrap()
+        .loaded_chunks
+        .insert(IVec3::ZERO);
 
-    // PhysicsFrozen should be removed from player (observer removes Avian components)
-    assert!(app.world().get::<PhysicsFrozen>(player).is_none(),
-        "Player should be unfrozen after transition completes");
+    set_transitioning(&mut app, player);
+
+    for _ in 0..3 { app.update(); }
+
+    // check_transition_chunks_loaded sends MapTransitionReady and inserts
+    // TransitionReadySent, but does NOT transition to Playing (that requires
+    // MapTransitionEnd from server).
+    assert_eq!(
+        *app.world().resource::<State<MapTransitionState>>().get(),
+        MapTransitionState::Transitioning,
+        "Should stay Transitioning until MapTransitionEnd arrives from server"
+    );
+    assert!(
+        app.world().get::<TransitionReadySent>(player).is_some(),
+        "TransitionReadySent should be inserted after chunks load"
+    );
+    assert!(
+        app.world().get::<PendingTransition>(player).is_some(),
+        "PendingTransition should remain until MapTransitionEnd"
+    );
 }
 ```
 
@@ -1761,6 +1839,7 @@ fn client_spawns_matching_map_from_transition_data() {
         seed: 12345,
         generation_version: 0,
         bounds: Some(IVec3::new(4, 4, 4)),
+        spawn_position: Vec3::new(0.0, 5.0, 0.0),
     };
 
     // Client-side: spawn map instance from transition data (same logic as handle_map_transition_start)
@@ -1850,7 +1929,7 @@ fn different_homebase_owners_produce_different_seeds() {
 | `crates/voxel_map_engine/tests/lifecycle.rs` (extended) | `ChunkTarget` derived from `MapRegistry`, player entity drives chunk loading/unloading | `VoxelPlugin` + `MapRegistry` |
 | `crates/server/tests/rooms.rs` | Entities in different lightyear rooms not replicated to wrong clients. Same-frame room transfer preserves visibility. | `CrossbeamTestStepper` + `Room` |
 | `crates/server/tests/map_transition.rs` | `PlayerMapSwitchRequest` → server processes → client receives `MapTransitionStart`. Duplicate request rejected during transition. Server and client produce identical map configs. | `CrossbeamTestStepper` + server map systems |
-| `crates/client/tests/map_transition.rs` | Client enters `Transitioning` state → chunks load → returns to `Playing`. `PendingTransition` component removed from player. `RigidBodyDisabled` + `ColliderDisabled` removed. | `VoxelPlugin` + `StatesPlugin` + `MapTransitionState` |
+| `crates/client/tests/map_transition.rs` | Client stays `Transitioning` while chunks loading (no `TransitionReadySent`). After chunks load, `TransitionReadySent` inserted but state stays `Transitioning` (awaiting `MapTransitionEnd` from server). | `StatesPlugin` + `MapTransitionState` + `check_transition_chunks_loaded` |
 | `crates/ui/tests/ui_plugin.rs` (extended) | `MapSwitchButton` spawns in HUD. Label shows "Homebase" on Overworld, "Overworld" on Homebase. | `UiPlugin` + `StatesPlugin` + mock player entity |
 
 ### Manual Testing Steps:
@@ -1896,12 +1975,11 @@ Every `expect()` message in the plan describes the invariant being violated. The
 
 ## Deviations from Plan
 All deviations resolved:
-1. ~~No client-side integration tests~~ — Fixed: `crates/client/tests/map_transition.rs` created with `stays_transitioning_while_chunks_loading` and `transitions_to_playing_after_chunks_load` tests.
+1. ~~No client-side integration tests~~ — Fixed: `crates/client/tests/map_transition.rs` created with `stays_transitioning_while_chunks_loading` and `inserts_ready_sent_after_chunks_load` tests.
 2. ~~No CrossbeamTestStepper roundtrip test~~ — Fixed: `map_switch_request_triggers_transition_start` and `duplicate_switch_request_ignored` added to `crates/server/tests/integration.rs`.
 3. ~~resolve_switch_target uses Entity::to_bits()~~ — Fixed: now uses `RemoteId(PeerId).to_bits()` (stable netcode client ID).
-4. Minor: `timer.0.is_finished()` — kept as-is; is the newer Bevy API, functionally equivalent.
 
 ## Potential Issues (Resolved)
 1. ~~Homebase owner identity~~ — Resolved by deviation #3 fix. Homebase owner is now PeerId::Netcode bits (stable per client_id at connection time).
 2. ~~No DespawnOnExit import verification~~ — Verified working via UI tests.
-3. check_transition_chunks_loaded race — Accepted limitation. The `loaded_chunks.is_empty()` guard prevents false-positive completion. The 3-second server-side timer is a safety net. See research doc Section 19.
+3. check_transition_chunks_loaded race — Accepted limitation. The `loaded_chunks.is_empty()` guard prevents false-positive completion. `TransitionReadySent` marker prevents duplicate `MapTransitionReady` sends. See research doc Section 19.

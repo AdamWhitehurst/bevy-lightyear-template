@@ -127,7 +127,20 @@ pub struct MapTransitionStart {
     pub seed: u64,
     pub generation_version: u32,
     pub bounds: Option<IVec3>,
+    pub spawn_position: Vec3,
 }
+
+/// Client tells server that chunks are loaded and it's ready
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+pub struct MapTransitionReady;
+
+/// Server tells client the transition is complete, player is unfrozen
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+pub struct MapTransitionEnd;
+
+/// Marker: client has sent MapTransitionReady, awaiting MapTransitionEnd
+#[derive(Component)]
+pub struct TransitionReadySent;
 
 /// Attaches trimesh colliders to voxel chunks whenever their mesh changes.
 /// Inherits `MapInstanceId` from the parent map entity.

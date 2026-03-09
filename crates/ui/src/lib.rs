@@ -8,7 +8,9 @@ use lightyear::netcode::Key;
 use lightyear::prelude::{client::*, Controlled, Replicated};
 use lightyear::prelude::{Authentication, MessageSender, Predicted};
 use protocol::map::{MapChannel, MapSwitchTarget, PlayerMapSwitchRequest};
-use protocol::{CharacterMarker, DummyTarget, MapInstanceId, PRIVATE_KEY, PROTOCOL_ID};
+use protocol::{
+    CharacterMarker, DummyTarget, MapInstanceId, PendingTransition, PRIVATE_KEY, PROTOCOL_ID,
+};
 pub use state::{ClientState, MapTransitionState};
 use std::net::SocketAddr;
 
@@ -477,6 +479,7 @@ fn map_switch_button_interaction(
     >,
     mut senders: Query<&mut MessageSender<PlayerMapSwitchRequest>>,
     transition_state: Res<State<MapTransitionState>>,
+    mut next_transition: ResMut<NextState<MapTransitionState>>,
 ) {
     if *transition_state.get() == MapTransitionState::Transitioning {
         return;
@@ -502,22 +505,29 @@ fn map_switch_button_interaction(
                 target: target.clone(),
             });
         }
+
+        // Show loading screen immediately — don't wait for server response
+        next_transition.set(MapTransitionState::Transitioning);
     }
 }
 
 fn update_map_switch_button_label(
-    player_query: Query<&MapInstanceId, (With<Predicted>, With<CharacterMarker>)>,
+    player_query: Query<
+        (&MapInstanceId, Option<&PendingTransition>),
+        (With<Predicted>, With<CharacterMarker>, With<Controlled>),
+    >,
     button_query: Query<&Children, With<MapSwitchButton>>,
     mut text_query: Query<&mut Text>,
 ) {
-    let Ok(map_id) = player_query.single() else {
+    let Ok((map_id, pending)) = player_query.single() else {
         return;
     };
     let Ok(children) = button_query.single() else {
         return;
     };
 
-    let label = match map_id {
+    let effective_map = pending.map(|p| &p.0).unwrap_or(map_id);
+    let label = match effective_map {
         MapInstanceId::Overworld => "Homebase",
         MapInstanceId::Homebase { .. } => "Overworld",
     };
@@ -539,7 +549,7 @@ fn setup_transition_loading_screen(mut commands: Commands) {
                 align_items: AlignItems::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.85)),
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 1.0)),
             GlobalZIndex(100),
             DespawnOnExit(MapTransitionState::Transitioning),
         ))

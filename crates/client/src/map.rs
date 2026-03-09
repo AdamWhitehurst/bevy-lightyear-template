@@ -1,13 +1,14 @@
 use std::sync::Arc;
 
-use avian3d::prelude::{ColliderDisabled, RigidBodyDisabled};
+use avian3d::prelude::{ColliderDisabled, LinearVelocity, Position, RigidBodyDisabled};
 use bevy::{prelude::*, window::PrimaryWindow};
 use leafwing_input_manager::prelude::*;
 use lightyear::prelude::{Controlled, DisableRollback, MessageReceiver, MessageSender, Predicted};
-use protocol::map::MapTransitionStart;
+use protocol::map::{MapChannel, MapTransitionEnd, MapTransitionReady, MapTransitionStart};
 use protocol::{
     CharacterMarker, MapInstanceId, MapRegistry, MapWorld, PendingTransition, PlayerActions,
-    VoxelChannel, VoxelEditBroadcast, VoxelEditRequest, VoxelStateSync, VoxelType,
+    TransitionReadySent, VoxelChannel, VoxelEditBroadcast, VoxelEditRequest, VoxelStateSync,
+    VoxelType,
 };
 use ui::MapTransitionState;
 use voxel_map_engine::prelude::{
@@ -42,7 +43,8 @@ impl Plugin for ClientMapPlugin {
             .add_systems(Update, handle_map_transition_start)
             .add_systems(
                 Update,
-                check_transition_chunks_loaded.run_if(in_state(MapTransitionState::Transitioning)),
+                (check_transition_chunks_loaded, handle_map_transition_end)
+                    .run_if(in_state(MapTransitionState::Transitioning)),
             );
     }
 }
@@ -187,7 +189,6 @@ pub fn send_voxel_edit(
 pub fn handle_map_transition_start(
     mut commands: Commands,
     mut receivers: Query<&mut MessageReceiver<MapTransitionStart>>,
-    mut next_transition: ResMut<NextState<MapTransitionState>>,
     mut registry: ResMut<MapRegistry>,
     player_query: Query<Entity, (With<Predicted>, With<CharacterMarker>, With<Controlled>)>,
 ) {
@@ -198,9 +199,16 @@ pub fn handle_map_transition_start(
             let player = player_query
                 .single()
                 .expect("Predicted player must exist when receiving MapTransitionStart");
-            commands
-                .entity(player)
-                .insert((RigidBodyDisabled, ColliderDisabled, DisableRollback));
+
+            // Freeze player, disable rollback, teleport to spawn position
+            commands.entity(player).insert((
+                RigidBodyDisabled,
+                ColliderDisabled,
+                DisableRollback,
+                PendingTransition(transition.target.clone()),
+                Position(transition.spawn_position),
+                LinearVelocity(Vec3::ZERO),
+            ));
 
             if !registry.0.contains_key(&transition.target) {
                 let generator = generator_for_map(&transition.target);
@@ -218,13 +226,6 @@ pub fn handle_map_transition_start(
             commands
                 .entity(player)
                 .insert(ChunkTarget::new(map_entity, 4));
-
-            next_transition.set(MapTransitionState::Transitioning);
-            commands.entity(player).insert((
-                ColliderDisabled,
-                RigidBodyDisabled,
-                PendingTransition(transition.target.clone()),
-            ));
         }
     }
 }
@@ -266,20 +267,26 @@ fn spawn_map_instance(
 
 pub fn check_transition_chunks_loaded(
     mut commands: Commands,
-    player_query: Query<(Entity, &PendingTransition), (With<Predicted>, With<CharacterMarker>)>,
+    player_query: Query<
+        (Entity, &PendingTransition),
+        (
+            With<Predicted>,
+            With<CharacterMarker>,
+            Without<TransitionReadySent>,
+        ),
+    >,
     registry: Res<MapRegistry>,
     maps: Query<(&VoxelMapInstance, Option<&PendingChunks>)>,
-    mut next_transition: ResMut<NextState<MapTransitionState>>,
+    mut senders: Query<&mut MessageSender<MapTransitionReady>>,
 ) {
-    let (player, pending) = player_query
-        .single()
-        .expect("Only one player expected to have PendingTransition");
+    let Ok((player, pending)) = player_query.single() else {
+        return;
+    };
     let map_entity = registry.get(&pending.0);
     let (map, pending_chunks) = maps
         .get(map_entity)
         .expect("Pending transition map must exist in ECS");
 
-    // PendingChunks is inserted by VoxelPlugin on the frame after spawn — treat absence as loading
     let Some(pending_chunks) = pending_chunks else {
         return;
     };
@@ -292,16 +299,48 @@ pub fn check_transition_chunks_loaded(
     }
 
     info!(
-        "Transition chunks loaded for {:?}, resuming play",
+        "Transition chunks loaded for {:?}, sending ready to server",
         pending.0
     );
 
-    commands.entity(player).remove::<(
-        RigidBodyDisabled,
-        ColliderDisabled,
-        DisableRollback,
-        PendingTransition,
-    )>();
+    commands.entity(player).insert(TransitionReadySent);
 
-    next_transition.set(MapTransitionState::Playing);
+    for mut sender in &mut senders {
+        sender.send::<MapChannel>(MapTransitionReady);
+    }
+}
+
+pub fn handle_map_transition_end(
+    mut commands: Commands,
+    mut receivers: Query<&mut MessageReceiver<MapTransitionEnd>>,
+    player_query: Query<
+        Entity,
+        (
+            With<Predicted>,
+            With<CharacterMarker>,
+            With<PendingTransition>,
+        ),
+    >,
+    mut next_transition: ResMut<NextState<MapTransitionState>>,
+) {
+    for mut receiver in &mut receivers {
+        for _end in receiver.receive() {
+            info!("Received MapTransitionEnd, resuming play");
+
+            let Ok(player) = player_query.single() else {
+                warn!("Received MapTransitionEnd but no transitioning player");
+                continue;
+            };
+
+            commands.entity(player).remove::<(
+                RigidBodyDisabled,
+                ColliderDisabled,
+                DisableRollback,
+                PendingTransition,
+                TransitionReadySent,
+            )>();
+
+            next_transition.set(MapTransitionState::Playing);
+        }
+    }
 }

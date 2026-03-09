@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 use lightyear::prelude::client::*;
-use lightyear::prelude::Predicted;
+use lightyear::prelude::{Controlled, Predicted};
 use protocol::*;
 use std::time::Duration;
 use ui::*;
@@ -229,8 +229,12 @@ fn map_switch_button_label_shows_homebase_when_on_overworld() {
         .set(ClientState::InGame);
     app.update();
 
-    app.world_mut()
-        .spawn((CharacterMarker, Predicted, MapInstanceId::Overworld));
+    app.world_mut().spawn((
+        CharacterMarker,
+        Predicted,
+        Controlled,
+        MapInstanceId::Overworld,
+    ));
     app.update();
 
     let button_entity = app
@@ -264,6 +268,7 @@ fn map_switch_button_label_shows_overworld_when_on_homebase() {
     app.world_mut().spawn((
         CharacterMarker,
         Predicted,
+        Controlled,
         MapInstanceId::Homebase { owner: 42 },
     ));
     app.update();

@@ -1,6 +1,6 @@
 use ::client::map::handle_map_transition_start;
 use ::client::network::{ClientNetworkConfig, ClientNetworkPlugin, ClientTransport};
-use ::server::map::{handle_map_switch_requests, tick_transition_unfreeze, RoomRegistry};
+use ::server::map::{handle_map_switch_requests, handle_map_transition_ready, RoomRegistry};
 use ::server::network::{ServerNetworkConfig, ServerNetworkPlugin, ServerTransport};
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
@@ -816,7 +816,7 @@ fn add_server_map_systems(stepper: &mut CrossbeamTestStepper) {
     stepper.server_app.init_resource::<MapWorld>();
     stepper.server_app.add_systems(
         Update,
-        (handle_map_switch_requests, tick_transition_unfreeze),
+        (handle_map_switch_requests, handle_map_transition_ready),
     );
 }
 
@@ -1073,7 +1073,7 @@ fn server_and_client_spawn_matching_homebase_configs() {
     server_app.init_resource::<MapWorld>();
     server_app.add_systems(
         Update,
-        (handle_map_switch_requests, tick_transition_unfreeze),
+        (handle_map_switch_requests, handle_map_transition_ready),
     );
     server_app.finish();
     server_app.cleanup();
