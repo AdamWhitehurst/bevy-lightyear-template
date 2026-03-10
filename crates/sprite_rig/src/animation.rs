@@ -67,6 +67,15 @@ pub struct LocomotionState {
     pub active: bool,
 }
 
+/// Smoothed blend weights for locomotion clips, lerped toward target each frame.
+#[derive(Component)]
+pub struct LocomotionBlendWeights {
+    pub weights: Vec<f32>,
+}
+
+/// Rate at which blend weights converge toward targets (per second).
+const BLEND_LERP_SPEED: f32 = 10.0;
+
 /// Populates `AnimBoneDefaults` by resolving each animset's rig and mapping its bone
 /// definitions to every animation clip referenced by that animset.
 ///
@@ -507,25 +516,34 @@ pub fn attach_animation_players(
     }
 }
 
-/// Starts all locomotion clips on newly-added animation players.
+/// Starts all locomotion clips on newly-added animation players and initializes blend weights.
 pub fn start_locomotion_blend(
-    mut query: Query<(&mut AnimationPlayer, &AnimSetRef), Added<AnimationPlayer>>,
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut AnimationPlayer, &AnimSetRef), Added<AnimationPlayer>>,
     built_graphs: Res<BuiltAnimGraphs>,
 ) {
-    for (mut player, animset_ref) in &mut query {
+    for (entity, mut player, animset_ref) in &mut query {
         let built_graph = built_graphs
             .0
             .get(&animset_ref.0.id())
             .expect("AnimationPlayer attached but graph not built");
+
+        let mut initial_weights = vec![0.0; built_graph.locomotion_entries.len()];
         for (i, entry) in built_graph.locomotion_entries.iter().enumerate() {
+            let weight = if i == 0 { 1.0 } else { 0.0 };
+            initial_weights[i] = weight;
             let anim = player.play(entry.node_index);
             anim.repeat();
-            anim.set_weight(if i == 0 { 1.0 } else { 0.0 });
+            anim.set_weight(weight);
         }
+
+        commands.entity(entity).insert(LocomotionBlendWeights {
+            weights: initial_weights,
+        });
     }
 }
 
-/// Updates locomotion blend weights based on horizontal velocity.
+/// Updates locomotion blend weights based on horizontal velocity, with temporal smoothing.
 pub fn update_locomotion_blend_weights(
     mut characters: Query<
         (
@@ -533,12 +551,17 @@ pub fn update_locomotion_blend_weights(
             &LocomotionState,
             &AnimSetRef,
             &LinearVelocity,
+            &mut LocomotionBlendWeights,
         ),
         With<CharacterMarker>,
     >,
     built_graphs: Res<BuiltAnimGraphs>,
+    time: Res<Time>,
 ) {
-    for (mut player, loco_state, animset_ref, velocity) in &mut characters {
+    let dt = time.delta_secs();
+    let lerp_factor = (BLEND_LERP_SPEED * dt).min(1.0);
+
+    for (mut player, loco_state, animset_ref, velocity, mut blend_weights) in &mut characters {
         if !loco_state.active {
             continue; // locomotion disabled during ability animations
         }
@@ -546,12 +569,27 @@ pub fn update_locomotion_blend_weights(
             continue; // graph not built yet — expected during startup
         };
         let speed = velocity.xz().length();
-        let weights = compute_blend_weights(speed, &built_graph.locomotion_entries);
-        for (entry, weight) in built_graph.locomotion_entries.iter().zip(weights.iter()) {
+        let target_weights = compute_blend_weights(speed, &built_graph.locomotion_entries);
+
+        debug_assert_eq!(
+            blend_weights.weights.len(),
+            target_weights.len(),
+            "LocomotionBlendWeights length mismatch with locomotion entries"
+        );
+
+        for (i, (entry, &target)) in built_graph
+            .locomotion_entries
+            .iter()
+            .zip(target_weights.iter())
+            .enumerate()
+        {
+            let current = &mut blend_weights.weights[i];
+            *current += (target - *current) * lerp_factor;
+
             let anim = player
                 .animation_mut(entry.node_index)
                 .expect("Locomotion clip must be playing when locomotion is active");
-            anim.set_weight(*weight);
+            anim.set_weight(*current);
         }
     }
 }

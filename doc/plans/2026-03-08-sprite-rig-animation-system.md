@@ -1214,6 +1214,30 @@ fn compute_blend_weights(speed: f32, entries: &[LocomotionNodeEntry]) -> Vec<f32
 }
 ```
 
+### 3.7 Blend weight smoothing
+
+Without smoothing, blend weights snap instantly when speed changes — e.g., idle (`[1,0,0]`) to walk
+(`[0,1,0]`) in a single frame, causing a visible pose snap because clips are at unrelated phases.
+
+`LocomotionBlendWeights` component stores the current smoothed weights per character. Each frame,
+`update_locomotion_blend_weights` computes target weights from speed, then lerps current toward
+target at `BLEND_LERP_SPEED` (10.0/s).
+
+```rust
+/// Smoothed blend weights for locomotion clips, lerped toward target each frame.
+#[derive(Component)]
+pub struct LocomotionBlendWeights {
+    pub weights: Vec<f32>,
+}
+
+const BLEND_LERP_SPEED: f32 = 10.0;
+```
+
+`start_locomotion_blend` inserts `LocomotionBlendWeights` with initial weights (idle=1.0, rest=0.0)
+via `Commands`. `update_locomotion_blend_weights` takes `Res<Time>`, computes
+`lerp_factor = (BLEND_LERP_SPEED * dt).min(1.0)`, and applies `current += (target - current) * lerp_factor`
+per weight before setting on the `AnimationPlayer`.
+
 ### Success Criteria — Phase 3
 
 #### Automated Verification

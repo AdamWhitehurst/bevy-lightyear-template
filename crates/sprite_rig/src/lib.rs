@@ -9,7 +9,8 @@ use protocol::{app_state::TrackedAssets, CharacterType};
 use std::collections::HashMap;
 
 pub use animation::{
-    AnimBoneDefaults, BuiltAnimGraphs, BuiltAnimations, LoadedAnimHandles, LocomotionState,
+    AnimBoneDefaults, BuiltAnimGraphs, BuiltAnimations, LoadedAnimHandles, LocomotionBlendWeights,
+    LocomotionState,
 };
 pub use spawn::{AnimSetRef, BoneEntities, Facing, RigBillboard, SpriteRig};
 
