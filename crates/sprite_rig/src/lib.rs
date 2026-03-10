@@ -1,3 +1,4 @@
+pub mod animation;
 pub mod asset;
 pub mod spawn;
 
@@ -7,6 +8,9 @@ use bevy_common_assets::ron::RonAssetPlugin;
 use protocol::{app_state::TrackedAssets, CharacterType};
 use std::collections::HashMap;
 
+pub use animation::{
+    AnimBoneDefaults, BuiltAnimGraphs, BuiltAnimations, LoadedAnimHandles, LocomotionState,
+};
 pub use spawn::{AnimSetRef, BoneEntities, Facing, RigBillboard, SpriteRig};
 
 pub struct SpriteRigPlugin;
@@ -18,12 +22,23 @@ impl Plugin for SpriteRigPlugin {
             RonAssetPlugin::<SpriteAnimAsset>::new(&["anim.ron"]),
             RonAssetPlugin::<SpriteAnimSetAsset>::new(&["animset.ron"]),
         ));
+        app.init_resource::<animation::BuiltAnimations>();
+        app.init_resource::<animation::LoadedAnimHandles>();
+        app.init_resource::<animation::BuiltAnimGraphs>();
+        app.init_resource::<animation::AnimBoneDefaults>();
         app.add_systems(Startup, load_rig_assets);
         app.add_systems(
             Update,
             (
                 spawn::resolve_character_rig,
                 spawn::spawn_sprite_rigs,
+                animation::load_animset_clips,
+                animation::populate_anim_bone_defaults,
+                animation::build_animation_clips,
+                animation::build_anim_graphs,
+                animation::attach_animation_players,
+                animation::start_locomotion_blend,
+                animation::update_locomotion_blend_weights,
                 spawn::billboard_rigs_face_camera,
                 spawn::update_facing_from_velocity,
                 spawn::apply_facing_to_rig,

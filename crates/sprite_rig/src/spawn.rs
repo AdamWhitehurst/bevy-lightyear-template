@@ -31,6 +31,11 @@ pub enum Facing {
 #[derive(Component)]
 pub struct RigBillboard;
 
+/// Preserves a bone's z-depth so animation curves (which overwrite all 3 translation axes) don't
+/// flatten the draw order. A post-animation system restores `Transform::translation.z` from this.
+#[derive(Component)]
+pub struct BoneZOrder(pub f32);
+
 /// Looks up `RigRegistry` when `CharacterType` is added and inserts rig components.
 pub fn resolve_character_rig(
     mut commands: Commands,
@@ -88,8 +93,8 @@ pub fn spawn_sprite_rigs(
             billboard_id,
             &sorted_bones,
             &slot_lookup,
-            &mut meshes,
-            &mut materials,
+            &mut *meshes,
+            &mut *materials,
         );
 
         commands.entity(entity).insert(BoneEntities(bone_map));
@@ -110,7 +115,12 @@ fn spawn_bone_hierarchy(
     for bone_def in sorted_bones {
         let transform = bone_transform_from_def(bone_def, slot_lookup);
 
-        let mut bone_cmds = commands.spawn((Name::new(bone_def.name.clone()), transform));
+        let z_order = transform.translation.z;
+        let mut bone_cmds = commands.spawn((
+            Name::new(bone_def.name.clone()),
+            transform,
+            BoneZOrder(z_order),
+        ));
 
         if let Some(&(_z_order, size)) = slot_lookup.get(bone_def.name.as_str()) {
             let mesh = meshes.add(Plane3d::new(Vec3::Z, size / 2.0));

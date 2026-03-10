@@ -905,6 +905,11 @@ to characters. A locomotion system updates blend weights each frame based on cha
 #[derive(Resource, Default)]
 pub struct BuiltAnimations(pub HashMap<AssetId<SpriteAnimAsset>, Handle<AnimationClip>>);
 
+/// Maps anim asset path string → strong Handle<SpriteAnimAsset>.
+/// Keeps strong handles alive so Bevy doesn't garbage-collect the assets before they load.
+#[derive(Resource, Default)]
+pub struct LoadedAnimHandles(pub HashMap<String, Handle<SpriteAnimAsset>>);
+
 /// Pre-built animation graphs, one per animset asset. Shared across all character
 /// instances of the same type.
 #[derive(Resource, Default)]
@@ -923,7 +928,6 @@ pub struct BuiltAnimGraph {
 pub struct LocomotionNodeEntry {
     pub node_index: AnimationNodeIndex,
     pub speed_threshold: f32,
-    pub clip_path: String,
 }
 ```
 
@@ -1077,8 +1081,8 @@ fn build_anim_graphs(
 }
 ```
 
-`LoadedAnimHandles` is a resource mapping anim asset path string → `Handle<SpriteAnimAsset>`, built
-by the startup loader so we can look up handles by path.
+`LoadedAnimHandles` maps anim asset path string → strong `Handle<SpriteAnimAsset>`. It must store
+strong handles (not `AssetId`) to prevent Bevy from garbage-collecting the assets before they load.
 
 ### 3.4 Attach AnimationPlayer to characters + add AnimationTarget to bones
 
@@ -1213,10 +1217,10 @@ fn compute_blend_weights(speed: f32, entries: &[LocomotionNodeEntry]) -> Vec<f32
 ### Success Criteria — Phase 3
 
 #### Automated Verification
-- [ ] `cargo check-all` passes
+- [x] `cargo check-all` passes
 
 #### Manual Verification
-- [ ] `cargo client` — character bone rectangles animate with smooth blended locomotion
+- [x] `cargo client` — character bone rectangles animate with smooth blended locomotion
 - [ ] Speed transitions blend smoothly (idle->walk->run are interpolated, not discrete switches)
 - [ ] Standing still shows pure idle; full speed shows pure run; intermediate speeds show blends
 - [ ] Editing an `.anim.ron` file on disk updates the animation without restarting (hot-reload)
