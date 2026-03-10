@@ -27,17 +27,24 @@
 - **[HIGH]** After making code changes, MUST review README.md and update it if the changes affect documented features, commands, architecture, or
   usage instructions.
 
+## System Design
+- **[HIGHEST]** - Never silently fail for invalid conditions. Always `debug_assert!` and `expect()` instead of silently `return`ing or `continue`ing.
+- **[HIGHEST]** No silent `return`s or `continue`s. If it a `return` or `continue` is expected e.g. during startup waiting for an asset to load. 
+- Always leave a comment explaining why a silent `return` or `continue` is expected
+- **[HIGHEST]** Always use `debug_assert!` and `expect` to enforce expected behavior. Fail early and loudly.
+- Only use ECS Resources for data that should be globally unique and can't otherwise be tied to one entity.
+- Load all assets and resources during app startup before `AppState::Ready`
+- NEVER use `Option<Res<_>>` unless there is a legitimate reason that it may not exist yet e.g. during startup in the fn responsible for loading the Resource. Leave a comment explaining why the `Option<Res<_>>` is necessary.
+
 ## Code Style
 
 - When comments would be used, split code into self-descriptive functions instead
-- Add doc-comments that describe types and functions. Use regular comments sparingly
-- Do not use regional-separation comments
+- Always add doc-comments that describe types and functions. Use regular comments sparingly
+- NEVER use regional comments
 - Avoid large functions. Break them into smaller, atomic, self-describing functions.
 - **Demand elegance.**
   - For non-trivial tasks: Pause and ask "is there a more elegant way?"
   - Challenge your own work before presenting it.
-- Never silently `return` or `continue` past a condition that indicates something is wrong
-- **[HIGH]** Use `debug_assert!` and `expect()` instead of silently `return`ing or `continue`ing from unexpected situations. These failures need to be caught early during testing.
 
 ## Verification Rules
 
