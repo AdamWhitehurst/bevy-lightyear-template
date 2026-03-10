@@ -6913,6 +6913,7 @@ dependencies = [
  "avian3d",
  "bevy",
  "bevy_common_assets",
+ "lightyear",
  "protocol",
  "serde",
  "test-log",

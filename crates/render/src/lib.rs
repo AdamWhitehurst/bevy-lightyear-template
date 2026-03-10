@@ -72,7 +72,7 @@ fn add_visual_interpolation_components(
 fn add_character_meshes(
     mut commands: Commands,
     character_query: Query<
-        (Entity, Option<&ColorComponent>),
+        Entity,
         (
             Or<(Added<Predicted>, Added<Replicated>, Added<Interpolated>)>,
             With<CharacterMarker>,
@@ -81,16 +81,8 @@ fn add_character_meshes(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    for (entity, color) in &character_query {
-        let color = color.map(|c| c.0).unwrap_or(Color::srgb(0.5, 0.5, 0.5));
+    for entity in &character_query {
         info!(?entity, "Adding cosmetics to character");
-        commands.entity(entity).insert((
-            Mesh3d(meshes.add(Capsule3d::new(
-                CHARACTER_CAPSULE_RADIUS,
-                CHARACTER_CAPSULE_HEIGHT,
-            ))),
-            MeshMaterial3d(materials.add(color)),
-        ));
         health_bar::spawn_health_bar(&mut commands, entity, &mut *meshes, &mut *materials);
     }
 }

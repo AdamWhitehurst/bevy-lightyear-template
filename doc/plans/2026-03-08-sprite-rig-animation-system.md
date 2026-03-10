@@ -881,7 +881,7 @@ mesh — the rig spawning is driven by `CharacterType` replication, not by `add_
 - [x] `cargo check-all` passes
 
 #### Manual Verification
-- [ ] `cargo client` — colored rectangle bone hierarchies appear on character entities, facing the camera
+- [ ] `cargo client` — colored rectangle bone hierarchies appear on character entities, facing the camera (requires server + client connected)
 - [ ] Characters flip horizontally when moving left
 - [ ] Bone hierarchy is correct (head above torso, arms at sides, legs at bottom)
 

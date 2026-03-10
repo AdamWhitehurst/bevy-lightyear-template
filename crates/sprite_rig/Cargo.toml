@@ -7,6 +7,7 @@ edition = "2021"
 avian3d = { workspace = true }
 bevy = { workspace = true, features = ["bevy_animation"] }
 bevy_common_assets = { workspace = true }
+lightyear = { workspace = true }
 protocol = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 

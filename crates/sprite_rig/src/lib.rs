@@ -1,10 +1,13 @@
 pub mod asset;
+pub mod spawn;
 
 use asset::*;
 use bevy::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
 use protocol::{app_state::TrackedAssets, CharacterType};
 use std::collections::HashMap;
+
+pub use spawn::{AnimSetRef, BoneEntities, Facing, RigBillboard, SpriteRig};
 
 pub struct SpriteRigPlugin;
 
@@ -16,10 +19,21 @@ impl Plugin for SpriteRigPlugin {
             RonAssetPlugin::<SpriteAnimSetAsset>::new(&["animset.ron"]),
         ));
         app.add_systems(Startup, load_rig_assets);
+        app.add_systems(
+            Update,
+            (
+                spawn::resolve_character_rig,
+                spawn::spawn_sprite_rigs,
+                spawn::billboard_rigs_face_camera,
+                spawn::update_facing_from_velocity,
+                spawn::apply_facing_to_rig,
+            )
+                .chain(),
+        );
     }
 }
 
-/// Maps `CharacterType` to its animset asset path.
+/// Maps `CharacterType` to its loaded rig and animset handles.
 #[derive(Resource)]
 pub struct RigRegistry {
     pub entries: HashMap<CharacterType, RigRegistryEntry>,
