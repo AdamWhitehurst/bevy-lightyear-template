@@ -9,6 +9,7 @@ tags: [research, persistence, map-saving, chunks, entities, minecraft, voxel-wor
 status: complete
 last_updated: 2026-03-09
 last_updated_by: claude
+last_updated_note: "Added follow-up research on Minecraft in-memory chunk storage and memory reduction techniques"
 ---
 
 # Research: Minecraft-style Map-as-Directory Saving
@@ -390,6 +391,130 @@ Alternative to Minecraft's Anvil from [scrayos.net](https://scrayos.net/justchun
 - `doc/research/2026-02-27-bonsairobo-stack-multi-instance-voxel-replacement.md` — Research on replacing bevy_voxel_world; informed current voxel_map_engine design
 - `doc/plans/2026-02-28-voxel-map-engine.md` — Plan for building voxel_map_engine crate
 - `TODO.md` — Lists "map as dir saving chunks, entities as files" as a pending item
+
+## Follow-up Research: Minecraft In-Memory Chunk Storage
+
+### Palette-Based Block Storage
+
+Minecraft does not use flat arrays in memory. Each 16×16×16 section uses a `PalettedContainer<BlockState>` with three strategies selected at runtime:
+
+| Strategy | Bits/Entry | When Used | Memory |
+|---|---|---|---|
+| Single-valued | 0 | Uniform section (all one block) | ~0 bytes (just the palette entry) |
+| Indirect | 4-8 | 2-256 distinct block types | Palette array + packed long[] |
+| Direct | 15 | >256 distinct types | No local palette, global registry IDs |
+
+The block indices (4,096 per section) are packed into a `long[]` array. At 4 bits/entry, 16 entries fit per `long`, requiring 256 longs (2,048 bytes) for 4,096 blocks. An index never spans two `long` values — unused high bits are padding.
+
+The palette is a small array mapping local indices → global `BlockState` IDs. For a section with 5 distinct blocks, the palette has 5 entries and each index is 4 bits wide.
+
+**Key insight**: uniform sections (all air, all stone) cost essentially zero — just the single palette entry. In a typical overworld chunk, only 5-6 of 24 possible sections contain mixed blocks. The upper ~18 sections are all-air and consume near-zero memory.
+
+Sources:
+- [Minecraft Wiki — Chunk Protocol Format](https://minecraft.wiki/w/Java_Edition_protocol/Chunk_format)
+- [wiki.vg — Chunk Format](https://wiki.vg/Chunk_Format)
+
+### Chunk Memory Usage Numbers
+
+| Component | Size | Notes |
+|---|---|---|
+| Block data (palette + packed) | 2-8 KiB per section | Depends on palette size |
+| Sky light | 2,048 bytes per section | Nibble array (4 bits/block) |
+| Block light | 2,048 bytes per section | Nibble array |
+| Heightmaps | ~900 bytes per chunk column | 3 types × ~300 bytes each |
+| Biomes | Small | 4×4×4 resolution, same palette container |
+| **Total per section** | ~6-12 KiB | |
+| **Empty overworld chunk** | ~11 KiB | Most sections are single-valued |
+| **Typical overworld chunk** | ~50 KiB | 5-6 active sections |
+| **Measured average** | ~170 KiB | Including entities and overhead |
+
+At simulation distance 10: 441 chunks per player ≈ 22 MB of chunk data per player.
+
+Sources:
+- [Minecraft Forum — Memory Per Chunk](https://www.minecraftforum.net/forums/minecraft-java-edition/discussion/3120640-how-much-memory-does-it-take-to-hold-a-chunk)
+- [SpigotMC — RAM Usage Per Chunk](https://www.spigotmc.org/threads/ram-usage-per-chunk.302079/)
+
+### Chunk Ticket System (Load Level Management)
+
+Minecraft does not use LRU or simple distance-based eviction. Instead, a **ticket system** controls which chunks stay loaded:
+
+| Ticket Type | Level | Notes |
+|---|---|---|
+| Player | 31 | Moves with player, refreshed continuously |
+| Forced (`/forceload`) | 31 | Persists across restarts |
+| Portal | 30 | 300 ticks (15s) timeout |
+| Dragon | 24 | Ender dragon fight area |
+
+From the ticket source, the load level propagates outward (+1 per chunk hop, max 44). This creates concentric rings:
+
+| Level | Behavior |
+|---|---|
+| ≤31 | Entity ticking (full AI, spawning) |
+| 32 | Block ticking (entities exist but frozen) |
+| 33 | Border (entities accessible, frozen, count toward mob cap) |
+| 34+ | Not loaded |
+
+When a player disconnects, chunks stay loaded ~10 seconds before unloading.
+
+Sources:
+- [Minecraft Wiki — Chunk](https://minecraft.wiki/w/Chunk)
+- [Drovolon's Chunk Loading Mechanics](https://gist.github.com/Drovolon/24bfaae00d57e7a8ca64b792e14fa7c6)
+
+### Entity Lifecycle
+
+- Entities load/unload with chunks (since 1.17, stored in separate region files)
+- Entity processing depends on chunk load level (full AI at ≤31, frozen at 32-33)
+- Hostile mobs despawn instantly if >128 blocks from all players regardless of chunk state
+- When a chunk unloads, entities are serialized back to the entity region file
+
+### Light Data
+
+Stored per section as two nibble arrays (4 bits/block):
+- `SkyLight`: 2,048 bytes per section
+- `BlockLight`: 2,048 bytes per section
+
+Light is **not computed on the fly** — incrementally updated by the light engine when blocks change. Sections with no light can omit their nibble arrays.
+
+### Comparison: Memory Approaches
+
+| Approach | Memory/Voxel | Random Access | Best For |
+|---|---|---|---|
+| **Minecraft Palette** | ~0.5-2 bytes | O(1) | Mixed terrain, frequent read/write |
+| **Flat Array** (current project) | 2 bytes | O(1) | Simplest, fastest |
+| **Sparse Voxel Octree** | ~5 bytes/stored voxel | O(log n) | Sparse worlds |
+| **DAG** | Best compression | O(log n) | Repetitive structures |
+| **RLE** | Excellent for uniform runs | O(n) decompress | Layered terrain |
+
+**Palette's advantage**: O(1) random access (critical for gameplay — block placement, physics, lighting) while being significantly better than flat arrays. Uniform sections are nearly free.
+
+Sources:
+- [Voxel Compression Documentation](https://eisenwave.github.io/voxel-compression-docs/introduction.html)
+- [Ricardo Antunes — Grids vs Octrees](https://riscadoa.com/game-dev/voxel-engine-1/)
+
+### Current Project vs Minecraft
+
+| Aspect | Minecraft | Current Project |
+|---|---|---|
+| Section storage | PalettedContainer (0-15 bits/entry) | Flat `Vec<WorldVoxel>` (2 bytes/voxel) |
+| Empty sections | Near-zero cost (single-valued palette) | Full 11.4 KiB allocated |
+| Chunk memory | ~50 KiB typical | ~11.4 KiB (no light, no biomes) |
+| Data retention | Always retained while loaded | **Discarded after meshing**  |
+| Eviction | Ticket system with load levels | Distance-based `HashSet::retain` |
+| Modified voxels | Baked into section data | Separate `HashMap<IVec3, WorldVoxel>` |
+
+**Current chunk memory**: `WorldVoxel` is 2 bytes (discriminant + u8 payload). Each chunk stores 18³ = 5,832 voxels = **11,664 bytes** (~11.4 KiB). With `FillType` and `hash`, total is ~11.7 KiB per `ChunkData`.
+
+**No compression exists**: `FillType` is defined but never read at runtime. Every chunk allocates the full Vec regardless of content.
+
+### Applicability to This Project
+
+The project's 16³ chunks with `WorldVoxel` (only 3 variants: Air/Unset/Solid(u8)) are much simpler than Minecraft's thousands of block states. Realistic optimizations for this project:
+
+1. **Single-valued chunks**: If `FillType::Empty` or `FillType::Uniform`, don't allocate the Vec. This is trivially implementable since `FillType` already exists — just needs runtime use. Uniform air chunks (common above terrain) drop from 11.4 KiB to ~16 bytes.
+
+2. **Palette compression**: With only ~257 possible voxel values (Air + 256 Solid variants), most chunks need ≤8 bits/entry. A section with 2 distinct voxels needs 1 bit/entry = 512 bytes vs 11,664 bytes — a 23× reduction. Implementation complexity is moderate.
+
+3. **Not needed now**: At current spawning distances (2-10), flat arrays are fine. But if view distances grow or the server manages many simultaneous map instances, palette compression becomes worth it.
 
 ## Decisions
 
