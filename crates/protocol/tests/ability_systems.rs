@@ -1,8 +1,7 @@
 use avian3d::prelude::CollidingEntities;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::ActionState;
-use lightyear::core::time::TickDelta;
-use lightyear::prelude::{ComponentRegistry, LocalTimeline, NetworkTimeline, PeerId, Server, Tick};
+use lightyear::prelude::{ComponentRegistry, LocalTimeline, PeerId, Server, Tick};
 use lightyear_replication::prespawn::PreSpawnedReceiver;
 use protocol::ability::{
     ActiveBuff, ActiveBuffs, ActiveShield, HitTargets, HitboxOf, MeleeHitbox, OnEndEffects,
@@ -157,7 +156,7 @@ fn test_app() -> App {
     app.add_plugins(MinimalPlugins);
     // Minimal lightyear infrastructure for PreSpawned::default_with_salt to work.
     // The on_add hook needs: ComponentRegistry resource, Server + PreSpawnedReceiver
-    // component types registered, and one entity with LocalTimeline + PreSpawnedReceiver.
+    // component types registered. LocalTimeline is inserted as a resource by tests.
     app.init_resource::<ComponentRegistry>();
     app.world_mut().register_component::<Server>();
     app.world_mut().register_component::<PreSpawnedReceiver>();
@@ -183,18 +182,15 @@ fn test_app() -> App {
     app
 }
 
-fn spawn_timeline(world: &mut World, tick_value: u16) -> Entity {
-    let entity = world
-        .spawn((LocalTimeline::default(), PreSpawnedReceiver::default()))
-        .id();
-    let mut timeline = world.get_mut::<LocalTimeline>(entity).unwrap();
-    timeline.apply_delta(TickDelta::from_i16(tick_value as i16));
-    entity
+fn insert_timeline(world: &mut World, tick_value: u16) {
+    world.insert_resource(LocalTimeline::default());
+    let mut timeline = world.resource_mut::<LocalTimeline>();
+    timeline.apply_delta(tick_value as i16);
 }
 
-fn advance_timeline(world: &mut World, timeline_entity: Entity, delta: i16) {
-    let mut timeline = world.get_mut::<LocalTimeline>(timeline_entity).unwrap();
-    timeline.apply_delta(TickDelta::from_i16(delta));
+fn advance_timeline(world: &mut World, delta: i16) {
+    let mut timeline = world.resource_mut::<LocalTimeline>();
+    timeline.apply_delta(delta);
 }
 
 fn punch_slots() -> AbilitySlots {
@@ -241,7 +237,7 @@ fn find_active_ability_for_def(world: &mut World, def_id: &str) -> Option<(Entit
 #[test]
 fn activation_on_press() {
     let mut app = test_app();
-    let timeline_entity = spawn_timeline(app.world_mut(), 100);
+    insert_timeline(app.world_mut(), 100);
     let char_entity = spawn_character(app.world_mut());
 
     app.world_mut()
@@ -256,14 +252,14 @@ fn activation_on_press() {
     assert_eq!(active.def_id, AbilityId("punch".into()));
     assert_eq!(active.caster, char_entity);
 
-    let timeline = app.world().get::<LocalTimeline>(timeline_entity).unwrap();
+    let timeline = app.world().resource::<LocalTimeline>();
     assert_eq!(active.phase_start_tick, timeline.tick());
 }
 
 #[test]
 fn activation_blocked_by_cooldown() {
     let mut app = test_app();
-    spawn_timeline(app.world_mut(), 100);
+    insert_timeline(app.world_mut(), 100);
     let char_entity = spawn_character(app.world_mut());
 
     app.world_mut()
@@ -287,7 +283,7 @@ fn activation_blocked_by_cooldown() {
 #[test]
 fn activation_empty_slot() {
     let mut app = test_app();
-    spawn_timeline(app.world_mut(), 100);
+    insert_timeline(app.world_mut(), 100);
     let char_entity = spawn_character(app.world_mut());
 
     app.world_mut()
@@ -306,7 +302,7 @@ fn activation_empty_slot() {
 #[test]
 fn activation_sets_cooldown() {
     let mut app = test_app();
-    let timeline_entity = spawn_timeline(app.world_mut(), 100);
+    insert_timeline(app.world_mut(), 100);
     let char_entity = spawn_character(app.world_mut());
 
     app.world_mut()
@@ -317,14 +313,14 @@ fn activation_sets_cooldown() {
     app.update();
 
     let cd = app.world().get::<AbilityCooldowns>(char_entity).unwrap();
-    let timeline = app.world().get::<LocalTimeline>(timeline_entity).unwrap();
+    let timeline = app.world().resource::<LocalTimeline>();
     assert_eq!(cd.last_used[0], Some(timeline.tick()));
 }
 
 #[test]
 fn phase_startup_to_active() {
     let mut app = test_app();
-    let timeline_entity = spawn_timeline(app.world_mut(), 100);
+    insert_timeline(app.world_mut(), 100);
     let char_entity = spawn_character(app.world_mut());
 
     app.world_mut().spawn(ActiveAbility {
@@ -338,7 +334,7 @@ fn phase_startup_to_active() {
         depth: 0,
     });
 
-    advance_timeline(app.world_mut(), timeline_entity, 4);
+    advance_timeline(app.world_mut(), 4);
     app.update();
 
     let (_, active) = find_active_ability_for_def(app.world_mut(), "punch")
@@ -349,7 +345,7 @@ fn phase_startup_to_active() {
 #[test]
 fn phase_active_to_recovery() {
     let mut app = test_app();
-    let timeline_entity = spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
     app.world_mut().spawn(ActiveAbility {
@@ -363,7 +359,7 @@ fn phase_active_to_recovery() {
         depth: 0,
     });
 
-    advance_timeline(app.world_mut(), timeline_entity, 6);
+    advance_timeline(app.world_mut(), 6);
     app.update();
 
     let (_, active) = find_active_ability_for_def(app.world_mut(), "punch3")
@@ -374,7 +370,7 @@ fn phase_active_to_recovery() {
 #[test]
 fn phase_recovery_completes() {
     let mut app = test_app();
-    let timeline_entity = spawn_timeline(app.world_mut(), 300);
+    insert_timeline(app.world_mut(), 300);
     let char_entity = spawn_character(app.world_mut());
 
     app.world_mut().spawn(ActiveAbility {
@@ -388,7 +384,7 @@ fn phase_recovery_completes() {
         depth: 0,
     });
 
-    advance_timeline(app.world_mut(), timeline_entity, 4);
+    advance_timeline(app.world_mut(), 4);
     app.update();
 
     // prediction_despawn inserts PredictionDisable rather than actually despawning
@@ -400,7 +396,7 @@ fn phase_recovery_completes() {
 #[test]
 fn bullet_lifetime_despawn() {
     let mut app = test_app();
-    spawn_timeline(app.world_mut(), 300);
+    insert_timeline(app.world_mut(), 300);
 
     let spawn_entity = app
         .world_mut()
@@ -428,7 +424,7 @@ fn bullet_lifetime_despawn() {
 #[test]
 fn bullet_lifetime_alive() {
     let mut app = test_app();
-    spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
 
     let spawn_entity = app
         .world_mut()
@@ -456,7 +452,7 @@ fn bullet_lifetime_alive() {
 #[test]
 fn on_hit_effects_dispatched_on_first_active_tick() {
     let mut app = test_app();
-    spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
     let ability_entity = app
@@ -492,7 +488,7 @@ fn on_hit_effects_dispatched_on_first_active_tick() {
 #[test]
 fn on_hit_effects_removed_on_recovery() {
     let mut app = test_app();
-    let timeline_entity = spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
     let ability_entity = app
@@ -514,7 +510,7 @@ fn on_hit_effects_removed_on_recovery() {
     assert!(app.world().get::<OnHitEffects>(ability_entity).is_some());
 
     // Advance past active_ticks (6 ticks for punch3)
-    advance_timeline(app.world_mut(), timeline_entity, 6);
+    advance_timeline(app.world_mut(), 6);
     app.update();
 
     // Now in Recovery — OnHitEffects should be removed
@@ -532,7 +528,7 @@ fn on_hit_effects_removed_on_recovery() {
 #[test]
 fn melee_hitbox_entity_spawned() {
     let mut app = test_app();
-    spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
     app.world_mut().spawn(ActiveAbility {
@@ -562,7 +558,7 @@ fn melee_hitbox_entity_spawned() {
 #[test]
 fn hitbox_entity_has_correct_on_hit_effects() {
     let mut app = test_app();
-    spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
     app.world_mut().spawn(ActiveAbility {
@@ -596,7 +592,7 @@ fn hitbox_entity_has_correct_on_hit_effects() {
 #[test]
 fn on_end_effects_dispatched_on_active_to_recovery() {
     let mut app = test_app();
-    let timeline_entity = spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
     // Add a test ability with OnEnd effects
@@ -642,7 +638,7 @@ fn on_end_effects_dispatched_on_active_to_recovery() {
     assert!(app.world().get::<OnEndEffects>(ability_entity).is_none());
 
     // Advance past active_ticks (4 ticks) → triggers Active→Recovery
-    advance_timeline(app.world_mut(), timeline_entity, 4);
+    advance_timeline(app.world_mut(), 4);
     app.update();
 
     // Should now be in Recovery phase
@@ -669,7 +665,7 @@ fn count_active_abilities(world: &mut World) -> usize {
 #[test]
 fn sub_ability_spawned_on_cast() {
     let mut app = test_app();
-    spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
     // Add a "chain_test" ability that spawns "punch" as a sub-ability on cast
@@ -720,7 +716,7 @@ fn sub_ability_spawned_on_cast() {
 #[test]
 fn sub_ability_depth_limited() {
     let mut app = test_app();
-    spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
     // Add ability that tries to recurse
@@ -770,7 +766,7 @@ fn sub_ability_depth_limited() {
 fn sub_ability_phase_management() {
     // Verify that a sub-ability (depth > 0) goes through normal phase cycle
     let mut app = test_app();
-    let timeline_entity = spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
     // Use punch3 which has recovery_ticks > 0 for a full phase cycle test
@@ -793,7 +789,7 @@ fn sub_ability_phase_management() {
     assert_eq!(sub.depth, 1);
 
     // Advance 4 ticks: punch3 Startup (4 ticks) completes → Active
-    advance_timeline(app.world_mut(), timeline_entity, 4);
+    advance_timeline(app.world_mut(), 4);
     app.update();
 
     let (_, sub) =
@@ -801,7 +797,7 @@ fn sub_ability_phase_management() {
     assert_eq!(sub.phase, AbilityPhase::Active);
 
     // Advance 6 more ticks: punch3 Active (6 ticks) completes → Recovery
-    advance_timeline(app.world_mut(), timeline_entity, 6);
+    advance_timeline(app.world_mut(), 6);
     app.update();
 
     let (_, sub) = find_active_ability_for_def(app.world_mut(), "punch3")
@@ -812,7 +808,7 @@ fn sub_ability_phase_management() {
 #[test]
 fn on_input_effects_dispatched_during_active() {
     let mut app = test_app();
-    spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
     let ability_entity = app
@@ -849,7 +845,7 @@ fn on_input_effects_dispatched_during_active() {
 #[test]
 fn on_input_effects_removed_on_recovery() {
     let mut app = test_app();
-    let timeline_entity = spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
     let ability_entity = app
@@ -871,7 +867,7 @@ fn on_input_effects_removed_on_recovery() {
     assert!(app.world().get::<OnInputEffects>(ability_entity).is_some());
 
     // Advance past active_ticks (20 ticks for punch)
-    advance_timeline(app.world_mut(), timeline_entity, 20);
+    advance_timeline(app.world_mut(), 20);
     app.update();
 
     // punch has recovery_ticks=0, so it goes directly to despawn.
@@ -914,7 +910,7 @@ fn spawn_target(world: &mut World, pos: Vec3) -> Entity {
 #[test]
 fn aoe_hitbox_damages_target() {
     let mut app = test_app_with_hit_detection();
-    let timeline_entity = spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let caster = spawn_character(app.world_mut());
     let target = spawn_target(app.world_mut(), Vec3::new(3.0, 0.0, 0.0));
 
@@ -974,7 +970,7 @@ fn aoe_hitbox_damages_target() {
         .insert(target);
 
     // Advance timeline: ability will transition Active → Recovery
-    advance_timeline(app.world_mut(), timeline_entity, 1);
+    advance_timeline(app.world_mut(), 1);
 
     // Update 2: hit detection should process the collision BEFORE cleanup despawns the hitbox
     app.update();
@@ -990,7 +986,7 @@ fn aoe_hitbox_damages_target() {
 #[test]
 fn teleport_moves_caster() {
     let mut app = test_app();
-    spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
     app.world_mut()
@@ -1039,7 +1035,7 @@ fn teleport_moves_caster() {
 #[test]
 fn shield_absorbs_damage() {
     let mut app = test_app_with_hit_detection();
-    spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let caster = spawn_character(app.world_mut());
 
     let target = app
@@ -1125,7 +1121,7 @@ fn shield_absorbs_damage() {
 #[test]
 fn shield_overflow_damages_health() {
     let mut app = test_app_with_hit_detection();
-    spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let caster = spawn_character(app.world_mut());
 
     let target = app
@@ -1210,7 +1206,7 @@ fn shield_overflow_damages_health() {
 #[test]
 fn buff_inserted_on_target() {
     let mut app = test_app();
-    spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
     app.world_mut()
@@ -1263,7 +1259,7 @@ fn buff_inserted_on_target() {
 fn buff_expires_after_duration() {
     let mut app = test_app();
     app.add_systems(Update, ability::expire_buffs);
-    let timeline_entity = spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let char_entity = spawn_character(app.world_mut());
 
     app.world_mut()
@@ -1282,7 +1278,7 @@ fn buff_expires_after_duration() {
     );
 
     // Advance to tick 211 (past expiry)
-    advance_timeline(app.world_mut(), timeline_entity, 11);
+    advance_timeline(app.world_mut(), 11);
     app.update();
 
     assert!(
@@ -1294,7 +1290,7 @@ fn buff_expires_after_duration() {
 #[test]
 fn buff_increases_damage() {
     let mut app = test_app_with_hit_detection();
-    spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let caster = spawn_character(app.world_mut());
 
     // Give caster a 2x damage buff
@@ -1387,7 +1383,7 @@ fn run_force_test(
     target_rotation: Quat,
 ) -> Vec3 {
     let mut app = test_app_with_hit_detection();
-    let timeline_entity = spawn_timeline(app.world_mut(), 200);
+    insert_timeline(app.world_mut(), 200);
     let caster = spawn_character(app.world_mut());
     let target = spawn_target(app.world_mut(), target_pos);
 
@@ -1455,7 +1451,7 @@ fn run_force_test(
         .unwrap()
         .insert(target);
 
-    advance_timeline(app.world_mut(), timeline_entity, 1);
+    advance_timeline(app.world_mut(), 1);
 
     // Update 2: process hit → apply force
     app.update();

@@ -123,12 +123,7 @@ pub fn add_events_to_clip(clip: &mut AnimationClip, events: &[AnimEventKeyframe]
         };
         clip.add_event_fn(ev.time, move |commands, entity, _time, weight| {
             if weight > EVENT_WEIGHT_THRESHOLD {
-                commands.trigger_with(
-                    event.clone(),
-                    AnimationEventTrigger {
-                        animation_player: entity,
-                    },
-                );
+                commands.trigger_with(event.clone(), AnimationEventTrigger { target: entity });
             }
         });
     }
@@ -136,7 +131,7 @@ pub fn add_events_to_clip(clip: &mut AnimationClip, events: &[AnimEventKeyframe]
 
 /// Observer that logs animation events as they fire.
 pub fn on_animation_event_fired(trigger: On<AnimationEventFired>) {
-    let player_entity = trigger.trigger().animation_player;
+    let player_entity = trigger.trigger().target;
     let event = trigger.event();
     info!(character = ?player_entity, event = %event.event_name, "animation event fired");
 }

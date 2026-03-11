@@ -18,6 +18,7 @@ fn main() {
             file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").to_string(),
             ..default()
         })
+        .add_plugins(bevy::transform::TransformPlugin)
         .add_plugins(bevy::scene::ScenePlugin)
         // Register asset resources for voxel world mesh generation
         .add_message::<bevy::asset::AssetEvent<bevy::prelude::Mesh>>()

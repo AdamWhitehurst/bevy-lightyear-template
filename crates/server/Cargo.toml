@@ -15,7 +15,7 @@ bevy = { workspace = true, default-features = true, features = ["file_watcher"] 
 voxel_map_engine = { workspace = true }
 leafwing-input-manager = { workspace = true }
 lightyear = { workspace = true, features = ["server", "netcode", "udp", "webtransport", "websocket", "leafwing", "replication" ] }
-lightyear_crossbeam = "0.25.5"
+lightyear_crossbeam = "0.26.0"
 protocol = { workspace = true }
 anyhow = "1.0"
 async-compat = "0.2"
@@ -31,5 +31,5 @@ test-log = { workspace = true }
 protocol = { workspace = true, features = ["test_utils"] }
 client = { path = "../client" }
 ui = { path = "../ui" }
-lightyear_crossbeam = "0.25.5"
-lightyear_raw_connection = { version = "0.25.5", features = ["client", "server"] }
+lightyear_crossbeam = "0.26.0"
+lightyear_raw_connection = { version = "0.26.0", features = ["client", "server"] }

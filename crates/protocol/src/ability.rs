@@ -4,11 +4,10 @@ use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
 use bevy_common_assets::ron::RonAssetPlugin;
 use leafwing_input_manager::prelude::ActionState;
-use lightyear::prelude::server::ClientOf;
 use lightyear::prelude::PredictionDespawnCommandsExt;
 use lightyear::prelude::{
-    ControlledBy, DisableRollback, LocalTimeline, NetworkTarget, NetworkTimeline, PreSpawned,
-    PredictionTarget, Replicate, Tick,
+    ControlledBy, DisableRollback, LocalTimeline, NetworkTarget, PreSpawned, PredictionTarget,
+    Replicate, Tick,
 };
 use lightyear::utils::collections::EntityHashSet;
 use serde::{Deserialize, Serialize};
@@ -682,7 +681,7 @@ pub fn ability_activation(
     mut commands: Commands,
     ability_defs: Res<AbilityDefs>,
     default_slots: Res<DefaultAbilitySlots>,
-    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    timeline: Res<LocalTimeline>,
     mut query: Query<(
         Entity,
         &ActionState<PlayerActions>,
@@ -774,7 +773,7 @@ fn advance_ability_phase(
 pub fn update_active_abilities(
     mut commands: Commands,
     ability_defs: Res<AbilityDefs>,
-    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    timeline: Res<LocalTimeline>,
     mut query: Query<(Entity, &mut ActiveAbility)>,
 ) {
     let tick = timeline.tick();
@@ -794,7 +793,7 @@ pub fn update_active_abilities(
 pub fn dispatch_effect_markers(
     mut commands: Commands,
     ability_defs: Res<AbilityDefs>,
-    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    timeline: Res<LocalTimeline>,
     query: Query<(Entity, &ActiveAbility)>,
 ) {
     let tick = timeline.tick();
@@ -998,7 +997,7 @@ pub(crate) fn spawn_sub_ability(
 pub fn apply_on_tick_effects(
     mut commands: Commands,
     ability_defs: Res<AbilityDefs>,
-    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    timeline: Res<LocalTimeline>,
     server_query: Query<&ControlledBy>,
     player_id_query: Query<&PlayerId>,
     query: Query<(
@@ -1208,7 +1207,7 @@ pub fn apply_while_active_effects(
 pub fn apply_on_end_effects(
     mut commands: Commands,
     ability_defs: Res<AbilityDefs>,
-    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    timeline: Res<LocalTimeline>,
     server_query: Query<&ControlledBy>,
     player_id_query: Query<&PlayerId>,
     query: Query<(Entity, &OnEndEffects, &ActiveAbility)>,
@@ -1287,7 +1286,7 @@ pub fn apply_on_end_effects(
 pub fn apply_on_input_effects(
     mut commands: Commands,
     ability_defs: Res<AbilityDefs>,
-    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    timeline: Res<LocalTimeline>,
     server_query: Query<&ControlledBy>,
     player_id_query: Query<&PlayerId>,
     query: Query<(Entity, &OnInputEffects, &ActiveAbility)>,
@@ -1360,7 +1359,7 @@ fn apply_buff(
 /// Remove expired buffs each tick. Removes the ActiveBuffs component when empty.
 pub fn expire_buffs(
     mut commands: Commands,
-    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    timeline: Res<LocalTimeline>,
     mut query: Query<(Entity, &mut ActiveBuffs)>,
 ) {
     let tick = timeline.tick();
@@ -1393,7 +1392,7 @@ pub fn cleanup_effect_markers_on_removal(
 /// Spawn a `AbilityProjectileSpawn` entity from `ProjectileSpawnEffect` markers.
 pub fn ability_projectile_spawn(
     mut commands: Commands,
-    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    timeline: Res<LocalTimeline>,
     query: Query<(
         Entity,
         &ProjectileSpawnEffect,
@@ -1502,7 +1501,7 @@ pub fn despawn_ability_projectile_spawn(
 /// Despawn AoE hitboxes whose duration has expired.
 pub fn aoe_hitbox_lifetime(
     mut commands: Commands,
-    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    timeline: Res<LocalTimeline>,
     query: Query<(Entity, &AoEHitbox)>,
 ) {
     let tick = timeline.tick();
@@ -1517,7 +1516,7 @@ pub fn aoe_hitbox_lifetime(
 /// Despawn bullets whose lifetime has expired.
 pub fn ability_bullet_lifetime(
     mut commands: Commands,
-    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    timeline: Res<LocalTimeline>,
     query: Query<(Entity, &AbilityBulletOf)>,
     spawn_query: Query<&AbilityProjectileSpawn>,
 ) {

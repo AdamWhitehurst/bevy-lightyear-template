@@ -113,7 +113,7 @@ fn spawn_respawn_points(mut commands: Commands) {
 
 fn check_death_and_respawn(
     mut commands: Commands,
-    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    timeline: Res<LocalTimeline>,
     mut dead_query: Query<
         (Entity, &mut Health, &mut Position, &mut LinearVelocity),
         With<CharacterMarker>,
@@ -153,7 +153,7 @@ fn nearest_respawn_pos(
 
 fn expire_invulnerability(
     mut commands: Commands,
-    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    timeline: Res<LocalTimeline>,
     query: Query<(Entity, &Invulnerable)>,
 ) {
     let tick = timeline.tick();

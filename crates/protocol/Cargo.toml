@@ -12,7 +12,7 @@ bevy = { workspace = true, features = ["bevy_color", "bevy_state"] }
 voxel_map_engine = { workspace = true }
 leafwing-input-manager = { workspace = true }
 lightyear = { workspace = true, features = ["avian3d", "leafwing"] }
-lightyear_transport = { version = "0.25.5", optional = true }
+lightyear_transport = { version = "0.26.0", optional = true }
 ron = { workspace = true }
 bevy_common_assets = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
@@ -20,5 +20,5 @@ serde = { version = "1.0", features = ["derive"] }
 [dev-dependencies]
 bevy = { workspace = true, features = ["bevy_color", "bevy_state", "bevy_mesh", "bevy_asset"] }
 serde_json = "1.0"
-lightyear_transport = "0.25.5"
-lightyear_replication = "0.25.5"
+lightyear_transport = "0.26.0"
+lightyear_replication = "0.26.0"

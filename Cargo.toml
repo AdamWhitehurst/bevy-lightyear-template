@@ -30,18 +30,18 @@ exclude = [
 resolver = "2"
 
 [workspace.dependencies]
-avian3d = { version = "0.4.1", default-features = false, features = ["3d", "f32", "parry-f32", "default-collider", "collider-from-mesh"] }
-bevy = { version = "0.17.2", default-features = false }
-leafwing-input-manager = "0.19"
+avian3d = { version = "0.5.0", default-features = false, features = ["3d", "f32", "parry-f32", "default-collider", "collider-from-mesh"] }
+bevy = { version = "0.18", default-features = false }
+leafwing-input-manager = "0.20"
 voxel_map_engine = { path = "crates/voxel_map_engine" }
-lightyear = { version = "0.25.5", features = ["leafwing", "raw_connection"] }
+lightyear = { version = "0.26.0", features = ["leafwing", "raw_connection"] }
 protocol = { path = "crates/protocol" }
-ron = "0.9"
-bevy_common_assets = { version = "0.14", features = ["ron"] }
+ron = "0.12"
+bevy_common_assets = { version = "0.15", features = ["ron"] }
 serde = "1.0"
 
 # WASM-specific dependencies
-wasm-bindgen = "=0.2.105"
+wasm-bindgen = "=0.2.106"
 console_error_panic_hook = "0.1"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 

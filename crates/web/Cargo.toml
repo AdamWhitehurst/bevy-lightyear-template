@@ -32,6 +32,9 @@ bevy = { workspace = true, default-features = false, features = [
     "png",
     "webgl2",
     "serialize",
+    "mouse",
+    "keyboard",
+    "gamepad",
 ] }
 lightyear = { workspace = true, features = [
     "client",

@@ -50,10 +50,14 @@ pub fn mesh_chunk_greedy(voxels: &[WorldVoxel]) -> Option<Mesh> {
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
     );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, tex_coords);
-    mesh.insert_indices(Indices::U32(indices));
+    mesh.try_insert_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .expect("valid position attribute");
+    mesh.try_insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+        .expect("valid normal attribute");
+    mesh.try_insert_attribute(Mesh::ATTRIBUTE_UV_0, tex_coords)
+        .expect("valid uv attribute");
+    mesh.try_insert_indices(Indices::U32(indices))
+        .expect("valid indices");
     Some(mesh)
 }
 

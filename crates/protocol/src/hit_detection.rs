@@ -1,8 +1,7 @@
 use avian3d::prelude::*;
 use bevy::prelude::*;
 
-use lightyear::prelude::server::ClientOf;
-use lightyear::prelude::{ControlledBy, LocalTimeline, NetworkTimeline, Tick};
+use lightyear::prelude::{ControlledBy, LocalTimeline, Tick};
 
 use crate::ability::{
     facing_direction, spawn_sub_ability, AbilityBulletOf, AbilityDefs, AbilityEffect, AbilityPhase,
@@ -75,7 +74,7 @@ pub fn update_hitbox_positions(
 pub fn process_hitbox_hits(
     mut commands: Commands,
     ability_defs: Res<AbilityDefs>,
-    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    timeline: Res<LocalTimeline>,
     server_query: Query<&ControlledBy>,
     player_id_query: Query<&PlayerId>,
     mut hitbox_query: Query<(
@@ -148,7 +147,7 @@ pub fn cleanup_hitbox_entities(
 pub fn process_projectile_hits(
     mut commands: Commands,
     ability_defs: Res<AbilityDefs>,
-    timeline: Single<&LocalTimeline, Without<ClientOf>>,
+    timeline: Res<LocalTimeline>,
     server_query: Query<&ControlledBy>,
     player_id_query: Query<&PlayerId>,
     bullet_query: Query<

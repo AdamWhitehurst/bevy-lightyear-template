@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use avian3d::prelude::LinearVelocity;
 use bevy::{
-    animation::{animated_field, AnimationTarget, AnimationTargetId},
+    animation::{animated_field, AnimatedBy, AnimationTargetId},
     math::curve::sample_curves::UnevenSampleAutoCurve,
     prelude::*,
 };
@@ -510,10 +510,9 @@ pub fn attach_animation_players(
         for (bone_name, &bone_entity) in &bone_entities.0 {
             let target_id =
                 AnimationTargetId::from_names(std::iter::once(&Name::new(bone_name.clone())));
-            commands.entity(bone_entity).insert(AnimationTarget {
-                id: target_id,
-                player: entity,
-            });
+            commands
+                .entity(bone_entity)
+                .insert((target_id, AnimatedBy(entity)));
         }
     }
 }
