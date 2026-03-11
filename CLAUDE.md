@@ -28,10 +28,10 @@
   usage instructions.
 
 ## System Design
-- **[HIGHEST]** - Never silently fail for invalid conditions. Always `debug_assert!` and `expect()` instead of silently `return`ing or `continue`ing.
-- **[HIGHEST]** No silent `return`s or `continue`s. If it a `return` or `continue` is expected e.g. during startup waiting for an asset to load. 
-- Always leave a comment explaining why a silent `return` or `continue` is expected
-- **[HIGHEST]** Always use `debug_assert!` and `expect` to enforce expected behavior. Fail early and loudly.
+- **[HIGHEST]** Handle all conditions explicitly:
+  - Unexpected/invalid state: `debug_assert!`, `expect()`, or `panic!`. Never silently swallow errors.
+  - Expected early-out (e.g., resource not yet available during startup): `return`/`continue` is fine, but MUST include a `trace!` explaining why it's expected.
+  - No bare `return`/`continue` without either a loud failure or an explanatory `trace!`.
 - Only use ECS Resources for data that should be globally unique and can't otherwise be tied to one entity.
 - Load all assets and resources during app startup before `AppState::Ready`
 - NEVER use `Option<Res<_>>` unless there is a legitimate reason that it may not exist yet e.g. during startup in the fn responsible for loading the Resource. Leave a comment explaining why the `Option<Res<_>>` is necessary.
