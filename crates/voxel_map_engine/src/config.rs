@@ -20,6 +20,9 @@ pub struct VoxelMapConfig {
     pub generator: VoxelGenerator,
     /// Directory for persisting chunk data. `None` means no persistence.
     pub save_dir: Option<PathBuf>,
+    /// Whether this map generates chunks locally. Server sets `true`, client sets `false`
+    /// when chunks are streamed from the server.
+    pub generates_chunks: bool,
 }
 
 impl VoxelMapConfig {
@@ -50,6 +53,7 @@ impl VoxelMapConfig {
             tree_height,
             generator,
             save_dir: None,
+            generates_chunks: true,
         }
     }
 }

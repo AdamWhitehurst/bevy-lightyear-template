@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 use ndshape::ConstShape;
-use protocol::VoxelType;
-use server::map::{save_dirty_chunks_for_instance, VoxelModifications};
+use server::map::save_dirty_chunks_for_instance;
 use server::persistence::{load_map_meta, save_map_meta, MapMeta};
 use voxel_map_engine::persistence as chunk_persist;
 use voxel_map_engine::prelude::*;
@@ -109,24 +108,4 @@ fn evicted_dirty_chunk_saved_before_removal() {
     assert!(!instance.loaded_chunks.contains(&chunk_pos));
     assert!(instance.get_chunk_data(chunk_pos).is_none());
     assert!(instance.dirty_chunks.is_empty());
-}
-
-#[test]
-fn initial_voxel_state_from_runtime_modifications() {
-    // VoxelModifications is populated at runtime by handle_voxel_edit_requests,
-    // not loaded from disk. Verify the resource accumulates edits correctly.
-    let mut modifications = VoxelModifications::default();
-    assert!(modifications.modifications.is_empty());
-
-    modifications
-        .modifications
-        .push((IVec3::new(1, 2, 3), VoxelType::Solid(1)));
-    modifications
-        .modifications
-        .push((IVec3::new(4, 5, 6), VoxelType::Air));
-
-    assert_eq!(modifications.modifications.len(), 2);
-    assert_eq!(modifications.modifications[0].0, IVec3::new(1, 2, 3));
-    assert_eq!(modifications.modifications[0].1, VoxelType::Solid(1));
-    assert_eq!(modifications.modifications[1].1, VoxelType::Air);
 }

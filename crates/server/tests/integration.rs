@@ -1,6 +1,8 @@
 use ::client::map::handle_map_transition_start;
 use ::client::network::{ClientNetworkConfig, ClientNetworkPlugin, ClientTransport};
-use ::server::map::{handle_map_switch_requests, handle_map_transition_ready, RoomRegistry};
+use ::server::map::{
+    handle_chunk_requests, handle_map_switch_requests, handle_map_transition_ready, RoomRegistry,
+};
 use ::server::network::{ServerNetworkConfig, ServerNetworkPlugin, ServerTransport};
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
@@ -813,7 +815,6 @@ fn test_crossbeam_event_triggers() {
 fn add_server_map_systems(stepper: &mut CrossbeamTestStepper) {
     stepper.server_app.init_resource::<MapRegistry>();
     stepper.server_app.init_resource::<RoomRegistry>();
-    stepper.server_app.init_resource::<MapWorld>();
     stepper.server_app.add_systems(
         Update,
         (handle_map_switch_requests, handle_map_transition_ready),
@@ -1070,7 +1071,6 @@ fn server_and_client_spawn_matching_homebase_configs() {
     server_app.add_plugins(lightyear::prelude::RoomPlugin);
     server_app.init_resource::<MapRegistry>();
     server_app.init_resource::<RoomRegistry>();
-    server_app.init_resource::<MapWorld>();
     server_app.add_systems(
         Update,
         (handle_map_switch_requests, handle_map_transition_ready),
@@ -1268,5 +1268,104 @@ fn server_and_client_spawn_matching_homebase_configs() {
     assert_eq!(
         server_config.tree_height, client_config.tree_height,
         "tree_height must match"
+    );
+}
+
+/// Verify the chunk request/response roundtrip: client sends `ChunkRequest`,
+/// server looks up the chunk in `VoxelMapInstance`, client receives `ChunkDataSync`.
+#[test]
+fn test_client_requests_chunk_and_receives_data() {
+    use voxel_map_engine::prelude::{ChunkData, FillType, PalettedChunk, WorldVoxel};
+
+    let mut stepper = CrossbeamTestStepper::new();
+
+    // Collect ChunkDataSync messages on the client
+    stepper
+        .client_app
+        .init_resource::<MessageBuffer<ChunkDataSync>>();
+    stepper
+        .client_app
+        .add_systems(Update, collect_messages::<ChunkDataSync>);
+
+    // Collect ChunkRequest messages on the server (for handle_chunk_requests)
+    stepper.server_app.init_resource::<MapRegistry>();
+    stepper
+        .server_app
+        .add_systems(Update, handle_chunk_requests);
+
+    stepper.init();
+    assert!(stepper.wait_for_connection());
+
+    // Spawn overworld map on server with a chunk at IVec3::ZERO
+    let chunk_pos = IVec3::ZERO;
+    let mut instance = VoxelMapInstance::new(3);
+    let voxels = PalettedChunk::SingleValue(WorldVoxel::Solid(42));
+    instance.insert_chunk_data(
+        chunk_pos,
+        ChunkData {
+            voxels: voxels.clone(),
+            fill_type: FillType::Uniform(WorldVoxel::Solid(42)),
+            hash: 0,
+        },
+    );
+    instance.loaded_chunks.insert(chunk_pos);
+
+    let map_entity = stepper
+        .server_app
+        .world_mut()
+        .spawn((
+            instance,
+            VoxelMapConfig::new(0, 0, 1, None, 3, Arc::new(flat_terrain_voxels)),
+            Transform::default(),
+            MapInstanceId::Overworld,
+        ))
+        .id();
+    stepper
+        .server_app
+        .world_mut()
+        .resource_mut::<MapRegistry>()
+        .insert(MapInstanceId::Overworld, map_entity);
+
+    // Spawn a character owned by the client
+    stepper.server_app.world_mut().spawn((
+        CharacterMarker,
+        MapInstanceId::Overworld,
+        ControlledBy {
+            owner: stepper.client_of_entity,
+            lifetime: Default::default(),
+        },
+    ));
+
+    // Client sends ChunkRequest
+    stepper
+        .client_app
+        .world_mut()
+        .entity_mut(stepper.client_entity)
+        .get_mut::<MessageSender<ChunkRequest>>()
+        .expect("Client should have MessageSender<ChunkRequest>")
+        .send::<ChunkChannel>(ChunkRequest { chunk_pos });
+
+    // Step simulation to deliver request and response
+    stepper.tick_step(10);
+
+    // Verify client received ChunkDataSync
+    let buffer = stepper
+        .client_app
+        .world()
+        .resource::<MessageBuffer<ChunkDataSync>>();
+    assert_eq!(
+        buffer.messages.len(),
+        1,
+        "Client should receive exactly one ChunkDataSync, got {}",
+        buffer.messages.len(),
+    );
+    assert_eq!(
+        buffer.messages[0].1.chunk_pos, chunk_pos,
+        "Chunk position should match request"
+    );
+    assert_eq!(
+        buffer.messages[0].1.data,
+        PalettedChunk::SingleValue(WorldVoxel::Solid(42)),
+        "Chunk data should match server's stored data"
     );
 }

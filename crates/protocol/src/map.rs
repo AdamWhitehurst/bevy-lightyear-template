@@ -3,26 +3,10 @@ use std::collections::HashMap;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-pub use voxel_map_engine::prelude::{VoxelChunk, VoxelType};
+pub use voxel_map_engine::prelude::{PalettedChunk, VoxelChunk, VoxelType};
 
 /// Channel for voxel editing messages
 pub struct VoxelChannel;
-
-/// Shared voxel world configuration for server and client
-#[derive(Resource, Clone, Serialize, Deserialize, Eq, PartialEq)]
-pub struct MapWorld {
-    pub seed: u64,
-    pub generation_version: u32,
-}
-
-impl Default for MapWorld {
-    fn default() -> Self {
-        Self {
-            seed: 999,
-            generation_version: 0,
-        }
-    }
-}
 
 /// Identifies which map instance an entity belongs to.
 /// Semantic enum — safe to replicate, no Entity references.
@@ -94,12 +78,6 @@ pub struct VoxelEditBroadcast {
     pub voxel: VoxelType,
 }
 
-/// Server sends all modifications to connecting client
-#[derive(Serialize, Deserialize, Clone, Debug, Reflect, Message)]
-pub struct VoxelStateSync {
-    pub modifications: Vec<(IVec3, VoxelType)>,
-}
-
 /// Channel for map transition messages
 pub struct MapChannel;
 
@@ -141,6 +119,28 @@ pub struct MapTransitionEnd;
 /// Marker: client has sent MapTransitionReady, awaiting MapTransitionEnd
 #[derive(Component)]
 pub struct TransitionReadySent;
+
+/// Channel for chunk data streaming.
+pub struct ChunkChannel;
+
+/// Server sends a full chunk's palette-compressed data to a client.
+#[derive(Serialize, Deserialize, Clone, Debug, Reflect, Message)]
+pub struct ChunkDataSync {
+    pub chunk_pos: IVec3,
+    pub data: PalettedChunk,
+}
+
+/// Client requests a chunk from the server.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+pub struct ChunkRequest {
+    pub chunk_pos: IVec3,
+}
+
+/// Server tells client to discard a chunk (left view range).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+pub struct ChunkUnload {
+    pub chunk_pos: IVec3,
+}
 
 /// Marker: this entity should be saved with its map.
 #[derive(Component, Clone, Debug, Default)]

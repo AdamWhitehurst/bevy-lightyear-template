@@ -71,7 +71,9 @@ pub fn update_chunks(
         let desired = collect_desired_positions(map_entity, map_transform, config, &target_query);
 
         remove_out_of_range_chunks(&mut instance, &desired, config.save_dir.as_deref());
-        spawn_missing_chunks(&mut instance, &mut pending, config, &desired);
+        if config.generates_chunks {
+            spawn_missing_chunks(&mut instance, &mut pending, config, &desired);
+        }
     }
 }
 

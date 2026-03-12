@@ -6,16 +6,16 @@ use avian3d::prelude::{ColliderDisabled, Position, RigidBodyDisabled};
 use bevy::app::AppExit;
 use bevy::prelude::*;
 use lightyear::prelude::{
-    Connected, ControlledBy, DisableRollback, MessageReceiver, MessageSender, NetworkTarget,
-    RemoteId, Room, RoomEvent, RoomTarget, Server, ServerMultiMessageSender,
+    ControlledBy, DisableRollback, MessageReceiver, MessageSender, NetworkTarget, RemoteId, Room,
+    RoomEvent, RoomTarget, Server, ServerMultiMessageSender,
 };
 use protocol::map::{
     MapChannel, MapSwitchTarget, MapTransitionEnd, MapTransitionReady, MapTransitionStart,
     PlayerMapSwitchRequest,
 };
 use protocol::{
-    CharacterMarker, MapInstanceId, MapRegistry, MapWorld, PendingTransition, VoxelChannel,
-    VoxelEditBroadcast, VoxelEditRequest, VoxelStateSync, VoxelType,
+    CharacterMarker, ChunkChannel, ChunkDataSync, ChunkRequest, MapInstanceId, MapRegistry,
+    PendingTransition, VoxelChannel, VoxelEditBroadcast, VoxelEditRequest,
 };
 use voxel_map_engine::prelude::{
     flat_terrain_voxels, ChunkTarget, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld,
@@ -55,12 +55,6 @@ const DEFAULT_OVERWORLD_SEED: u64 = 999;
 const GENERATION_VERSION: u32 = 0;
 const SAVE_DEBOUNCE_SECONDS: f64 = 1.0;
 const MAX_DIRTY_SECONDS: f64 = 5.0;
-
-/// Tracks all voxel modifications for state sync (kept until Phase 5).
-#[derive(Resource, Default)]
-pub struct VoxelModifications {
-    pub modifications: Vec<(IVec3, VoxelType)>,
-}
 
 /// Tracks whether any map has unsaved dirty chunks.
 #[derive(Resource)]
@@ -331,10 +325,8 @@ impl Plugin for ServerMapPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(lightyear::prelude::RoomPlugin)
             .add_plugins(VoxelPlugin)
-            .init_resource::<MapWorld>() // Keep until Phase 5
             .init_resource::<MapRegistry>()
             .init_resource::<RoomRegistry>()
-            .init_resource::<VoxelModifications>() // Keep until Phase 5
             .init_resource::<WorldDirtyState>()
             .init_resource::<WorldSavePath>()
             .add_systems(Startup, (spawn_overworld, load_startup_entities).chain())
@@ -342,6 +334,7 @@ impl Plugin for ServerMapPlugin {
                 Update,
                 (
                     handle_voxel_edit_requests,
+                    handle_chunk_requests,
                     save_dirty_chunks_debounced,
                     handle_map_switch_requests,
                     handle_map_transition_ready,
@@ -349,7 +342,6 @@ impl Plugin for ServerMapPlugin {
                 ),
             )
             .add_systems(Last, save_world_on_shutdown)
-            .add_observer(send_initial_voxel_state)
             .add_observer(on_map_instance_id_added);
     }
 }
@@ -358,7 +350,6 @@ fn handle_voxel_edit_requests(
     mut receiver: Query<&mut MessageReceiver<VoxelEditRequest>>,
     mut sender: ServerMultiMessageSender,
     server: Single<&Server>,
-    mut modifications: ResMut<VoxelModifications>,
     mut dirty_state: ResMut<WorldDirtyState>,
     time: Res<Time>,
     overworld: Res<OverworldMap>,
@@ -372,10 +363,6 @@ fn handle_voxel_edit_requests(
                 request.position,
                 WorldVoxel::from(request.voxel),
             );
-
-            modifications
-                .modifications
-                .push((request.position, request.voxel));
 
             let now = time.elapsed_secs_f64();
             if !dirty_state.is_dirty {
@@ -398,19 +385,52 @@ fn handle_voxel_edit_requests(
     }
 }
 
-/// System to send initial state to newly connected clients.
-fn send_initial_voxel_state(
-    trigger: On<Add, Connected>,
-    modifications: Res<VoxelModifications>,
-    mut sender: Query<&mut MessageSender<VoxelStateSync>>,
+/// Handles client chunk requests — sends chunk data if available.
+pub fn handle_chunk_requests(
+    mut receivers: Query<(Entity, &mut MessageReceiver<ChunkRequest>)>,
+    mut senders: Query<&mut MessageSender<ChunkDataSync>>,
+    controlled_query: Query<(&ControlledBy, &MapInstanceId), With<CharacterMarker>>,
+    map_registry: Res<MapRegistry>,
+    map_query: Query<&VoxelMapInstance>,
 ) {
-    let Ok(mut message_sender) = sender.get_mut(trigger.entity) else {
-        return;
-    };
+    for (client_entity, mut receiver) in &mut receivers {
+        for request in receiver.receive() {
+            let Some((_, player_map_id)) = controlled_query
+                .iter()
+                .find(|(ctrl, _)| ctrl.owner == client_entity)
+            else {
+                trace!("handle_chunk_requests: no character for client {client_entity:?}");
+                continue;
+            };
 
-    message_sender.send::<VoxelChannel>(VoxelStateSync {
-        modifications: modifications.modifications.clone(),
-    });
+            let map_entity = map_registry.get(player_map_id);
+            let Ok(instance) = map_query.get(map_entity) else {
+                trace!("handle_chunk_requests: map entity not ready for {player_map_id:?}");
+                continue;
+            };
+
+            let data = if let Some(chunk_data) = instance.get_chunk_data(request.chunk_pos) {
+                Some(chunk_data.voxels.clone())
+            } else if instance.loaded_chunks.contains(&request.chunk_pos) {
+                // Chunk was generated but is empty (all air) — tell client so it stops requesting.
+                Some(voxel_map_engine::prelude::PalettedChunk::SingleValue(
+                    WorldVoxel::Air,
+                ))
+            } else {
+                trace!("Chunk {} not yet generated", request.chunk_pos);
+                None
+            };
+
+            if let Some(data) = data {
+                if let Ok(mut sender) = senders.get_mut(client_entity) {
+                    sender.send::<ChunkChannel>(ChunkDataSync {
+                        chunk_pos: request.chunk_pos,
+                        data,
+                    });
+                }
+            }
+        }
+    }
 }
 
 pub fn handle_map_switch_requests(
@@ -422,7 +442,7 @@ pub fn handle_map_switch_requests(
     remote_ids: Query<&RemoteId>,
     mut registry: ResMut<MapRegistry>,
     mut room_registry: ResMut<RoomRegistry>,
-    map_world: Res<MapWorld>,
+    config_query: Query<&VoxelMapConfig>,
 ) {
     for (client_entity, mut receiver) in &mut receivers {
         for request in receiver.receive() {
@@ -458,7 +478,7 @@ pub fn handle_map_switch_requests(
                 &target_map_id,
                 &mut *registry,
                 &mut *room_registry,
-                &*map_world,
+                &config_query,
                 &mut senders,
             );
         }
@@ -475,6 +495,13 @@ fn resolve_switch_target(target: &MapSwitchTarget, client_id_bits: u64) -> MapIn
     }
 }
 
+/// Seed, generation_version, and bounds for a map transition message.
+struct MapTransitionParams {
+    seed: u64,
+    generation_version: u32,
+    bounds: Option<IVec3>,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn execute_server_transition(
     commands: &mut Commands,
@@ -484,7 +511,7 @@ fn execute_server_transition(
     target_map_id: &MapInstanceId,
     registry: &mut MapRegistry,
     room_registry: &mut RoomRegistry,
-    map_world: &MapWorld,
+    config_query: &Query<&VoxelMapConfig>,
     senders: &mut Query<&mut MessageSender<MapTransitionStart>>,
 ) {
     info!("Transitioning player {player_entity:?} from {current_map_id:?} to {target_map_id:?}");
@@ -518,7 +545,7 @@ fn execute_server_transition(
 
     commands.entity(player_entity).insert(target_map_id.clone());
 
-    let map_entity = ensure_map_exists(commands, target_map_id, registry, map_world);
+    let (map_entity, params) = ensure_map_exists(commands, target_map_id, registry, config_query);
     commands
         .entity(player_entity)
         .insert(ChunkTarget::new(map_entity, 4));
@@ -529,31 +556,37 @@ fn execute_server_transition(
         avian3d::prelude::LinearVelocity(Vec3::ZERO),
     ));
 
-    let (seed, bounds) = match target_map_id {
-        MapInstanceId::Overworld => (map_world.seed, None),
-        MapInstanceId::Homebase { owner } => (*owner, Some(IVec3::new(4, 4, 4))),
-    };
-
     let mut sender = senders
         .get_mut(client_entity)
         .expect("Client entity must have MessageSender<MapTransitionStart>");
     sender.send::<MapChannel>(MapTransitionStart {
         target: target_map_id.clone(),
-        seed,
-        generation_version: map_world.generation_version,
-        bounds,
+        seed: params.seed,
+        generation_version: params.generation_version,
+        bounds: params.bounds,
         spawn_position,
     });
 }
 
+/// Returns the map entity and transition params. If the map already exists,
+/// reads params from its `VoxelMapConfig`. If newly spawned, derives them
+/// from the `MapInstanceId` (the entity isn't queryable yet via commands).
 fn ensure_map_exists(
     commands: &mut Commands,
     map_id: &MapInstanceId,
     registry: &mut MapRegistry,
-    _map_world: &MapWorld,
-) -> Entity {
+    config_query: &Query<&VoxelMapConfig>,
+) -> (Entity, MapTransitionParams) {
     if let Some(&entity) = registry.0.get(map_id) {
-        return entity;
+        let config = config_query
+            .get(entity)
+            .expect("Existing map entity must have VoxelMapConfig");
+        let params = MapTransitionParams {
+            seed: config.seed,
+            generation_version: config.generation_version,
+            bounds: config.bounds,
+        };
+        return (entity, params);
     }
 
     match map_id {
@@ -564,6 +597,11 @@ fn ensure_map_exists(
             let bounds = IVec3::new(4, 4, 4);
             let (instance, config, marker) =
                 VoxelMapInstance::homebase(*owner, bounds, Arc::new(flat_terrain_voxels));
+            let params = MapTransitionParams {
+                seed: config.seed,
+                generation_version: config.generation_version,
+                bounds: config.bounds,
+            };
             let entity = commands
                 .spawn((
                     instance,
@@ -575,7 +613,7 @@ fn ensure_map_exists(
                 .id();
             registry.insert(map_id.clone(), entity);
             info!("Spawned server homebase for owner {owner}: {entity:?}");
-            entity
+            (entity, params)
         }
     }
 }

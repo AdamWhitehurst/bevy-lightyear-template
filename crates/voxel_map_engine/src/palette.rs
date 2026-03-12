@@ -1,3 +1,4 @@
+use bevy::reflect::Reflect;
 use serde::{Deserialize, Serialize};
 
 use crate::types::WorldVoxel;
@@ -19,7 +20,7 @@ fn bits_needed(count: usize) -> u8 {
 ///
 /// Compresses a fixed-size voxel array (18^3 = 5832 entries) by deduplicating
 /// voxel types into a palette and storing small indices instead of full values.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
 pub enum PalettedChunk {
     /// All voxels are the same value. Near-zero overhead.
     SingleValue(WorldVoxel),

@@ -3,13 +3,14 @@ use std::sync::Arc;
 use avian3d::prelude::{ColliderDisabled, RigidBodyDisabled};
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
+use client::map::ClientChunkState;
 use lightyear::prelude::{Controlled, DisableRollback, Predicted};
 use protocol::map::TransitionReadySent;
 use protocol::PendingTransition;
 use protocol::{CharacterMarker, MapInstanceId, MapRegistry};
 use ui::{ClientState, MapTransitionState};
 use voxel_map_engine::prelude::{
-    flat_terrain_voxels, ChunkTarget, PendingChunks, VoxelMapConfig, VoxelMapInstance,
+    flat_terrain_voxels, ChunkTarget, VoxelMapConfig, VoxelMapInstance,
 };
 
 fn transition_test_app() -> App {
@@ -35,7 +36,7 @@ fn spawn_map(app: &mut App) -> Entity {
             VoxelMapConfig::new(0, 0, 1, None, 3, Arc::new(flat_terrain_voxels)),
             Transform::default(),
             MapInstanceId::Overworld,
-            PendingChunks::default(),
+            ClientChunkState::default(),
         ))
         .id();
     app.world_mut()
@@ -99,12 +100,12 @@ fn inserts_ready_sent_after_chunks_load() {
     let map = spawn_map(&mut app);
     let player = spawn_frozen_player(&mut app, map);
 
-    // Manually simulate loaded: insert a chunk coord, leave PendingChunks empty
+    // Manually simulate received: insert a chunk coord into ClientChunkState
     app.world_mut()
         .entity_mut(map)
-        .get_mut::<VoxelMapInstance>()
+        .get_mut::<ClientChunkState>()
         .unwrap()
-        .loaded_chunks
+        .received
         .insert(IVec3::ZERO);
 
     set_transitioning(&mut app, player);

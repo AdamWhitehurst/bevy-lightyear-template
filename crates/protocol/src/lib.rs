@@ -25,10 +25,11 @@ pub use hit_detection::{
     terrain_collision_layers, GameLayer,
 };
 pub use map::{
-    attach_chunk_colliders, MapChannel, MapInstanceId, MapRegistry, MapSaveTarget, MapSwitchTarget,
-    MapTransitionEnd, MapTransitionReady, MapTransitionStart, MapWorld, PendingTransition,
-    PlayerMapSwitchRequest, SavedEntity, SavedEntityKind, TransitionReadySent, VoxelChannel,
-    VoxelChunk, VoxelEditBroadcast, VoxelEditRequest, VoxelStateSync, VoxelType,
+    attach_chunk_colliders, ChunkChannel, ChunkDataSync, ChunkRequest, ChunkUnload, MapChannel,
+    MapInstanceId, MapRegistry, MapSaveTarget, MapSwitchTarget, MapTransitionEnd,
+    MapTransitionReady, MapTransitionStart, PendingTransition, PlayerMapSwitchRequest, SavedEntity,
+    SavedEntityKind, TransitionReadySent, VoxelChannel, VoxelChunk, VoxelEditBroadcast,
+    VoxelEditRequest, VoxelType,
 };
 
 pub const PROTOCOL_ID: u64 = 0;
@@ -169,7 +170,20 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::ClientToServer);
         app.register_message::<VoxelEditBroadcast>()
             .add_direction(NetworkDirection::ServerToClient);
-        app.register_message::<VoxelStateSync>()
+
+        // Chunk streaming channel
+        app.add_channel::<ChunkChannel>(ChannelSettings {
+            mode: ChannelMode::UnorderedReliable(ReliableSettings::default()),
+            ..default()
+        })
+        .add_direction(NetworkDirection::Bidirectional);
+
+        // Chunk streaming messages
+        app.register_message::<ChunkDataSync>()
+            .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<ChunkRequest>()
+            .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<ChunkUnload>()
             .add_direction(NetworkDirection::ServerToClient);
 
         // Map transition channel
