@@ -395,7 +395,7 @@ fn test_client_server_plugin_initialization() {
     client_app.add_plugins(ClientNetworkPlugin {
         config: ClientNetworkConfig {
             client_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
-            server_addr: SocketAddr::from(([127, 0, 0, 1], 5000)),
+            server_addr: SocketAddr::from(([127, 0, 0, 1], 5560)),
             client_id: 0,
             protocol_id: PROTOCOL_ID,
             private_key: PRIVATE_KEY,
@@ -437,8 +437,8 @@ fn test_plugin_transport_configuration() {
     // Test server can be configured with multiple transports
     let config = ServerNetworkConfig {
         transports: vec![
-            ServerTransport::Udp { port: 6000 },
-            ServerTransport::WebTransport { port: 6001 },
+            ServerTransport::Udp { port: 6600 },
+            ServerTransport::WebTransport { port: 6601 },
         ],
         ..Default::default()
     };

@@ -26,7 +26,7 @@ fn test_server_creates_udp_transport() {
         .spawn((
             Name::new("UDP Server"),
             NetcodeServer::new(netcode_config),
-            LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 5000))),
+            LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 5067))),
             ServerUdpIo::default(),
         ))
         .id();
@@ -67,7 +67,7 @@ fn test_server_creates_webtransport() {
         .spawn((
             Name::new("WebTransport Server"),
             NetcodeServer::new(netcode_config),
-            LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 5001))),
+            LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 5031))),
             WebTransportServerIo {
                 certificate: wt_certificate,
             },
@@ -98,7 +98,7 @@ fn test_server_creates_websocket() {
     };
 
     let ws_config = lightyear::websocket::server::ServerConfig::builder()
-        .with_bind_address(std::net::SocketAddr::from(([0, 0, 0, 0], 5002)))
+        .with_bind_address(std::net::SocketAddr::from(([0, 0, 0, 0], 5052)))
         .with_identity(
             lightyear::websocket::server::Identity::self_signed(vec![
                 "localhost".to_string(),
@@ -112,7 +112,7 @@ fn test_server_creates_websocket() {
         .spawn((
             Name::new("WebSocket Server"),
             NetcodeServer::new(netcode_config),
-            LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 5002))),
+            LocalAddr(std::net::SocketAddr::from(([0, 0, 0, 0], 5042))),
             WebSocketServerIo { config: ws_config },
         ))
         .id();

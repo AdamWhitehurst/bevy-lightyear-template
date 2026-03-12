@@ -61,7 +61,7 @@ fn sync_ability_manifest(defs: Option<Res<AbilityDefs>>, mut last_len: Local<usi
 fn spawn_dummy_target(mut commands: Commands, registry: Res<MapRegistry>) {
     commands.spawn((
         Name::new("DummyTarget"),
-        Position(Vec3::new(3.0, 30.0, 0.0)),
+        Position(Vec3::new(10.0, 5.0, 0.0)),
         Rotation::default(),
         Replicate::to_clients(NetworkTarget::All),
         PredictionTarget::to_clients(NetworkTarget::All),
@@ -198,7 +198,7 @@ fn handle_connected(
         .spawn((
             Name::new("Character"),
             PlayerId(peer_id),
-            Position(Vec3::new(x, 30.0, z)),
+            Position(Vec3::new(x, 5.0, z)),
             Rotation::default(),
             ActionState::<PlayerActions>::default(),
             Replicate::to_clients(NetworkTarget::All),

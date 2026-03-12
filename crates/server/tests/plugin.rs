@@ -114,7 +114,7 @@ fn test_server_network_plugin_single_transport() {
 
     // Add plugin with only UDP transport
     let config = ServerNetworkConfig {
-        transports: vec![ServerTransport::Udp { port: 6000 }],
+        transports: vec![ServerTransport::Udp { port: 6700 }],
         ..Default::default()
     };
     app.add_plugins(ServerNetworkPlugin { config });

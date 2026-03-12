@@ -16,7 +16,7 @@ fn test_client_connects_to_server() {
 
     // Spawn client entity with UDP transport
     let client_addr = std::net::SocketAddr::from(([0, 0, 0, 0], 0));
-    let server_addr = std::net::SocketAddr::from(([127, 0, 0, 1], 5000));
+    let server_addr = std::net::SocketAddr::from(([127, 0, 0, 1], 5020));
 
     let auth = Authentication::Manual {
         server_addr,
@@ -60,7 +60,7 @@ fn test_client_has_ping_manager() {
     app.add_plugins(protocol::ProtocolPlugin);
 
     let client_addr = std::net::SocketAddr::from(([0, 0, 0, 0], 0));
-    let server_addr = std::net::SocketAddr::from(([127, 0, 0, 1], 5000));
+    let server_addr = std::net::SocketAddr::from(([127, 0, 0, 1], 5030));
 
     let auth = Authentication::Manual {
         server_addr,
