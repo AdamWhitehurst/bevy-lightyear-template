@@ -1,6 +1,6 @@
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
-use lightyear::prelude::{Replicate, ReplicationSender, Room, RoomEvent, RoomPlugin, RoomTarget};
+use lightyear::prelude::{ReplicationSender, Room, RoomEvent, RoomPlugin, RoomTarget};
 use protocol::MapInstanceId;
 use server::map::RoomRegistry;
 
@@ -29,8 +29,6 @@ fn add_map_observer(app: &mut App) {
         },
     );
 }
-
-// --- RoomRegistry tests ---
 
 #[test]
 fn registry_creates_room_on_first_access() {
@@ -108,8 +106,6 @@ fn registry_distinguishes_homebase_owners() {
         .unwrap();
 }
 
-// --- Observer tests ---
-
 #[test]
 fn observer_adds_entity_to_room() {
     let mut app = room_test_app();
@@ -156,8 +152,6 @@ fn observer_routes_entities_to_correct_rooms() {
     assert!(!hb_room.entities.contains(&overworld_ent));
 }
 
-// --- Room membership tests (using lightyear Room API directly) ---
-
 #[test]
 fn sender_added_to_room_via_event() {
     let mut app = room_test_app();
@@ -180,8 +174,7 @@ fn entity_added_to_room_via_event() {
     let mut app = room_test_app();
 
     let room_entity = app.world_mut().spawn(Room::default()).id();
-    let sender = app.world_mut().spawn(ReplicationSender::default()).id();
-    let entity = app.world_mut().spawn(Replicate::manual(vec![sender])).id();
+    let entity = app.world_mut().spawn_empty().id();
 
     app.world_mut().trigger(RoomEvent {
         room: room_entity,
@@ -199,18 +192,9 @@ fn same_frame_room_transfer_moves_entity() {
 
     let room_a = app.world_mut().spawn(Room::default()).id();
     let room_b = app.world_mut().spawn(Room::default()).id();
-    let sender = app.world_mut().spawn(ReplicationSender::default()).id();
-    let entity = app.world_mut().spawn(Replicate::manual(vec![sender])).id();
+    let entity = app.world_mut().spawn_empty().id();
 
-    // Sender in both rooms, entity starts in room A.
-    app.world_mut().trigger(RoomEvent {
-        room: room_a,
-        target: RoomTarget::AddSender(sender),
-    });
-    app.world_mut().trigger(RoomEvent {
-        room: room_b,
-        target: RoomTarget::AddSender(sender),
-    });
+    // Entity starts in room A.
     app.world_mut().trigger(RoomEvent {
         room: room_a,
         target: RoomTarget::AddEntity(entity),
