@@ -1,10 +1,13 @@
 use bevy::prelude::*;
 use ndshape::ConstShape;
 use server::map::save_dirty_chunks_for_instance;
-use server::persistence::{load_map_meta, map_save_dir, save_map_meta, MapMeta};
+use server::persistence::{
+    load_entities, load_map_meta, map_save_dir, save_entities, save_map_meta, MapMeta,
+};
 use voxel_map_engine::persistence as chunk_persist;
 use voxel_map_engine::prelude::*;
 
+use protocol::map::{SavedEntity, SavedEntityKind};
 use protocol::MapInstanceId;
 
 #[test]
@@ -153,6 +156,96 @@ fn meta_and_chunks_coexist_in_map_directory() {
     // Both should exist and load independently
     assert!(map_dir.join("map.meta.bin").exists());
     assert!(map_dir.join("terrain").exists());
+
+    let loaded_meta = load_map_meta(&map_dir).unwrap().expect("meta exists");
+    assert_eq!(loaded_meta.seed, 42);
+
+    let loaded_chunk = chunk_persist::load_chunk(&map_dir, IVec3::ZERO)
+        .unwrap()
+        .expect("chunk exists");
+    assert_eq!(loaded_chunk.voxels.get(0), WorldVoxel::Solid(1));
+}
+
+#[test]
+fn entities_persist_across_server_restart() {
+    let tmp = tempfile::tempdir().unwrap();
+    let map_dir = tmp.path().join("overworld");
+
+    // First run: save respawn points and metadata
+    {
+        let entities = vec![
+            SavedEntity {
+                kind: SavedEntityKind::RespawnPoint,
+                position: Vec3::new(0.0, 5.0, 0.0),
+            },
+            SavedEntity {
+                kind: SavedEntityKind::RespawnPoint,
+                position: Vec3::new(10.0, 20.0, 30.0),
+            },
+        ];
+        save_entities(&map_dir, &entities).expect("save entities");
+
+        let meta = MapMeta {
+            version: 1,
+            seed: 999,
+            generation_version: 0,
+            spawn_points: vec![Vec3::new(0.0, 5.0, 0.0), Vec3::new(10.0, 20.0, 30.0)],
+        };
+        save_map_meta(&map_dir, &meta).expect("save meta");
+    }
+
+    // Verify entities.bin exists on disk
+    assert!(map_dir.join("entities.bin").exists());
+
+    // Second run: verify entities load correctly from disk
+    {
+        let loaded = load_entities(&map_dir).expect("load entities");
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0].kind, SavedEntityKind::RespawnPoint);
+        assert_eq!(loaded[0].position, Vec3::new(0.0, 5.0, 0.0));
+        assert_eq!(loaded[1].position, Vec3::new(10.0, 20.0, 30.0));
+
+        let meta = load_map_meta(&map_dir)
+            .expect("load meta")
+            .expect("meta should exist");
+        assert_eq!(meta.spawn_points.len(), 2);
+        assert!(meta.spawn_points.contains(&Vec3::new(0.0, 5.0, 0.0)));
+        assert!(meta.spawn_points.contains(&Vec3::new(10.0, 20.0, 30.0)));
+    }
+}
+
+#[test]
+fn entities_and_chunks_coexist_in_map_directory() {
+    let tmp = tempfile::tempdir().unwrap();
+    let map_dir = tmp.path().join("overworld");
+
+    // Save entities
+    let entities = vec![SavedEntity {
+        kind: SavedEntityKind::RespawnPoint,
+        position: Vec3::new(5.0, 10.0, 15.0),
+    }];
+    save_entities(&map_dir, &entities).unwrap();
+
+    // Save a chunk
+    let voxels = vec![WorldVoxel::Solid(1); PaddedChunkShape::USIZE];
+    chunk_persist::save_chunk(&map_dir, IVec3::ZERO, &ChunkData::from_voxels(&voxels)).unwrap();
+
+    // Save metadata
+    let meta = MapMeta {
+        version: 1,
+        seed: 42,
+        generation_version: 0,
+        spawn_points: vec![Vec3::new(5.0, 10.0, 15.0)],
+    };
+    save_map_meta(&map_dir, &meta).unwrap();
+
+    // All three coexist and load independently
+    assert!(map_dir.join("entities.bin").exists());
+    assert!(map_dir.join("map.meta.bin").exists());
+    assert!(map_dir.join("terrain").exists());
+
+    let loaded_entities = load_entities(&map_dir).unwrap();
+    assert_eq!(loaded_entities.len(), 1);
 
     let loaded_meta = load_map_meta(&map_dir).unwrap().expect("meta exists");
     assert_eq!(loaded_meta.seed, 42);

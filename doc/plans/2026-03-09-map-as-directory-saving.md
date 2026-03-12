@@ -2529,7 +2529,7 @@ fn entities_persist_across_server_restart() {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] All tests pass: `cargo test-all`
+- [x] All tests pass: `cargo test-all`
 - [ ] Server builds and runs: `cargo server`
 - [ ] Client builds and runs: `cargo client -c 1`
 
@@ -2538,6 +2538,10 @@ fn entities_persist_across_server_restart() {
 - [ ] Respawn points persist across server restart
 - [ ] Death/respawn uses loaded respawn points correctly (nearest_respawn_pos finds them)
 - [ ] `worlds/overworld/map.meta.bin` contains correct spawn_points list
+
+**Note:** Phase 3 manual verification items also apply and should be re-verified:
+- [ ] Start server, place blocks, stop server → `worlds/overworld/terrain/` contains chunk files
+- [ ] Restart server → placed blocks are still there
 
 ---
 

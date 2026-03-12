@@ -142,6 +142,23 @@ pub struct MapTransitionEnd;
 #[derive(Component)]
 pub struct TransitionReadySent;
 
+/// Marker: this entity should be saved with its map.
+#[derive(Component, Clone, Debug, Default)]
+pub struct MapSaveTarget;
+
+/// Identifies the type of a saved entity for reconstruction.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub enum SavedEntityKind {
+    RespawnPoint,
+}
+
+/// A single entity serialized for persistence.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SavedEntity {
+    pub kind: SavedEntityKind,
+    pub position: Vec3,
+}
+
 /// Attaches trimesh colliders to voxel chunks whenever their mesh changes.
 /// Inherits `MapInstanceId` from the parent map entity.
 pub fn attach_chunk_colliders(

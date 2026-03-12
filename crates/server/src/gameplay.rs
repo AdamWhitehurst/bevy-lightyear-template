@@ -7,8 +7,7 @@ use lightyear::prelude::server::ClientOf;
 use lightyear::prelude::*;
 use protocol::*;
 
-use crate::map::spawn_overworld;
-use crate::persistence::{load_map_meta, map_save_dir, WorldSavePath};
+use crate::map::load_startup_entities;
 use voxel_map_engine::prelude::ChunkTarget;
 
 /// Default spawn position used for respawning and initial player placement.
@@ -21,7 +20,7 @@ impl Plugin for ServerGameplayPlugin {
         app.add_observer(handle_connected);
         app.add_systems(
             Startup,
-            (spawn_dummy_target, spawn_respawn_points).after(spawn_overworld),
+            (spawn_dummy_target, validate_respawn_points).after(load_startup_entities),
         );
         app.add_systems(FixedUpdate, handle_character_movement);
         app.add_systems(
@@ -111,16 +110,19 @@ fn handle_character_movement(
     }
 }
 
-/// Load spawn points from disk metadata; fall back to DEFAULT_SPAWN_POS on first run.
-fn spawn_respawn_points(mut commands: Commands, save_path: Res<WorldSavePath>) {
-    let map_dir = map_save_dir(&save_path.0, &MapInstanceId::Overworld);
-    let spawn_points = match load_map_meta(&map_dir) {
-        Ok(Some(meta)) if !meta.spawn_points.is_empty() => meta.spawn_points,
-        _ => vec![DEFAULT_SPAWN_POS],
-    };
-
-    for pos in spawn_points {
-        commands.spawn((RespawnPoint, Position(pos), MapInstanceId::Overworld));
+/// Ensures every registered map has at least one respawn point.
+/// On first run (no save), spawns a default. On subsequent runs, loaded from disk.
+fn validate_respawn_points(
+    mut commands: Commands,
+    existing: Query<(&RespawnPoint, &MapInstanceId)>,
+    map_registry: Res<MapRegistry>,
+) {
+    for (map_id, _entity) in map_registry.0.iter() {
+        let has_respawn = existing.iter().any(|(_, mid)| mid == map_id);
+        if !has_respawn {
+            info!("Map {map_id:?} has no respawn points — spawning default");
+            commands.spawn((RespawnPoint, Position(DEFAULT_SPAWN_POS), map_id.clone()));
+        }
     }
 }
 
@@ -209,13 +211,12 @@ fn handle_connected(
         .find(|(_, mid)| **mid == MapInstanceId::Overworld)
         .map(|(p, _)| p.0)
         .unwrap_or(DEFAULT_SPAWN_POS);
-    let start_pos = Vec3::new(spawn_pos.x, spawn_pos.y + 25.0, spawn_pos.z);
 
     commands
         .spawn((
             Name::new("Character"),
             PlayerId(peer_id),
-            Position(start_pos),
+            Position(spawn_pos),
             Rotation::default(),
             ActionState::<PlayerActions>::default(),
             Replicate::to_clients(NetworkTarget::All),

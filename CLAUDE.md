@@ -21,7 +21,10 @@
 
 ## Project-specific Rules
 
-- **[HIGHEST]** NEVER run multiple `cargo build`, `cargo check`, or `cargo test` commands in parallel (not in background, not in separate tasks). Each build consumes the full machine. Running two simultaneously causes memory thrashing and can crash the system. Always wait for one to finish before starting the next.
+- **[HIGHEST]** NEVER run multiple `cargo build`, `cargo check`, or `cargo test` commands in parallel
+  - not in background, not in separate tasks
+  - **[MANDATORY]** Before running ANY `build`/`check`/`test`, you must check if there is a running `build`/`check`/`test`. If there is, you MUST either wait for it to finish or kill it first.
+  - Each build consumes the full machine. Running two simultaneously causes memory thrashing and can crash the system. Always wait for one to finish before starting the next
 - Use cargo alias commands whenever possible, instead of `cargo make` commands or custom cargo commands
 - Run the commands explicitly specified by plan documents
 - **[HIGH]** After making code changes, MUST review README.md and update it if the changes affect documented features, commands, architecture, or

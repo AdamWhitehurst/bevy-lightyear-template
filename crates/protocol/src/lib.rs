@@ -25,10 +25,10 @@ pub use hit_detection::{
     terrain_collision_layers, GameLayer,
 };
 pub use map::{
-    attach_chunk_colliders, MapChannel, MapInstanceId, MapRegistry, MapSwitchTarget,
+    attach_chunk_colliders, MapChannel, MapInstanceId, MapRegistry, MapSaveTarget, MapSwitchTarget,
     MapTransitionEnd, MapTransitionReady, MapTransitionStart, MapWorld, PendingTransition,
-    PlayerMapSwitchRequest, TransitionReadySent, VoxelChannel, VoxelChunk, VoxelEditBroadcast,
-    VoxelEditRequest, VoxelStateSync, VoxelType,
+    PlayerMapSwitchRequest, SavedEntity, SavedEntityKind, TransitionReadySent, VoxelChannel,
+    VoxelChunk, VoxelEditBroadcast, VoxelEditRequest, VoxelStateSync, VoxelType,
 };
 
 pub const PROTOCOL_ID: u64 = 0;
@@ -83,6 +83,7 @@ pub enum CharacterType {
 
 /// Marks a respawn location. Server-only, not replicated.
 #[derive(Component, Clone, Debug)]
+#[require(MapSaveTarget)]
 pub struct RespawnPoint;
 
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-use avian3d::prelude::{ColliderDisabled, RigidBodyDisabled};
+use avian3d::prelude::{ColliderDisabled, Position, RigidBodyDisabled};
 use bevy::app::AppExit;
 use bevy::prelude::*;
 use lightyear::prelude::{
@@ -22,7 +22,12 @@ use voxel_map_engine::prelude::{
     WorldVoxel,
 };
 
-use crate::persistence::{load_map_meta, map_save_dir, save_map_meta, MapMeta, WorldSavePath};
+use crate::persistence::{
+    load_entities, load_map_meta, map_save_dir, save_entities, save_map_meta, MapMeta,
+    WorldSavePath,
+};
+use protocol::map::{MapSaveTarget, SavedEntity, SavedEntityKind};
+use protocol::RespawnPoint;
 use voxel_map_engine::persistence as chunk_persist;
 
 /// Plugin managing server-side voxel map functionality.
@@ -112,7 +117,15 @@ pub fn spawn_overworld(
 fn save_dirty_chunks_debounced(
     time: Res<Time>,
     mut dirty_state: ResMut<WorldDirtyState>,
+    save_path: Res<WorldSavePath>,
     mut map_query: Query<(&mut VoxelMapInstance, &VoxelMapConfig, &MapInstanceId)>,
+    entity_query: Query<(
+        &MapSaveTarget,
+        &MapInstanceId,
+        &Position,
+        Option<&RespawnPoint>,
+    )>,
+    respawn_query: Query<(&Position, &MapInstanceId), With<RespawnPoint>>,
 ) {
     if !dirty_state.is_dirty {
         return;
@@ -137,16 +150,23 @@ fn save_dirty_chunks_debounced(
 
         save_dirty_chunks_for_instance(&mut instance, map_dir);
 
+        let spawn_points: Vec<Vec3> = respawn_query
+            .iter()
+            .filter(|(_, mid)| *mid == map_id)
+            .map(|(pos, _)| pos.0)
+            .collect();
         let meta = MapMeta {
             version: 1,
             seed: config.seed,
             generation_version: config.generation_version,
-            spawn_points: vec![], // Phase 4 will populate from RespawnPoint entities
+            spawn_points,
         };
         if let Err(e) = save_map_meta(map_dir, &meta) {
             error!("Failed to save map meta for {map_id:?}: {e}");
         }
     }
+
+    collect_and_save_entities(&save_path, &entity_query);
 
     dirty_state.is_dirty = false;
     dirty_state.first_dirty_time = None;
@@ -169,6 +189,14 @@ pub fn save_world_on_shutdown(
     mut exit_reader: MessageReader<AppExit>,
     mut map_query: Query<(&mut VoxelMapInstance, &VoxelMapConfig, &MapInstanceId)>,
     dirty_state: Res<WorldDirtyState>,
+    save_path: Res<WorldSavePath>,
+    entity_query: Query<(
+        &MapSaveTarget,
+        &MapInstanceId,
+        &Position,
+        Option<&RespawnPoint>,
+    )>,
+    respawn_query: Query<(&Position, &MapInstanceId), With<RespawnPoint>>,
 ) {
     if exit_reader.is_empty() {
         return;
@@ -185,17 +213,101 @@ pub fn save_world_on_shutdown(
         };
         save_dirty_chunks_for_instance(&mut instance, map_dir);
 
+        let spawn_points: Vec<Vec3> = respawn_query
+            .iter()
+            .filter(|(_, mid)| *mid == map_id)
+            .map(|(pos, _)| pos.0)
+            .collect();
         let meta = MapMeta {
             version: 1,
             seed: config.seed,
             generation_version: config.generation_version,
-            spawn_points: vec![],
+            spawn_points,
         };
         if let Err(e) = save_map_meta(map_dir, &meta) {
             error!("Failed to save meta on shutdown for {map_id:?}: {e}");
         }
     }
+
+    collect_and_save_entities(&save_path, &entity_query);
     info!("World saved on shutdown");
+}
+
+/// Collect all persistable entities grouped by map and save to disk.
+fn collect_and_save_entities(
+    save_path: &WorldSavePath,
+    entity_query: &Query<(
+        &MapSaveTarget,
+        &MapInstanceId,
+        &Position,
+        Option<&RespawnPoint>,
+    )>,
+) {
+    let mut by_map: HashMap<MapInstanceId, Vec<SavedEntity>> = HashMap::new();
+
+    for item in entity_query.iter() {
+        let (_marker, map_id, position, respawn): (
+            &MapSaveTarget,
+            &MapInstanceId,
+            &Position,
+            Option<&RespawnPoint>,
+        ) = item;
+        let kind = if respawn.is_some() {
+            SavedEntityKind::RespawnPoint
+        } else {
+            debug_assert!(
+                false,
+                "Entity with MapSaveTarget has no recognized SavedEntityKind"
+            );
+            continue;
+        };
+
+        by_map.entry(map_id.clone()).or_default().push(SavedEntity {
+            kind,
+            position: position.0,
+        });
+    }
+
+    for (map_id, entities) in &by_map {
+        let map_dir = map_save_dir(&save_path.0, map_id);
+        if let Err(e) = save_entities(&map_dir, entities) {
+            error!("Failed to save entities for {map_id:?}: {e}");
+        }
+    }
+}
+
+/// Load entities from disk for a map and spawn them in the ECS.
+fn load_map_entities(
+    commands: &mut Commands,
+    save_path: &WorldSavePath,
+    map_id: &MapInstanceId,
+) -> usize {
+    let map_dir = map_save_dir(&save_path.0, map_id);
+    let entities = match load_entities(&map_dir) {
+        Ok(entities) => entities,
+        Err(e) => {
+            warn!("Failed to load entities for {map_id:?}: {e}");
+            return 0;
+        }
+    };
+
+    let count = entities.len();
+    for saved in entities {
+        match saved.kind {
+            SavedEntityKind::RespawnPoint => {
+                commands.spawn((RespawnPoint, Position(saved.position), map_id.clone()));
+            }
+        }
+    }
+    count
+}
+
+/// Load persisted entities for the overworld on startup.
+pub fn load_startup_entities(mut commands: Commands, save_path: Res<WorldSavePath>) {
+    let count = load_map_entities(&mut commands, &save_path, &MapInstanceId::Overworld);
+    if count > 0 {
+        info!("Loaded {count} entities for overworld");
+    }
 }
 
 fn on_map_instance_id_added(
@@ -225,7 +337,7 @@ impl Plugin for ServerMapPlugin {
             .init_resource::<VoxelModifications>() // Keep until Phase 5
             .init_resource::<WorldDirtyState>()
             .init_resource::<WorldSavePath>()
-            .add_systems(Startup, spawn_overworld)
+            .add_systems(Startup, (spawn_overworld, load_startup_entities).chain())
             .add_systems(
                 Update,
                 (
