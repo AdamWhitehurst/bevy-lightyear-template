@@ -6,8 +6,8 @@ use avian3d::prelude::{ColliderDisabled, Position, RigidBodyDisabled};
 use bevy::app::AppExit;
 use bevy::prelude::*;
 use lightyear::prelude::{
-    ControlledBy, DisableRollback, MessageReceiver, MessageSender, RemoteId, Room, RoomEvent,
-    RoomTarget, ServerMultiMessageSender,
+    ControlledBy, DisableRollback, MessageReceiver, MessageSender, NetworkVisibility, RemoteId,
+    Room, RoomEvent, RoomTarget, ServerMultiMessageSender,
 };
 use protocol::map::{
     MapChannel, MapSwitchTarget, MapTransitionEnd, MapTransitionReady, MapTransitionStart,
@@ -331,6 +331,7 @@ fn on_map_instance_id_added(
         .get(entity)
         .expect("Entity with MapInstanceId trigger must have MapInstanceId");
     let room = room_registry.get_or_create(map_id, &mut commands);
+    commands.entity(entity).try_insert(NetworkVisibility);
     commands.trigger(RoomEvent {
         room,
         target: RoomTarget::AddEntity(entity),

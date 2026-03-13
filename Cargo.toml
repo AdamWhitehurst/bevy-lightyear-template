@@ -34,7 +34,7 @@ avian3d = { version = "0.5.0", default-features = false, features = ["3d", "f32"
 bevy = { version = "0.18", default-features = false }
 leafwing-input-manager = "0.20"
 voxel_map_engine = { path = "crates/voxel_map_engine" }
-lightyear = { version = "0.26.0", features = ["leafwing", "raw_connection"] }
+lightyear = { git = "https://github.com/AdamWhitehurst/lightyear", branch = "main", features = ["leafwing", "raw_connection"]}
 protocol = { path = "crates/protocol" }
 ron = "0.12"
 bevy_common_assets = { version = "0.15", features = ["ron"] }

@@ -3,7 +3,7 @@
 	url = https://github.com/bevyengine/bevy.git
 [submodule "git/lightyear"]
 	path = git/lightyear
-	url = https://github.com/cBournhonesque/lightyear.git
+	url = https://github.com/AdamWhitehurst/lightyear.git
 [submodule "git/avian"]
 	path = git/avian
 	url = https://github.com/Jondolf/avian.git

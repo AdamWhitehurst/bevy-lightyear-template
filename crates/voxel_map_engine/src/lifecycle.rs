@@ -48,9 +48,11 @@ pub fn ensure_pending_chunks(
     remesh_query: Query<Entity, (With<VoxelMapInstance>, Without<PendingRemeshes>)>,
 ) {
     for entity in &chunks_query {
+        info!("ensure_pending_chunks: adding PendingChunks to {entity:?}");
         commands.entity(entity).insert(PendingChunks::default());
     }
     for entity in &remesh_query {
+        info!("ensure_pending_chunks: adding PendingRemeshes to {entity:?}");
         commands.entity(entity).insert(PendingRemeshes::default());
     }
 }
@@ -66,9 +68,22 @@ pub fn update_chunks(
         &GlobalTransform,
     )>,
     target_query: Query<(&ChunkTarget, &GlobalTransform)>,
+    mut tick: Local<u32>,
 ) {
+    let map_count = map_query.iter().count();
+    *tick += 1;
+    if map_count > 0 && *tick % 300 == 0 {
+        trace!("update_chunks: iterating {map_count} map(s)");
+    }
     for (map_entity, mut instance, config, mut pending, map_transform) in &mut map_query {
         let desired = collect_desired_positions(map_entity, map_transform, config, &target_query);
+
+        if desired.is_empty() && !instance.loaded_chunks.is_empty() {
+            info!(
+                "update_chunks: map {map_entity:?} has {} loaded chunks but 0 desired — will clean up",
+                instance.loaded_chunks.len()
+            );
+        }
 
         remove_out_of_range_chunks(&mut instance, &desired, config.save_dir.as_deref());
         if config.generates_chunks {
@@ -296,6 +311,10 @@ pub fn despawn_out_of_range_chunks(
         };
 
         if !instance.loaded_chunks.contains(&chunk.position) {
+            info!(
+                "despawn_out_of_range_chunks: despawning chunk {:?} at {:?} (parent map {:?})",
+                entity, chunk.position, child_of.0
+            );
             commands.entity(entity).despawn();
         }
     }

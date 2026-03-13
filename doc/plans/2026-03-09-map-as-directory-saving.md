@@ -2884,7 +2884,7 @@ fn test_client_requests_chunk_and_receives_data() {
 - [ ] Client builds and runs: `cargo client -c 1`
 
 #### Manual Verification:
-- [ ] Client renders terrain received from server (no local generation)
+- [x] Client renders terrain received from server (no local generation)
 - [ ] Moving to new areas loads new chunks from server
 - [ ] Chunks unload when leaving view range
 - [ ] Map transitions work — new map's chunks stream from server
