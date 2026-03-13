@@ -64,18 +64,33 @@ mod tests {
     }
 }
 
-/// Client requests a voxel edit (admin only)
+/// Client requests a voxel edit (admin only).
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
 pub struct VoxelEditRequest {
     pub position: IVec3,
     pub voxel: VoxelType,
+    pub sequence: u32,
 }
 
-/// Server broadcasts voxel edit to all clients
+/// Server broadcasts voxel edit to all clients.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
 pub struct VoxelEditBroadcast {
     pub position: IVec3,
     pub voxel: VoxelType,
+}
+
+/// Server acknowledges a block edit up to this sequence number.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+pub struct VoxelEditAck {
+    pub sequence: u32,
+}
+
+/// Server rejects a block edit — client must roll back.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+pub struct VoxelEditReject {
+    pub sequence: u32,
+    pub position: IVec3,
+    pub correct_voxel: VoxelType,
 }
 
 /// Channel for map transition messages

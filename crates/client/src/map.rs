@@ -8,8 +8,8 @@ use lightyear::prelude::{Controlled, DisableRollback, MessageReceiver, MessageSe
 use protocol::map::{MapChannel, MapTransitionEnd, MapTransitionReady, MapTransitionStart};
 use protocol::{
     CharacterMarker, ChunkChannel, ChunkDataSync, ChunkRequest, ChunkUnload, MapInstanceId,
-    MapRegistry, PendingTransition, PlayerActions, TransitionReadySent, VoxelChannel,
-    VoxelEditBroadcast, VoxelEditRequest, VoxelType,
+    MapRegistry, PendingTransition, PlayerActions, TransitionReadySent, VoxelChannel, VoxelEditAck,
+    VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
 };
 use ui::MapTransitionState;
 use voxel_map_engine::prelude::{
@@ -40,6 +40,30 @@ impl Default for ClientChunkState {
     }
 }
 
+/// Tracks pending predictions for block edits awaiting server acknowledgment.
+#[derive(Resource, Default)]
+pub struct VoxelPredictionState {
+    pub next_sequence: u32,
+    pub pending: Vec<VoxelPrediction>,
+}
+
+/// A single pending block edit prediction awaiting server acknowledgment.
+pub struct VoxelPrediction {
+    pub sequence: u32,
+    pub position: IVec3,
+    pub old_voxel: VoxelType,
+    pub new_voxel: VoxelType,
+}
+
+impl VoxelPredictionState {
+    /// Returns the next sequence number, incrementing the counter.
+    pub fn next(&mut self) -> u32 {
+        let seq = self.next_sequence;
+        self.next_sequence += 1;
+        seq
+    }
+}
+
 /// Plugin managing client-side voxel map functionality.
 pub struct ClientMapPlugin;
 
@@ -47,12 +71,15 @@ impl Plugin for ClientMapPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(VoxelPlugin)
             .init_resource::<MapRegistry>()
+            .init_resource::<VoxelPredictionState>()
             .add_systems(Startup, spawn_overworld)
             .add_systems(
                 Update,
                 (
                     attach_chunk_target_to_player,
                     handle_voxel_broadcasts,
+                    handle_voxel_edit_ack,
+                    handle_voxel_edit_reject,
                     request_missing_chunks,
                     handle_chunk_data_sync,
                     handle_chunk_unload,
@@ -62,7 +89,9 @@ impl Plugin for ClientMapPlugin {
             )
             .add_systems(
                 PostUpdate,
-                handle_voxel_input.after(TransformSystems::Propagate),
+                handle_voxel_input
+                    .run_if(in_state(ui::ClientState::InGame))
+                    .after(TransformSystems::Propagate),
             )
             .add_systems(Update, handle_map_transition_start)
             .add_systems(
@@ -287,16 +316,35 @@ fn handle_chunk_unload(
     }
 }
 
+/// Applies voxel edit broadcasts from the server, skipping positions with pending predictions.
 fn handle_voxel_broadcasts(
     mut receiver: Query<&mut MessageReceiver<VoxelEditBroadcast>>,
-    player_query: Query<&ChunkTarget, (With<Predicted>, With<CharacterMarker>)>,
+    player_query: Query<&ChunkTarget, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
     mut voxel_world: VoxelWorld,
+    prediction_state: Res<VoxelPredictionState>,
 ) {
     let Ok(chunk_target) = player_query.single() else {
+        trace!("handle_voxel_broadcasts: no predicted player with ChunkTarget");
         return;
     };
     for mut message_receiver in receiver.iter_mut() {
         for broadcast in message_receiver.receive() {
+            let has_pending_prediction = prediction_state
+                .pending
+                .iter()
+                .any(|p| p.position == broadcast.position);
+            if has_pending_prediction {
+                trace!(
+                    "handle_voxel_broadcasts: skipping broadcast at {:?} (pending prediction)",
+                    broadcast.position
+                );
+                continue;
+            }
+
+            debug!(
+                "handle_voxel_broadcasts: applying broadcast at {:?} voxel={:?}",
+                broadcast.position, broadcast.voxel
+            );
             voxel_world.set_voxel(
                 chunk_target.map_entity,
                 broadcast.position,
@@ -307,17 +355,20 @@ fn handle_voxel_broadcasts(
 }
 
 fn handle_voxel_input(
-    player_query: Query<&ChunkTarget, (With<Predicted>, With<CharacterMarker>)>,
-    voxel_world: VoxelWorld,
+    player_query: Query<&ChunkTarget, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    mut voxel_world: VoxelWorld,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     action_query: Query<&ActionState<PlayerActions>, With<Controlled>>,
-    message_sender: Query<&mut MessageSender<VoxelEditRequest>>,
+    mut message_sender: Query<&mut MessageSender<VoxelEditRequest>>,
+    mut prediction_state: ResMut<VoxelPredictionState>,
 ) {
     let Ok(chunk_target) = player_query.single() else {
+        trace!("handle_voxel_input: no predicted player with ChunkTarget");
         return;
     };
     let Ok(action_state) = action_query.single() else {
+        trace!("handle_voxel_input: no entity with ActionState + Controlled");
         return;
     };
 
@@ -328,20 +379,47 @@ fn handle_voxel_input(
     }
 
     let Some(ray) = camera_ray(&camera_query, &window_query) else {
+        warn!("handle_voxel_input: no camera ray (no cursor position?)");
         return;
     };
 
     let Some(hit) = voxel_world.raycast(chunk_target.map_entity, ray, RAYCAST_MAX_DISTANCE, |v| {
         matches!(v, WorldVoxel::Solid(_))
     }) else {
+        debug!("handle_voxel_input: raycast hit nothing");
         return;
     };
 
-    if removing {
-        send_voxel_edit(hit.position, VoxelType::Air, message_sender);
+    let (position, voxel) = if removing {
+        (hit.position, VoxelType::Air)
     } else if let Some(normal) = hit.normal {
-        let place_pos = hit.position + normal.as_ivec3();
-        send_voxel_edit(place_pos, VoxelType::Solid(0), message_sender);
+        (hit.position + normal.as_ivec3(), VoxelType::Solid(0))
+    } else {
+        debug!("handle_voxel_input: place hit has no normal");
+        return;
+    };
+
+    let sequence = prediction_state.next();
+    let old_voxel = voxel_world
+        .get_voxel(chunk_target.map_entity, position)
+        .into();
+
+    voxel_world.set_voxel(chunk_target.map_entity, position, WorldVoxel::from(voxel));
+
+    prediction_state.pending.push(VoxelPrediction {
+        sequence,
+        position,
+        old_voxel,
+        new_voxel: voxel,
+    });
+
+    for mut sender in message_sender.iter_mut() {
+        debug!("Sending voxel edit request to server: {:?}", position);
+        sender.send::<VoxelChannel>(VoxelEditRequest {
+            position,
+            voxel,
+            sequence,
+        });
     }
 }
 
@@ -363,15 +441,52 @@ fn camera_ray(
         .ok()
 }
 
-/// Send a voxel edit request to the server.
-pub fn send_voxel_edit(
-    position: IVec3,
-    voxel: VoxelType,
-    mut message_sender: Query<&mut MessageSender<VoxelEditRequest>>,
+/// Processes server acknowledgments, clearing confirmed predictions.
+fn handle_voxel_edit_ack(
+    mut receivers: Query<&mut MessageReceiver<VoxelEditAck>>,
+    mut prediction_state: ResMut<VoxelPredictionState>,
 ) {
-    for mut sender in message_sender.iter_mut() {
-        debug!("Sending voxel edit request to server: {:?}", position);
-        sender.send::<VoxelChannel>(VoxelEditRequest { position, voxel });
+    for mut receiver in &mut receivers {
+        for ack in receiver.receive() {
+            debug!(
+                "handle_voxel_edit_ack: ack seq={}, clearing {} pending",
+                ack.sequence,
+                prediction_state.pending.len()
+            );
+            prediction_state
+                .pending
+                .retain(|p| p.sequence > ack.sequence);
+        }
+    }
+}
+
+/// Processes server rejections, rolling back the predicted voxel to the correct value.
+fn handle_voxel_edit_reject(
+    mut receivers: Query<&mut MessageReceiver<VoxelEditReject>>,
+    mut prediction_state: ResMut<VoxelPredictionState>,
+    mut voxel_world: VoxelWorld,
+    player_query: Query<&ChunkTarget, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+) {
+    let Ok(chunk_target) = player_query.single() else {
+        trace!("handle_voxel_edit_reject: no predicted player");
+        return;
+    };
+
+    for mut receiver in &mut receivers {
+        for reject in receiver.receive() {
+            warn!(
+                "handle_voxel_edit_reject: rejected seq={} at {:?}, correct={:?}",
+                reject.sequence, reject.position, reject.correct_voxel
+            );
+            voxel_world.set_voxel(
+                chunk_target.map_entity,
+                reject.position,
+                WorldVoxel::from(reject.correct_voxel),
+            );
+            prediction_state
+                .pending
+                .retain(|p| p.sequence != reject.sequence);
+        }
     }
 }
 
@@ -379,15 +494,20 @@ pub fn handle_map_transition_start(
     mut commands: Commands,
     mut receivers: Query<&mut MessageReceiver<MapTransitionStart>>,
     mut registry: ResMut<MapRegistry>,
-    player_query: Query<Entity, (With<Predicted>, With<CharacterMarker>, With<Controlled>)>,
+    player_query: Query<
+        (Entity, &MapInstanceId),
+        (With<Predicted>, With<CharacterMarker>, With<Controlled>),
+    >,
 ) {
     for mut receiver in &mut receivers {
         for transition in receiver.receive() {
             info!("Received MapTransitionStart for {:?}", transition.target);
 
-            let player = player_query
+            let (player, current_map_id) = player_query
                 .single()
                 .expect("Predicted player must exist when receiving MapTransitionStart");
+
+            despawn_old_map(&mut commands, &mut *registry, current_map_id);
 
             commands.entity(player).insert((
                 RigidBodyDisabled,
@@ -415,6 +535,19 @@ pub fn handle_map_transition_start(
                 .entity(player)
                 .insert(ChunkTarget::new(map_entity, 4));
         }
+    }
+}
+
+/// Despawn the old map entity and all its children (chunk meshes), removing it from the registry.
+/// When the player transitions back, the map will be re-created and chunks re-requested.
+fn despawn_old_map(
+    commands: &mut Commands,
+    registry: &mut MapRegistry,
+    old_map_id: &MapInstanceId,
+) {
+    if let Some(old_map_entity) = registry.0.remove(old_map_id) {
+        info!("Despawning old map {old_map_id:?} entity {old_map_entity:?}");
+        commands.entity(old_map_entity).despawn();
     }
 }
 
@@ -532,5 +665,35 @@ pub fn handle_map_transition_end(
 
             next_transition.set(MapTransitionState::Playing);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prediction_state_sequence_increments() {
+        let mut state = VoxelPredictionState::default();
+        assert_eq!(state.next(), 0);
+        assert_eq!(state.next(), 1);
+        assert_eq!(state.next(), 2);
+    }
+
+    #[test]
+    fn ack_clears_predictions_up_to_sequence() {
+        let mut state = VoxelPredictionState::default();
+        for i in 0..5 {
+            state.pending.push(VoxelPrediction {
+                sequence: i,
+                position: IVec3::ZERO,
+                old_voxel: VoxelType::Air,
+                new_voxel: VoxelType::Solid(1),
+            });
+        }
+        // Ack sequence 2 — clears 0, 1, 2
+        state.pending.retain(|p| p.sequence > 2);
+        assert_eq!(state.pending.len(), 2);
+        assert_eq!(state.pending[0].sequence, 3);
     }
 }

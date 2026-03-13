@@ -28,8 +28,8 @@ pub use map::{
     attach_chunk_colliders, ChunkChannel, ChunkDataSync, ChunkRequest, ChunkUnload, MapChannel,
     MapInstanceId, MapRegistry, MapSaveTarget, MapSwitchTarget, MapTransitionEnd,
     MapTransitionReady, MapTransitionStart, PendingTransition, PlayerMapSwitchRequest, SavedEntity,
-    SavedEntityKind, TransitionReadySent, VoxelChannel, VoxelChunk, VoxelEditBroadcast,
-    VoxelEditRequest, VoxelType,
+    SavedEntityKind, TransitionReadySent, VoxelChannel, VoxelChunk, VoxelEditAck,
+    VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
 };
 
 pub const PROTOCOL_ID: u64 = 0;
@@ -169,6 +169,10 @@ impl Plugin for ProtocolPlugin {
         app.register_message::<VoxelEditRequest>()
             .add_direction(NetworkDirection::ClientToServer);
         app.register_message::<VoxelEditBroadcast>()
+            .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<VoxelEditAck>()
+            .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<VoxelEditReject>()
             .add_direction(NetworkDirection::ServerToClient);
 
         // Chunk streaming channel

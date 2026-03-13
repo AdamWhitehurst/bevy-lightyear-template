@@ -6,8 +6,8 @@ use avian3d::prelude::{ColliderDisabled, Position, RigidBodyDisabled};
 use bevy::app::AppExit;
 use bevy::prelude::*;
 use lightyear::prelude::{
-    ControlledBy, DisableRollback, MessageReceiver, MessageSender, NetworkTarget, RemoteId, Room,
-    RoomEvent, RoomTarget, Server, ServerMultiMessageSender,
+    ControlledBy, DisableRollback, MessageReceiver, MessageSender, RemoteId, Room, RoomEvent,
+    RoomTarget, ServerMultiMessageSender,
 };
 use protocol::map::{
     MapChannel, MapSwitchTarget, MapTransitionEnd, MapTransitionReady, MapTransitionStart,
@@ -15,7 +15,8 @@ use protocol::map::{
 };
 use protocol::{
     CharacterMarker, ChunkChannel, ChunkDataSync, ChunkRequest, MapInstanceId, MapRegistry,
-    PendingTransition, VoxelChannel, VoxelEditBroadcast, VoxelEditRequest,
+    PendingTransition, VoxelChannel, VoxelEditAck, VoxelEditBroadcast, VoxelEditReject,
+    VoxelEditRequest, VoxelType,
 };
 use voxel_map_engine::prelude::{
     flat_terrain_voxels, ChunkTarget, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld,
@@ -72,6 +73,21 @@ impl Default for WorldDirtyState {
             first_dirty_time: None,
         }
     }
+}
+
+/// A voxel edit pending broadcast, with context for room-scoped sending.
+pub struct PendingVoxelEdit {
+    pub position: IVec3,
+    pub voxel: VoxelType,
+    /// Client entity that made the edit (excluded from broadcast).
+    pub originator: Entity,
+    pub map_id: MapInstanceId,
+}
+
+/// Accumulates voxel edits per chunk during a tick for batching.
+#[derive(Resource, Default)]
+pub struct PendingVoxelBroadcasts {
+    pub per_chunk: HashMap<IVec3, Vec<PendingVoxelEdit>>,
 }
 
 pub fn spawn_overworld(
@@ -328,12 +344,14 @@ impl Plugin for ServerMapPlugin {
             .init_resource::<MapRegistry>()
             .init_resource::<RoomRegistry>()
             .init_resource::<WorldDirtyState>()
+            .init_resource::<PendingVoxelBroadcasts>()
             .init_resource::<WorldSavePath>()
             .add_systems(Startup, (spawn_overworld, load_startup_entities).chain())
             .add_systems(
                 Update,
                 (
                     handle_voxel_edit_requests,
+                    flush_voxel_broadcasts,
                     handle_chunk_requests,
                     save_dirty_chunks_debounced,
                     handle_map_switch_requests,
@@ -346,20 +364,43 @@ impl Plugin for ServerMapPlugin {
     }
 }
 
-fn handle_voxel_edit_requests(
-    mut receiver: Query<&mut MessageReceiver<VoxelEditRequest>>,
-    mut sender: ServerMultiMessageSender,
-    server: Single<&Server>,
+pub fn handle_voxel_edit_requests(
+    mut receivers: Query<(Entity, &mut MessageReceiver<VoxelEditRequest>)>,
+    mut ack_senders: Query<&mut MessageSender<VoxelEditAck>>,
+    mut reject_senders: Query<&mut MessageSender<VoxelEditReject>>,
+    mut pending_broadcasts: ResMut<PendingVoxelBroadcasts>,
     mut dirty_state: ResMut<WorldDirtyState>,
     time: Res<Time>,
-    overworld: Res<OverworldMap>,
     mut voxel_world: VoxelWorld,
+    controlled_query: Query<(&ControlledBy, &MapInstanceId), With<CharacterMarker>>,
+    map_registry: Res<MapRegistry>,
 ) {
-    let server_ref = server.into_inner();
-    for mut message_receiver in receiver.iter_mut() {
-        for request in message_receiver.receive() {
+    for (client_entity, mut receiver) in &mut receivers {
+        for request in receiver.receive() {
+            debug!("handle_voxel_edit_requests: received edit from {client_entity:?} at {:?} voxel={:?} seq={}", request.position, request.voxel, request.sequence);
+            let Some((_, player_map_id)) = controlled_query
+                .iter()
+                .find(|(ctrl, _)| ctrl.owner == client_entity)
+            else {
+                trace!("handle_voxel_edit_requests: no character for client {client_entity:?}");
+                continue;
+            };
+            let map_entity = map_registry.get(player_map_id);
+
+            if !validate_voxel_edit(&request, map_entity, &voxel_world) {
+                let current_voxel = voxel_world.get_voxel(map_entity, request.position);
+                if let Ok(mut sender) = reject_senders.get_mut(client_entity) {
+                    sender.send::<VoxelChannel>(VoxelEditReject {
+                        sequence: request.sequence,
+                        position: request.position,
+                        correct_voxel: current_voxel.into(),
+                    });
+                }
+                continue;
+            }
+
             voxel_world.set_voxel(
-                overworld.0,
+                map_entity,
                 request.position,
                 WorldVoxel::from(request.voxel),
             );
@@ -371,15 +412,79 @@ fn handle_voxel_edit_requests(
             dirty_state.is_dirty = true;
             dirty_state.last_edit_time = now;
 
+            if let Ok(mut sender) = ack_senders.get_mut(client_entity) {
+                debug!(
+                    "handle_voxel_edit_requests: ack seq={} to {client_entity:?}",
+                    request.sequence
+                );
+                sender.send::<VoxelChannel>(VoxelEditAck {
+                    sequence: request.sequence,
+                });
+            } else {
+                warn!("handle_voxel_edit_requests: no ack sender for {client_entity:?}");
+            }
+
+            let chunk_pos = voxel_map_engine::prelude::voxel_to_chunk_pos(request.position);
+            pending_broadcasts
+                .per_chunk
+                .entry(chunk_pos)
+                .or_default()
+                .push(PendingVoxelEdit {
+                    position: request.position,
+                    voxel: request.voxel,
+                    originator: client_entity,
+                    map_id: player_map_id.clone(),
+                });
+        }
+    }
+}
+
+/// Validates a voxel edit request. Returns false if the edit should be rejected.
+fn validate_voxel_edit(
+    _request: &VoxelEditRequest,
+    _map_entity: Entity,
+    _voxel_world: &VoxelWorld,
+) -> bool {
+    // TODO: Add validation rules as needed (bounds, range, anti-cheat)
+    true
+}
+
+/// Drains accumulated voxel edits and broadcasts them to clients in the same room,
+/// excluding the originating client.
+pub fn flush_voxel_broadcasts(
+    mut pending: ResMut<PendingVoxelBroadcasts>,
+    mut sender: ServerMultiMessageSender,
+    room_registry: Res<RoomRegistry>,
+    rooms: Query<&Room>,
+) {
+    if pending.per_chunk.is_empty() {
+        return;
+    }
+
+    for (_chunk_pos, edits) in pending.per_chunk.drain() {
+        for edit in edits {
+            let Some(&room_entity) = room_registry.0.get(&edit.map_id) else {
+                warn!("flush_voxel_broadcasts: no room for map {:?}", edit.map_id);
+                continue;
+            };
+            let Ok(room) = rooms.get(room_entity) else {
+                warn!("flush_voxel_broadcasts: room entity {room_entity:?} has no Room component");
+                continue;
+            };
+
+            let broadcast = VoxelEditBroadcast {
+                position: edit.position,
+                voxel: edit.voxel,
+            };
+
+            let targets: bevy::ecs::entity::EntityHashSet = room
+                .clients
+                .iter()
+                .filter(|e| **e != edit.originator)
+                .copied()
+                .collect();
             sender
-                .send::<_, VoxelChannel>(
-                    &VoxelEditBroadcast {
-                        position: request.position,
-                        voxel: request.voxel,
-                    },
-                    server_ref,
-                    &NetworkTarget::All,
-                )
+                .send_to_entities::<_, VoxelChannel>(&broadcast, &targets)
                 .ok();
         }
     }

@@ -1,7 +1,9 @@
 use ::client::map::handle_map_transition_start;
 use ::client::network::{ClientNetworkConfig, ClientNetworkPlugin, ClientTransport};
 use ::server::map::{
-    handle_chunk_requests, handle_map_switch_requests, handle_map_transition_ready, RoomRegistry,
+    flush_voxel_broadcasts, handle_chunk_requests, handle_map_switch_requests,
+    handle_map_transition_ready, handle_voxel_edit_requests, PendingVoxelBroadcasts, RoomRegistry,
+    WorldDirtyState,
 };
 use ::server::network::{ServerNetworkConfig, ServerNetworkPlugin, ServerTransport};
 use bevy::prelude::*;
@@ -598,6 +600,7 @@ fn test_voxel_messages_registered() {
     let _request = VoxelEditRequest {
         position: IVec3::new(1, 2, 3),
         voxel: VoxelType::Solid(42),
+        sequence: 0,
     };
 
     info!("✓ Voxel message types compile successfully!");
@@ -669,6 +672,7 @@ fn test_crossbeam_client_to_server_messages() {
     let test_message = VoxelEditRequest {
         position: IVec3::new(1, 2, 3),
         voxel: VoxelType::Solid(42),
+        sequence: 0,
     };
 
     stepper
@@ -1346,7 +1350,7 @@ fn test_client_requests_chunk_and_receives_data() {
         .send::<ChunkChannel>(ChunkRequest { chunk_pos });
 
     // Step simulation to deliver request and response
-    stepper.tick_step(10);
+    stepper.tick_step(20);
 
     // Verify client received ChunkDataSync
     let buffer = stepper
@@ -1367,5 +1371,102 @@ fn test_client_requests_chunk_and_receives_data() {
         buffer.messages[0].1.data,
         PalettedChunk::SingleValue(WorldVoxel::Solid(42)),
         "Chunk data should match server's stored data"
+    );
+}
+
+/// Test that client sends `VoxelEditRequest` and receives `VoxelEditAck` from server.
+#[test]
+fn test_voxel_edit_ack_received() {
+    use voxel_map_engine::prelude::{ChunkData, FillType, PalettedChunk, WorldVoxel};
+
+    let mut stepper = CrossbeamTestStepper::new();
+
+    add_server_map_systems(&mut stepper);
+    stepper.server_app.init_resource::<WorldDirtyState>();
+    stepper.server_app.init_resource::<PendingVoxelBroadcasts>();
+    stepper.server_app.add_systems(
+        Update,
+        (handle_voxel_edit_requests, flush_voxel_broadcasts).chain(),
+    );
+
+    stepper
+        .client_app
+        .init_resource::<MessageBuffer<VoxelEditAck>>();
+    stepper
+        .client_app
+        .add_systems(Update, collect_messages::<VoxelEditAck>);
+
+    stepper.init();
+    stepper.wait_for_connection();
+
+    // Spawn overworld with a loaded chunk at origin so the edit succeeds
+    let chunk_pos = IVec3::ZERO;
+    let mut instance = VoxelMapInstance::new(3);
+    instance.insert_chunk_data(
+        chunk_pos,
+        ChunkData {
+            voxels: PalettedChunk::SingleValue(WorldVoxel::Solid(1)),
+            fill_type: FillType::Uniform(WorldVoxel::Solid(1)),
+            hash: 0,
+        },
+    );
+    instance.loaded_chunks.insert(chunk_pos);
+
+    let overworld = stepper
+        .server_app
+        .world_mut()
+        .spawn((
+            instance,
+            VoxelMapConfig::new(0, 0, 1, None, 3, Arc::new(flat_terrain_voxels)),
+            Transform::default(),
+            MapInstanceId::Overworld,
+        ))
+        .id();
+    stepper
+        .server_app
+        .world_mut()
+        .resource_mut::<MapRegistry>()
+        .insert(MapInstanceId::Overworld, overworld);
+
+    let client_of = stepper.client_of_entity;
+    let _character = spawn_server_character(&mut stepper, client_of);
+
+    // Client sends VoxelEditRequest
+    let client_entity = stepper.client_entity;
+    stepper
+        .client_app
+        .world_mut()
+        .entity_mut(client_entity)
+        .get_mut::<MessageSender<VoxelEditRequest>>()
+        .expect("client must have MessageSender<VoxelEditRequest>")
+        .send::<VoxelChannel>(VoxelEditRequest {
+            position: IVec3::new(5, 5, 5),
+            voxel: VoxelType::Air,
+            sequence: 0,
+        });
+
+    // Poll until client receives VoxelEditAck
+    let mut got_ack = false;
+    for _ in 0..30 {
+        stepper.tick_step(1);
+        let buffer = stepper
+            .client_app
+            .world()
+            .resource::<MessageBuffer<VoxelEditAck>>();
+        if !buffer.messages.is_empty() {
+            got_ack = true;
+            break;
+        }
+    }
+
+    assert!(got_ack, "Client should receive VoxelEditAck from server");
+    let buffer = stepper
+        .client_app
+        .world()
+        .resource::<MessageBuffer<VoxelEditAck>>();
+    assert_eq!(buffer.messages.len(), 1, "Should receive exactly one ack");
+    assert_eq!(
+        buffer.messages[0].1.sequence, 0,
+        "Ack sequence should match request"
     );
 }

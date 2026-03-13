@@ -153,7 +153,8 @@ fn lookup_voxel_in_chunk(voxels: &[WorldVoxel], voxel_pos: IVec3, chunk_pos: IVe
     }
 }
 
-pub(crate) fn voxel_to_chunk_pos(voxel_pos: IVec3) -> IVec3 {
+/// Converts a world-space voxel position to the chunk coordinate containing it.
+pub fn voxel_to_chunk_pos(voxel_pos: IVec3) -> IVec3 {
     IVec3::new(
         voxel_pos.x.div_euclid(CHUNK_SIZE as i32),
         voxel_pos.y.div_euclid(CHUNK_SIZE as i32),
