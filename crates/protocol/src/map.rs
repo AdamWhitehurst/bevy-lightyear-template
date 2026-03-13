@@ -94,7 +94,7 @@ pub struct VoxelEditReject {
 }
 
 /// Batched block changes for a single chunk, sent when 2+ changes happen in one tick.
-#[derive(Serialize, Deserialize, Clone, Debug, Reflect, Message)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
 pub struct SectionBlocksUpdate {
     pub chunk_pos: IVec3,
     pub changes: Vec<(IVec3, VoxelType)>,

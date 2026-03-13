@@ -3486,7 +3486,7 @@ fn pending_cleared_after_flush() {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] All tests pass: `cargo test-all`
+- [x] All tests pass: `cargo test-all`
 - [ ] Server builds and runs: `cargo server`
 - [ ] Client builds and runs: `cargo client -c 1`
 

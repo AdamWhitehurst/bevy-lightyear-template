@@ -512,7 +512,7 @@ pub fn flush_voxel_broadcasts(
         return;
     }
 
-    for (_chunk_pos, edits) in pending.per_chunk.drain() {
+    for (chunk_pos, edits) in pending.per_chunk.drain() {
         let Some(first) = edits.first() else {
             continue;
         };
@@ -546,7 +546,6 @@ pub fn flush_voxel_broadcasts(
                 )
                 .ok();
         } else {
-            let chunk_pos = voxel_map_engine::prelude::voxel_to_chunk_pos(edits[0].position);
             let changes: Vec<(IVec3, VoxelType)> =
                 edits.iter().map(|e| (e.position, e.voxel)).collect();
             sender
@@ -825,5 +824,91 @@ pub fn handle_map_transition_ready(
                 .expect("Client entity must have MessageSender<MapTransitionEnd>");
             sender.send::<MapChannel>(MapTransitionEnd);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use protocol::map::VoxelType;
+
+    fn make_edit(position: IVec3, voxel: VoxelType) -> PendingVoxelEdit {
+        PendingVoxelEdit {
+            position,
+            voxel,
+            originator: Entity::PLACEHOLDER,
+            map_id: MapInstanceId::Overworld,
+        }
+    }
+
+    #[test]
+    fn single_change_takes_individual_broadcast_path() {
+        let mut pending = PendingVoxelBroadcasts::default();
+        pending
+            .per_chunk
+            .entry(IVec3::ZERO)
+            .or_default()
+            .push(make_edit(IVec3::new(1, 2, 3), VoxelType::Solid(1)));
+
+        for (_, edits) in pending.per_chunk.drain() {
+            assert_eq!(
+                edits.len(),
+                1,
+                "single edit should take individual broadcast path"
+            );
+        }
+    }
+
+    #[test]
+    fn multiple_changes_in_same_chunk_takes_batched_path() {
+        let mut pending = PendingVoxelBroadcasts::default();
+        let entry = pending.per_chunk.entry(IVec3::ZERO).or_default();
+        entry.push(make_edit(IVec3::new(1, 2, 3), VoxelType::Solid(1)));
+        entry.push(make_edit(IVec3::new(4, 5, 6), VoxelType::Air));
+
+        for (_, edits) in pending.per_chunk.drain() {
+            assert_eq!(edits.len(), 2, "multi-edit should take batched update path");
+        }
+    }
+
+    #[test]
+    fn different_chunks_produce_separate_entries() {
+        let mut pending = PendingVoxelBroadcasts::default();
+        pending
+            .per_chunk
+            .entry(IVec3::ZERO)
+            .or_default()
+            .push(make_edit(IVec3::new(1, 2, 3), VoxelType::Solid(1)));
+        pending
+            .per_chunk
+            .entry(IVec3::ONE)
+            .or_default()
+            .push(make_edit(IVec3::new(17, 18, 19), VoxelType::Solid(2)));
+
+        let chunks: Vec<_> = pending.per_chunk.drain().collect();
+        assert_eq!(
+            chunks.len(),
+            2,
+            "different chunks should produce separate entries"
+        );
+        for (_, edits) in &chunks {
+            assert_eq!(edits.len(), 1);
+        }
+    }
+
+    #[test]
+    fn pending_cleared_after_drain() {
+        let mut pending = PendingVoxelBroadcasts::default();
+        pending
+            .per_chunk
+            .entry(IVec3::ZERO)
+            .or_default()
+            .push(make_edit(IVec3::new(1, 2, 3), VoxelType::Solid(1)));
+
+        for _ in pending.per_chunk.drain() {}
+        assert!(
+            pending.per_chunk.is_empty(),
+            "pending should be empty after drain"
+        );
     }
 }
