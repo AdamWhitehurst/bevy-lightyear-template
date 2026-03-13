@@ -1,4 +1,4 @@
-use bevy::prelude::*;
+use bevy::{log::LogPlugin, prelude::*};
 use protocol::AppStatePlugin;
 use render::RenderPlugin;
 
@@ -21,6 +21,7 @@ fn test_render_plugin_adds_camera() {
                 ),
                 ..default()
             })
+            .disable::<LogPlugin>()
             .disable::<bevy::winit::WinitPlugin>()
             .add(bevy::app::ScheduleRunnerPlugin::default()),
         AppStatePlugin,

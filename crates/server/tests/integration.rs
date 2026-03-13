@@ -1204,9 +1204,13 @@ fn server_and_client_spawn_matching_homebase_configs() {
         .insert(RemoteId(PeerId::Netcode(TEST_CLIENT_ID)));
 
     // Predicted player required by handle_map_transition_start
-    client_app
-        .world_mut()
-        .spawn((CharacterMarker, Predicted, Controlled));
+    // Must include MapInstanceId to match the system's query
+    client_app.world_mut().spawn((
+        CharacterMarker,
+        Predicted,
+        Controlled,
+        MapInstanceId::Overworld,
+    ));
 
     client_app
         .world_mut()

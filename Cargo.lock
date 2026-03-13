@@ -4255,29 +4255,29 @@ dependencies = [
  "lightyear_aeronet",
  "lightyear_avian2d",
  "lightyear_avian3d",
- "lightyear_connection 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_crossbeam 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_connection",
+ "lightyear_core",
+ "lightyear_crossbeam",
  "lightyear_frame_interpolation",
  "lightyear_inputs",
  "lightyear_inputs_bei",
  "lightyear_inputs_leafwing",
  "lightyear_inputs_native",
  "lightyear_interpolation",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_messages 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_link",
+ "lightyear_messages",
  "lightyear_metrics",
  "lightyear_netcode",
  "lightyear_prediction",
- "lightyear_raw_connection 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_replication 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_serde 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_raw_connection",
+ "lightyear_replication",
+ "lightyear_serde",
  "lightyear_steam",
- "lightyear_sync 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_transport 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_sync",
+ "lightyear_transport",
  "lightyear_udp",
  "lightyear_ui",
- "lightyear_utils 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_utils",
  "lightyear_web",
  "lightyear_websocket",
  "lightyear_webtransport",
@@ -4295,8 +4295,8 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "bevy_reflect",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_core",
+ "lightyear_link",
  "tracing",
 ]
 
@@ -4312,12 +4312,12 @@ dependencies = [
  "bevy_time",
  "bevy_transform",
  "bevy_utils",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_core",
  "lightyear_frame_interpolation",
  "lightyear_interpolation",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_link",
  "lightyear_prediction",
- "lightyear_replication 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_replication",
  "tracing",
 ]
 
@@ -4333,32 +4333,12 @@ dependencies = [
  "bevy_time",
  "bevy_transform",
  "bevy_utils",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_core",
  "lightyear_frame_interpolation",
  "lightyear_interpolation",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_link",
  "lightyear_prediction",
- "lightyear_replication 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "tracing",
-]
-
-[[package]]
-name = "lightyear_connection"
-version = "0.26.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad7fa5c7b928074895a56e96d0154e78cbc4e751f37e1a9b0b5fda469eb28c74"
-dependencies = [
- "bevy_app",
- "bevy_ecs",
- "bevy_platform",
- "bevy_reflect",
- "bytes",
- "lightyear_core 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_link 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_serde 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "serde",
- "smallvec",
- "thiserror 2.0.17",
+ "lightyear_replication",
  "tracing",
 ]
 
@@ -4372,32 +4352,12 @@ dependencies = [
  "bevy_platform",
  "bevy_reflect",
  "bytes",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_serde 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_core",
+ "lightyear_link",
+ "lightyear_serde",
  "serde",
  "smallvec",
  "thiserror 2.0.17",
- "tracing",
-]
-
-[[package]]
-name = "lightyear_core"
-version = "0.26.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a310d13cb0059fd20f59ec60b24056403ffc2388daabbc663c8eb1d4a08ddf4"
-dependencies = [
- "bevy_app",
- "bevy_derive",
- "bevy_ecs",
- "bevy_platform",
- "bevy_reflect",
- "bevy_time",
- "chrono",
- "fixed",
- "lightyear_serde 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_utils 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "serde",
  "tracing",
 ]
 
@@ -4414,25 +4374,9 @@ dependencies = [
  "bevy_time",
  "chrono",
  "fixed",
- "lightyear_serde 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_utils 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_serde",
+ "lightyear_utils",
  "serde",
- "tracing",
-]
-
-[[package]]
-name = "lightyear_crossbeam"
-version = "0.26.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9b353e8b692034c99e6f9a89cc3c95ec4f7d123b32622228ccf680b849855fd"
-dependencies = [
- "aeronet_io",
- "bevy_app",
- "bevy_ecs",
- "bytes",
- "crossbeam-channel",
- "lightyear_core 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_link 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing",
 ]
 
@@ -4446,8 +4390,8 @@ dependencies = [
  "bevy_ecs",
  "bytes",
  "crossbeam-channel",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_core",
+ "lightyear_link",
  "tracing",
 ]
 
@@ -4462,10 +4406,10 @@ dependencies = [
  "bevy_time",
  "bevy_transform",
  "bevy_utils",
- "lightyear_connection 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_connection",
+ "lightyear_core",
  "lightyear_interpolation",
- "lightyear_replication 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_replication",
  "serde",
  "tracing",
 ]
@@ -4480,15 +4424,15 @@ dependencies = [
  "bevy_platform",
  "bevy_reflect",
  "bevy_utils",
- "lightyear_connection 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_connection",
+ "lightyear_core",
  "lightyear_interpolation",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_messages 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_link",
+ "lightyear_messages",
  "lightyear_prediction",
- "lightyear_replication 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_sync 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_transport 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_replication",
+ "lightyear_sync",
+ "lightyear_transport",
  "serde",
  "tracing",
 ]
@@ -4503,13 +4447,13 @@ dependencies = [
  "bevy_enhanced_input",
  "bevy_reflect",
  "bevy_utils",
- "lightyear_connection 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_connection",
+ "lightyear_core",
  "lightyear_inputs",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_messages 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_replication 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_serde 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_link",
+ "lightyear_messages",
+ "lightyear_replication",
+ "lightyear_serde",
  "serde",
  "tracing",
 ]
@@ -4528,7 +4472,7 @@ dependencies = [
  "bevy_reflect",
  "bevy_utils",
  "leafwing-input-manager",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_core",
  "lightyear_inputs",
  "serde",
  "tracing",
@@ -4543,7 +4487,7 @@ dependencies = [
  "bevy_derive",
  "bevy_ecs",
  "bevy_reflect",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_core",
  "lightyear_inputs",
  "serde",
  "tracing",
@@ -4562,31 +4506,14 @@ dependencies = [
  "bevy_reflect",
  "bevy_time",
  "bevy_utils",
- "lightyear_connection 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_messages 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_replication 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_serde 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_sync 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_utils 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_connection",
+ "lightyear_core",
+ "lightyear_messages",
+ "lightyear_replication",
+ "lightyear_serde",
+ "lightyear_sync",
+ "lightyear_utils",
  "serde",
- "tracing",
-]
-
-[[package]]
-name = "lightyear_link"
-version = "0.26.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ede74a86374f21606be56aaf1c1bf9dd333f473866bd780ab449653f0caca24"
-dependencies = [
- "bevy_app",
- "bevy_ecs",
- "bevy_reflect",
- "bevy_utils",
- "bytes",
- "lightyear_core 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_utils 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "rand",
  "tracing",
 ]
 
@@ -4600,30 +4527,9 @@ dependencies = [
  "bevy_reflect",
  "bevy_utils",
  "bytes",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_utils 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_core",
+ "lightyear_utils",
  "rand",
- "tracing",
-]
-
-[[package]]
-name = "lightyear_messages"
-version = "0.26.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1141fb3d9895f5c9e8aa5d723d9b9bf9db800fd044ba8c8b542ac660beeab47"
-dependencies = [
- "bevy_app",
- "bevy_ecs",
- "bevy_reflect",
- "bevy_utils",
- "bytes",
- "lightyear_connection 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_core 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_serde 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_transport 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_utils 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "serde",
- "thiserror 2.0.17",
  "tracing",
 ]
 
@@ -4637,12 +4543,12 @@ dependencies = [
  "bevy_reflect",
  "bevy_utils",
  "bytes",
- "lightyear_connection 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_serde 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_transport 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_utils 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_connection",
+ "lightyear_core",
+ "lightyear_link",
+ "lightyear_serde",
+ "lightyear_transport",
+ "lightyear_utils",
  "serde",
  "thiserror 2.0.17",
  "tracing",
@@ -4679,12 +4585,12 @@ dependencies = [
  "bevy_time",
  "bytes",
  "chacha20poly1305",
- "lightyear_connection 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_serde 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_transport 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_utils 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_connection",
+ "lightyear_core",
+ "lightyear_link",
+ "lightyear_serde",
+ "lightyear_transport",
+ "lightyear_utils",
  "no_std_io2",
  "rand",
  "thiserror 2.0.17",
@@ -4706,33 +4612,17 @@ dependencies = [
  "bevy_reflect",
  "bevy_time",
  "bevy_utils",
- "lightyear_connection 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_connection",
+ "lightyear_core",
  "lightyear_frame_interpolation",
  "lightyear_interpolation",
- "lightyear_messages 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_replication 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_sync 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_utils 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_messages",
+ "lightyear_replication",
+ "lightyear_sync",
+ "lightyear_utils",
  "parking_lot",
  "seahash",
  "serde",
- "tracing",
-]
-
-[[package]]
-name = "lightyear_raw_connection"
-version = "0.26.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "631b5527b4f11d1e199f823ecdcd02585136fc55dd3261d5280e03bbcc29cdd3"
-dependencies = [
- "aeronet_io",
- "bevy_app",
- "bevy_ecs",
- "lightyear_connection 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_core 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_link 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_transport 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "tracing",
 ]
 
@@ -4744,44 +4634,10 @@ dependencies = [
  "aeronet_io",
  "bevy_app",
  "bevy_ecs",
- "lightyear_connection 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_transport 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "tracing",
-]
-
-[[package]]
-name = "lightyear_replication"
-version = "0.26.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a451536b73e618035472548e8d7f1af51e193649f556318f7836ddc70e6f73d2"
-dependencies = [
- "bevy_app",
- "bevy_derive",
- "bevy_ecs",
- "bevy_math",
- "bevy_platform",
- "bevy_ptr",
- "bevy_reflect",
- "bevy_time",
- "bevy_transform",
- "bevy_utils",
- "bytes",
- "dashmap",
- "indexmap",
- "lightyear_connection 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_core 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_link 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_messages 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_serde 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_sync 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_transport 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_utils 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "seahash",
- "serde",
- "smallvec",
- "thiserror 2.0.17",
+ "lightyear_connection",
+ "lightyear_core",
+ "lightyear_link",
+ "lightyear_transport",
  "tracing",
 ]
 
@@ -4805,40 +4661,19 @@ dependencies = [
  "bytes",
  "dashmap",
  "indexmap",
- "lightyear_connection 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_messages 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_serde 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_sync 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_transport 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_utils 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_connection",
+ "lightyear_core",
+ "lightyear_link",
+ "lightyear_messages",
+ "lightyear_serde",
+ "lightyear_sync",
+ "lightyear_transport",
+ "lightyear_utils",
  "seahash",
  "serde",
  "smallvec",
  "thiserror 2.0.17",
  "tracing",
-]
-
-[[package]]
-name = "lightyear_serde"
-version = "0.26.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c00dfe55ea4ba8413424616564b36c64d404fe9f5c68e4d71c4a97193da3d6e"
-dependencies = [
- "bevy_derive",
- "bevy_ecs",
- "bevy_platform",
- "bevy_ptr",
- "bevy_reflect",
- "bevy_utils",
- "bincode 2.0.1",
- "bytes",
- "no_std_io2",
- "serde",
- "thiserror 2.0.17",
- "tracing",
- "variadics_please",
 ]
 
 [[package]]
@@ -4871,34 +4706,10 @@ dependencies = [
  "bevy_app",
  "bevy_ecs",
  "lightyear_aeronet",
- "lightyear_connection 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_connection",
+ "lightyear_core",
+ "lightyear_link",
  "thiserror 2.0.17",
- "tracing",
-]
-
-[[package]]
-name = "lightyear_sync"
-version = "0.26.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "834af4e025c9d7954c9684d82255e5ed639e0ce4482e3c674582687ce1f2dbfd"
-dependencies = [
- "bevy_app",
- "bevy_derive",
- "bevy_diagnostic",
- "bevy_ecs",
- "bevy_reflect",
- "bevy_time",
- "bevy_utils",
- "lightyear_connection 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_core 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_link 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_messages 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_serde 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_transport 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_utils 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "serde",
  "tracing",
 ]
 
@@ -4914,43 +4725,14 @@ dependencies = [
  "bevy_reflect",
  "bevy_time",
  "bevy_utils",
- "lightyear_connection 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_messages 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_serde 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_transport 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_utils 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_connection",
+ "lightyear_core",
+ "lightyear_link",
+ "lightyear_messages",
+ "lightyear_serde",
+ "lightyear_transport",
+ "lightyear_utils",
  "serde",
- "tracing",
-]
-
-[[package]]
-name = "lightyear_transport"
-version = "0.26.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "272b66fae233f66887cbef40c30d2a7673d299d327a9fdd2becbd3b2ae59336b"
-dependencies = [
- "bevy_app",
- "bevy_ecs",
- "bevy_platform",
- "bevy_reflect",
- "bevy_time",
- "bevy_utils",
- "bytes",
- "crossbeam-channel",
- "enum_dispatch",
- "governor",
- "indexmap",
- "lightyear_connection 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_core 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_link 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_serde 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_utils 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "nonzero_ext",
- "ringbuffer",
- "serde",
- "thiserror 2.0.17",
  "tracing",
 ]
 
@@ -4970,11 +4752,11 @@ dependencies = [
  "enum_dispatch",
  "governor",
  "indexmap",
- "lightyear_connection 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_serde 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_utils 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_connection",
+ "lightyear_core",
+ "lightyear_link",
+ "lightyear_serde",
+ "lightyear_utils",
  "nonzero_ext",
  "ringbuffer",
  "serde",
@@ -4992,8 +4774,8 @@ dependencies = [
  "bevy_ecs",
  "bevy_platform",
  "bytes",
- "lightyear_core 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_core",
+ "lightyear_link",
  "thiserror 2.0.17",
  "tracing",
 ]
@@ -5015,22 +4797,6 @@ dependencies = [
  "lightyear_metrics",
  "metrics",
  "metrics-util",
- "tracing",
-]
-
-[[package]]
-name = "lightyear_utils"
-version = "0.26.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9a54a63441f9001dc834fc8e6b4bb23eeb8f6b2ef28db8c65b4bfbf9496b139"
-dependencies = [
- "bevy_ecs",
- "bevy_platform",
- "bevy_reflect",
- "bevy_utils",
- "hashbrown 0.16.1",
- "paste",
- "seahash",
  "tracing",
 ]
 
@@ -5072,7 +4838,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_reflect",
  "lightyear_aeronet",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_link",
  "thiserror 2.0.17",
  "tracing",
 ]
@@ -5088,7 +4854,7 @@ dependencies = [
  "bevy_ecs",
  "bevy_reflect",
  "lightyear_aeronet",
- "lightyear_link 0.26.4 (git+https://github.com/AdamWhitehurst/lightyear?branch=main)",
+ "lightyear_link",
  "thiserror 2.0.17",
  "tracing",
 ]
@@ -6362,8 +6128,7 @@ dependencies = [
  "bevy_common_assets",
  "leafwing-input-manager",
  "lightyear",
- "lightyear_replication 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_transport 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lightyear_replication",
  "ron 0.12.0",
  "serde",
  "serde_json",
@@ -7058,8 +6823,7 @@ dependencies = [
  "client",
  "leafwing-input-manager",
  "lightyear",
- "lightyear_crossbeam 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "lightyear_raw_connection 0.26.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "lightyear_crossbeam",
  "mock_instant",
  "ndshape",
  "protocol",

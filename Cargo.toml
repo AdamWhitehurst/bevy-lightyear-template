@@ -35,6 +35,8 @@ bevy = { version = "0.18", default-features = false }
 leafwing-input-manager = "0.20"
 voxel_map_engine = { path = "crates/voxel_map_engine" }
 lightyear = { git = "https://github.com/AdamWhitehurst/lightyear", branch = "main", features = ["leafwing", "raw_connection"]}
+lightyear_crossbeam = { git = "https://github.com/AdamWhitehurst/lightyear", branch = "main" }
+lightyear_replication = { git = "https://github.com/AdamWhitehurst/lightyear", branch = "main" }
 protocol = { path = "crates/protocol" }
 ron = "0.12"
 bevy_common_assets = { version = "0.15", features = ["ron"] }
