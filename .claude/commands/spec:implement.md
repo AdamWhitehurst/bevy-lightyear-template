@@ -7,11 +7,12 @@ You are tasked with **orchestrating** the implementation of an approved technica
 ## Getting Started
 
 When given a plan path:
-- Read the plan completely and check for any existing checkmarks (- [x])
-- Read the original ticket and all files mentioned in the plan
+- Read the plan **completely** and check for any existing checkmarks (- [x])
+- Read the original all files mentioned in the plan
 - **Read files fully** - never use limit/offset parameters, you need complete context
 - Think deeply about how the pieces fit together
 - Create a todo list to track your progress
+- create a TodoWrite checklist of every deliverable
 - **Identify which subagents** are needed for each phase
 - Delegate to subagents for implementation work
 
@@ -116,3 +117,5 @@ If the plan has existing checkmarks:
 
 Remember: You're implementing a solution, not just checking boxes. Keep the end goal in mind and maintain forward momentum.
 
+## Concluding work
+Before marking a phase complete, re-read the plan document and verify EVERY bullet point under this phase's success criteria. List each criterion and whether it's implemented. Do not skip any.
