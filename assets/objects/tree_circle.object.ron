@@ -1,0 +1,11 @@
+(
+    category: Scenery,
+    visual: Vox("models/trees/tree_circle.vox"),
+    collider: Some(Cylinder(radius: 0.5, height: 3.0)),
+    components: {
+        "protocol::Health": (
+            current: 50.0,
+            max: 50.0,
+        ),
+    },
+)

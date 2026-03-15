@@ -11,6 +11,7 @@ pub mod app_state;
 pub mod hit_detection;
 pub mod map;
 pub mod physics;
+pub mod world_object;
 
 pub use ability::{
     ability_action_to_slot, AbilityBulletOf, AbilityBullets, AbilityCooldowns, AbilityDef,
@@ -31,6 +32,7 @@ pub use map::{
     SavedEntityKind, SectionBlocksUpdate, TransitionReadySent, VoxelChannel, VoxelChunk,
     VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
 };
+pub use world_object::{WorldObjectDefRegistry, WorldObjectId, WorldObjectPlugin};
 
 pub const PROTOCOL_ID: u64 = 0;
 pub const PRIVATE_KEY: [u8; 32] = [0; 32];
@@ -87,7 +89,8 @@ pub enum CharacterType {
 #[require(MapSaveTarget)]
 pub struct RespawnPoint;
 
-#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Default)]
+#[reflect(Component, Default)]
 pub struct Health {
     pub current: f32,
     pub max: f32,
@@ -284,6 +287,7 @@ impl Plugin for SharedGameplayPlugin {
         app.add_plugins(AppStatePlugin);
         app.add_plugins(ProtocolPlugin);
         app.add_plugins(AbilityPlugin);
+        app.add_plugins(world_object::WorldObjectPlugin);
 
         app.add_plugins(lightyear::avian3d::plugin::LightyearAvianPlugin {
             replication_mode: lightyear::avian3d::plugin::AvianReplicationMode::Position,

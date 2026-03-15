@@ -8,7 +8,7 @@ test_utils = []
 
 [dependencies]
 avian3d = { workspace = true, features = ["serialize"] }
-bevy = { workspace = true, features = ["bevy_color", "bevy_state"] }
+bevy = { workspace = true, features = ["bevy_color", "bevy_state", "bevy_asset"] }
 voxel_map_engine = { workspace = true }
 leafwing-input-manager = { workspace = true }
 lightyear = { workspace = true, features = ["avian3d", "leafwing"] }

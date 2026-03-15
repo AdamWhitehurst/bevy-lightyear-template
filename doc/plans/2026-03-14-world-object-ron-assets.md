@@ -511,11 +511,11 @@ Add `pub mod world_object;` and re-export key types from `world_object/mod.rs`.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Workspace compiles: `cargo check-all`
-- [ ] Unit tests pass: `cargo test -p protocol -- world_object`
+- [x] Workspace compiles: `cargo check-all`
+- [x] Unit tests pass: `cargo test -p protocol -- world_object`
 
 #### Manual Verification:
-- [ ] None yet — no runtime behavior in this phase
+- [x] None yet — no runtime behavior in this phase
 
 ---
 
@@ -737,7 +737,7 @@ app.add_plugins(WorldObjectPlugin);
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] Workspace compiles: `cargo check-all`
+- [x] Workspace compiles: `cargo check-all`
 
 #### Manual Verification:
 - [ ] `cargo server` — logs "Loaded 1 world object definitions" at startup
