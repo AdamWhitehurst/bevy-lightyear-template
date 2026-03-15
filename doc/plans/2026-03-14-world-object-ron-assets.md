@@ -2,7 +2,7 @@
 
 ## Overview
 
-Implement a data-driven world object definition system using RON assets with Reflect-based component insertion. World objects (trees, buildings, ores, NPCs, items) are defined in `.object.ron` files, loaded via a custom `AssetLoader` that deserializes arbitrary ECS components through Bevy's `TypeRegistry`, and spawned exclusively by the server. Clients react to replicated entities via Lightyear's `Added<Replicated>` observer pattern — they never spawn world objects themselves.
+Implement a data-driven world object definition system using RON assets with Reflect-based component insertion. World objects (trees, buildings, ores, NPCs, items) are defined in `.object.ron` files as **flat maps of type-path → component data**. A custom `AssetLoader` deserializes arbitrary ECS components through Bevy's `TypeRegistry`, and the resulting `WorldObjectDef` is a single `Vec<Box<dyn PartialReflect>>`. Objects are spawned exclusively by the server; clients react to replicated entities via Lightyear's `Added<Replicated>` observer pattern.
 
 ## Current State Analysis
 
@@ -20,31 +20,37 @@ Implement a data-driven world object definition system using RON assets with Ref
 - Static world objects use `Replicate` but **no `PredictionTarget`** — Lightyear therefore creates **exactly one entity** on each client (the confirmed `Replicated` entity). There is no shadow predicted/interpolated copy. This means clients never see duplicate world object entities.
 - Room integration is automatic: `MapInstanceId` on a server entity triggers `RoomEvent::AddEntity` via the existing observer without any additional code at the spawn site.
 - Message API (confirmed from `PlayerMapSwitchRequest` pattern): `Query<&mut MessageSender<T>>` on client, `Query<(Entity, &mut MessageReceiver<T>)>` on server, with `.send::<Channel>(msg)` / `.receive()`.
+- **avian3d `serialize` feature** enables `Serialize`/`Deserialize` on physics types (`ColliderConstructor`, `RigidBody`, `CollisionLayers`, etc.), allowing them to appear directly in the RON component map without wrapper types.
+- **lightyear `avian3d` feature** enables Lightyear's built-in replication support for avian physics components.
 
 ## Desired End State
 
-1. `.object.ron` files in `assets/objects/` define world objects with arbitrary Reflect components
+1. `.object.ron` files in `assets/objects/` define world objects as flat type-path → component maps
 2. `WorldObjectDefRegistry` resource holds all loaded definitions, keyed by `WorldObjectId`
 3. Hot-reload updates definitions at runtime
 4. Server spawns world objects via `spawn_world_object` (server crate); Lightyear replicates them to clients
-5. Client reacts to replicated world objects via `Added<Replicated>` + `With<WorldObjectId>`, attaches physics and reflected components from `WorldObjectDefRegistry`
+5. Client reacts to replicated world objects via `Added<Replicated>` + `With<WorldObjectId>`, attaches reflected components from `WorldObjectDefRegistry` and a placeholder mesh
 6. Unit tests verify deserialization success and error paths
 7. Integration tests verify the full pipeline: RON file → load → query components
 8. Debug UI button sends a `SpawnWorldObjectRequest` to the server, which spawns a test tree at the requested position
 
 ### Example RON file (`assets/objects/tree_circle.object.ron`):
 ```ron
-(
-    category: Scenery,
-    visual: Vox("models/trees/tree_circle.vox"),
-    collider: Some(Cylinder(radius: 0.5, height: 3.0)),
-    components: {
-        "protocol::Health": (
-            current: 50.0,
-            max: 50.0,
-        ),
-    },
-)
+{
+    "protocol::world_object::types::ObjectCategory": Scenery,
+    "protocol::world_object::types::VisualKind": Vox("models/trees/tree_circle.vox"),
+    "avian3d::collision::collider::constructor::ColliderConstructor": Cylinder(radius: 0.5, height: 3.0),
+    "protocol::Health": (
+        current: 50.0,
+        max: 50.0,
+    ),
+    "avian3d::dynamics::rigid_body::RigidBody": Static,
+    "avian3d::collision::collider::layers::CollisionLayers": (
+        memberships: (16),
+        filters: (2),
+    ),
+    "avian3d::physics_transform::transform::Position": ((5.0, 5.0, 5.0)),
+}
 ```
 
 ## What We're NOT Doing
@@ -58,23 +64,36 @@ Implement a data-driven world object definition system using RON assets with Ref
 
 ## Implementation Approach
 
-Follow the ability system pattern exactly for loading infrastructure. Diverge only where the custom `AssetLoader` replaces `RonAssetPlugin` (required for `TypeRegistry` access). Shared utilities live in `protocol`. Server spawning lives in `server`. Client reaction lives in `client`. Component types used in RON files must be registered with `#[reflect(Component, Default)]` and `app.register_type::<T>()`.
+Follow the ability system pattern exactly for loading infrastructure. Diverge only where the custom `AssetLoader` replaces `RonAssetPlugin` (required for `TypeRegistry` access). Shared utilities live in `protocol`. Server spawning lives in `server`. Client reaction lives in `client`. Component types used in RON files must be registered with `#[reflect(Component)]` and `app.register_type::<T>()`.
+
+**Key design decision**: `WorldObjectDef` contains only `components: Vec<Box<dyn PartialReflect>>` — a flat list of type-erased components. There are no typed fields for `category`, `visual`, or `collider`. Everything is a component in the same flat map. This eliminates the need for a custom struct-level deserializer (`WorldObjectDefSeed`/`WorldObjectDefVisitor`) and makes the RON format maximally extensible — any registered `Component` type can be added to an object definition without code changes.
 
 ---
 
-## Phase 1: Core Types and Custom AssetLoader
+## Phase 1: Core Types, Custom AssetLoader, and Dependency Features
 
 ### Overview
-Define `WorldObjectDef`, `WorldObjectId`, `ObjectCategory`, `VisualKind`. Implement `WorldObjectLoader` using `TypedReflectDeserializer`. Register the loader with Bevy.
+Define `WorldObjectDef`, `WorldObjectId`, `ObjectCategory`, `VisualKind`. Implement `WorldObjectLoader` using `TypedReflectDeserializer`. Add `serialize` feature to avian3d and `avian3d` feature to lightyear. Register the loader with Bevy.
 
 ### Changes Required:
 
-#### 1. Add `bevy_asset` feature to protocol crate
+#### 1. Add dependency features
+**File**: `Cargo.toml` (workspace root)
+
+Add `serialize` feature to avian3d to enable `Serialize`/`Deserialize` on physics types:
+```toml
+avian3d = { version = "0.5.0", default-features = false, features = ["3d", "f32", "parry-f32", "default-collider", "collider-from-mesh", "serialize"] }
+```
+
 **File**: `crates/protocol/Cargo.toml`
 
-Add `bevy_asset` to the bevy features list (needed for `AssetLoader` trait):
+Add `bevy_asset` to bevy features, `avian3d` feature to lightyear, and `serialize` feature to avian3d:
 ```toml
+[dependencies]
+avian3d = { workspace = true, features = ["serialize"] }
 bevy = { workspace = true, features = ["bevy_color", "bevy_state", "bevy_asset"] }
+lightyear = { workspace = true, features = ["avian3d", "leafwing"] }
+serde = { version = "1.0", features = ["derive"] }
 ```
 
 #### 2. Create world_object module
@@ -94,18 +113,12 @@ The module is split into focused files under `crates/protocol/src/world_object/`
 ##### Types
 **File**: `crates/protocol/src/world_object/types.rs`
 
-`WorldObjectId` gets the full set of derives it will need across all phases — including Lightyear networking — from the start:
+`WorldObjectId` gets the full set of derives it will need across all phases — including Lightyear networking — from the start. `ObjectCategory` and `VisualKind` are `Component` types with `#[reflect(Component, Serialize, Deserialize)]` so they can appear in the RON component map:
 
 ```rust
-use avian3d::prelude::ColliderConstructor;
-use bevy::asset::io::Reader;
-use bevy::asset::{Asset, AssetLoader, LoadContext};
 use bevy::prelude::*;
-use bevy::reflect::serde::{TypeRegistrationDeserializer, TypedReflectDeserializer};
-use bevy::reflect::{PartialReflect, ReflectFromReflect, TypeRegistry, TypeRegistryArc};
-use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, Visitor};
+use bevy::reflect::PartialReflect;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fmt;
 
 /// Unique identifier for a world object definition. Derived from the `.object.ron` filename.
@@ -116,7 +129,8 @@ use std::fmt;
 pub struct WorldObjectId(pub String);
 
 /// Broad classification of world objects.
-#[derive(Clone, Debug, Serialize, Deserialize, Reflect)]
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
+#[reflect(Component, Serialize, Deserialize)]
 pub enum ObjectCategory {
     Scenery,
     Interactive,
@@ -129,7 +143,8 @@ pub enum ObjectCategory {
 ///
 /// Visual assets are resolved lazily at spawn time via `asset_server.load`, following
 /// the sprite rig cross-reference pattern. Deferred to the vox loading plan.
-#[derive(Clone, Debug, Serialize, Deserialize, Reflect)]
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
+#[reflect(Component, Serialize, Deserialize)]
 pub enum VisualKind {
     /// Path to a .vox model relative to assets/.
     Vox(String),
@@ -143,14 +158,10 @@ pub enum VisualKind {
 
 /// A loaded world object definition.
 ///
-/// Holds the full data needed to spawn a world object entity on any side.
-/// Components are stored as type-erased reflect values; they are inserted via
+/// All fields are stored as type-erased reflect components. They are inserted via
 /// `apply_object_components`, which uses `ReflectComponent::insert` on each.
 #[derive(Asset, TypePath)]
 pub struct WorldObjectDef {
-    pub category: ObjectCategory,
-    pub visual: VisualKind,
-    pub collider: Option<ColliderConstructor>,
     /// Reflect components deserialized from RON via `TypeRegistry`.
     /// Inserted on both server and client via `apply_object_components`.
     pub components: Vec<Box<dyn PartialReflect>>,
@@ -159,10 +170,15 @@ pub struct WorldObjectDef {
 impl Clone for WorldObjectDef {
     fn clone(&self) -> Self {
         Self {
-            category: self.category.clone(),
-            visual: self.visual.clone(),
-            collider: self.collider.clone(),
-            components: self.components.iter().map(|c| c.clone_value()).collect(),
+            components: self
+                .components
+                .iter()
+                .map(|c| {
+                    c.reflect_clone()
+                        .expect("world object component must be cloneable")
+                        .into_partial_reflect()
+                })
+                .collect(),
         }
     }
 }
@@ -170,12 +186,11 @@ impl Clone for WorldObjectDef {
 impl fmt::Debug for WorldObjectDef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WorldObjectDef")
-            .field("category", &self.category)
-            .field("visual", &self.visual)
-            .field("collider", &self.collider)
             .field(
                 "components",
-                &self.components.iter()
+                &self
+                    .components
+                    .iter()
                     .map(|c| c.reflect_type_path())
                     .collect::<Vec<_>>(),
             )
@@ -189,7 +204,8 @@ impl fmt::Debug for WorldObjectDef {
 
 ```rust
 /// Custom asset loader that uses `TypeRegistry` for reflect-based component deserialization.
-struct WorldObjectLoader {
+#[derive(TypePath)]
+pub(super) struct WorldObjectLoader {
     type_registry: TypeRegistryArc,
 }
 
@@ -227,73 +243,27 @@ impl AssetLoader for WorldObjectLoader {
 ##### Deserialization
 **File**: `crates/protocol/src/world_object/loader.rs` (continued)
 
-`WorldObjectDefSeed` implements `DeserializeSeed` with a map visitor that reads the four struct fields. The `category`, `visual`, and `collider` fields use standard serde deserialization; the `components` field delegates to a `DeserializeSeed` that wraps `ComponentMapVisitor`.
+The RON file is a flat map of type paths to component data. The entire file is deserialized by `ComponentMapDeserializer` — no struct-level visitor needed:
+
 ```rust
-fn deserialize_world_object(
+/// Deserializes a `WorldObjectDef` from RON bytes using the given `TypeRegistry`.
+///
+/// The RON format is a flat map of type paths to component data:
+/// ```ron
+/// {
+///     "protocol::world_object::ObjectCategory": Scenery,
+///     "protocol::world_object::VisualKind": Vox("models/trees/tree.vox"),
+///     "protocol::Health": (current: 50.0, max: 50.0),
+/// }
+/// ```
+pub fn deserialize_world_object(
     bytes: &[u8],
     registry: &TypeRegistry,
 ) -> Result<WorldObjectDef, WorldObjectLoadError> {
     let mut deserializer = ron::de::Deserializer::from_bytes(bytes)?;
-    let def = WorldObjectDefSeed { registry }.deserialize(&mut deserializer)?;
+    let components = ComponentMapDeserializer { registry }.deserialize(&mut deserializer)?;
     deserializer.end()?;
-    Ok(def)
-}
-
-struct WorldObjectDefSeed<'a> {
-    registry: &'a TypeRegistry,
-}
-
-impl<'a, 'de> DeserializeSeed<'de> for WorldObjectDefSeed<'a> {
-    type Value = WorldObjectDef;
-
-    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
-        deserializer.deserialize_map(WorldObjectDefVisitor { registry: self.registry })
-    }
-}
-
-struct WorldObjectDefVisitor<'a> {
-    registry: &'a TypeRegistry,
-}
-
-impl<'a, 'de> Visitor<'de> for WorldObjectDefVisitor<'a> {
-    type Value = WorldObjectDef;
-
-    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "a WorldObjectDef struct")
-    }
-
-    fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
-        let mut category = None;
-        let mut visual = None;
-        let mut collider = None;
-        let mut components = None;
-
-        while let Some(key) = map.next_key::<String>()? {
-            match key.as_str() {
-                "category" => category = Some(map.next_value::<ObjectCategory>()?),
-                "visual" => visual = Some(map.next_value::<VisualKind>()?),
-                "collider" => collider = Some(map.next_value::<Option<ColliderConstructor>>()?),
-                "components" => {
-                    components = Some(map.next_value_seed(ComponentMapDeserializer {
-                        registry: self.registry,
-                    })?)
-                }
-                other => {
-                    return Err(de::Error::unknown_field(
-                        other,
-                        &["category", "visual", "collider", "components"],
-                    ))
-                }
-            }
-        }
-
-        Ok(WorldObjectDef {
-            category: category.ok_or_else(|| de::Error::missing_field("category"))?,
-            visual: visual.ok_or_else(|| de::Error::missing_field("visual"))?,
-            collider: collider.unwrap_or(None),
-            components: components.unwrap_or_default(),
-        })
-    }
+    Ok(WorldObjectDef { components })
 }
 
 struct ComponentMapDeserializer<'a> {
@@ -304,7 +274,9 @@ impl<'a, 'de> DeserializeSeed<'de> for ComponentMapDeserializer<'a> {
     type Value = Vec<Box<dyn PartialReflect>>;
 
     fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
-        deserializer.deserialize_map(ComponentMapVisitor { registry: self.registry })
+        deserializer.deserialize_map(ComponentMapVisitor {
+            registry: self.registry,
+        })
     }
 }
 
@@ -326,7 +298,7 @@ impl<'a, 'de> Visitor<'de> for ComponentMapVisitor<'a> {
         {
             let value =
                 map.next_value_seed(TypedReflectDeserializer::new(registration, self.registry))?;
-            // Convert dynamic representation to concrete type if available.
+            // Attempt to convert the dynamic representation to a concrete type.
             let value = self
                 .registry
                 .get(registration.type_id())
@@ -344,7 +316,7 @@ impl<'a, 'de> Visitor<'de> for ComponentMapVisitor<'a> {
 ##### Error type
 **File**: `crates/protocol/src/world_object/types.rs` (continued)
 
-No `thiserror` or `anyhow` in the workspace — implement standard error traits manually:
+No `thiserror` or `anyhow` in the workspace — implement standard error traits manually. Includes `From<ron::error::Error>` in addition to `From<ron::error::SpannedError>` because `deserializer.end()` returns the unspanned variant:
 
 ```rust
 #[derive(Debug)]
@@ -377,6 +349,18 @@ impl From<std::io::Error> for WorldObjectLoadError {
 
 impl From<ron::error::SpannedError> for WorldObjectLoadError {
     fn from(e: ron::error::SpannedError) -> Self { Self::Ron(e) }
+}
+
+impl From<ron::error::Error> for WorldObjectLoadError {
+    fn from(e: ron::error::Error) -> Self {
+        Self::Ron(ron::error::SpannedError {
+            code: e,
+            span: ron::error::Span {
+                start: ron::error::Position { line: 0, col: 0 },
+                end: ron::error::Position { line: 0, col: 0 },
+            },
+        })
+    }
 }
 ```
 
@@ -426,62 +410,49 @@ fn insert_reflected_component(
 #### 3. Unit tests for deserialization
 **File**: `crates/protocol/src/world_object/loader.rs` (in `#[cfg(test)] mod tests`)
 
-`deserialize_world_object` is a pure function — testable without a Bevy `App`. Build a `TypeRegistry` manually, register needed types, test directly:
+`deserialize_world_object` is a pure function — testable without a Bevy `App`. Build a `TypeRegistry` manually, register needed types, test directly. Tests use the flat map format:
 
 ```rust
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world_object::types::{ObjectCategory, VisualKind};
+    use crate::Health;
 
     fn test_registry() -> TypeRegistry {
         let mut registry = TypeRegistry::default();
-        registry.register::<crate::Health>();
+        registry.register::<Health>();
+        registry.register::<ObjectCategory>();
+        registry.register::<VisualKind>();
         registry
     }
 
     #[test]
     fn deserialize_valid_world_object() {
         let registry = test_registry();
-        let ron = br#"(
-            category: Scenery,
-            visual: Vox("models/trees/tree_circle.vox"),
-            collider: Some(Cylinder(radius: 0.5, height: 3.0)),
-            components: {
-                "protocol::Health": (current: 50.0, max: 50.0),
-            },
-        )"#;
+        let ron = br#"{
+            "protocol::world_object::types::ObjectCategory": Scenery,
+            "protocol::world_object::types::VisualKind": Vox("models/trees/tree_circle.vox"),
+            "protocol::Health": (current: 50.0, max: 50.0),
+        }"#;
         let def = deserialize_world_object(ron, &registry).unwrap();
-        assert!(matches!(def.category, ObjectCategory::Scenery));
-        assert!(matches!(def.visual, VisualKind::Vox(_)));
-        assert!(def.collider.is_some());
-        assert_eq!(def.components.len(), 1);
+        assert_eq!(def.components.len(), 3);
     }
 
     #[test]
     fn deserialize_empty_components() {
         let registry = test_registry();
-        let ron = br#"(
-            category: Interactive,
-            visual: None,
-            collider: None,
-            components: {},
-        )"#;
+        let ron = br#"{}"#;
         let def = deserialize_world_object(ron, &registry).unwrap();
         assert!(def.components.is_empty());
-        assert!(def.collider.is_none());
     }
 
     #[test]
     fn deserialize_unregistered_type_errors() {
         let registry = TypeRegistry::default();
-        let ron = br#"(
-            category: Scenery,
-            visual: None,
-            collider: None,
-            components: {
-                "protocol::Health": (current: 1.0, max: 1.0),
-            },
-        )"#;
+        let ron = br#"{
+            "protocol::Health": (current: 1.0, max: 1.0),
+        }"#;
         assert!(deserialize_world_object(ron, &registry).is_err());
     }
 
@@ -489,16 +460,6 @@ mod tests {
     fn deserialize_malformed_ron_errors() {
         let registry = test_registry();
         assert!(deserialize_world_object(b"not valid ron {{{", &registry).is_err());
-    }
-
-    #[test]
-    fn deserialize_missing_field_errors() {
-        let registry = test_registry();
-        let ron = br#"(
-            category: Scenery,
-            visual: None,
-        )"#; // missing collider and components
-        assert!(deserialize_world_object(ron, &registry).is_err());
     }
 }
 ```
@@ -603,10 +564,20 @@ impl Plugin for WorldObjectPlugin {
                 .run_if(in_state(crate::app_state::AppState::Loading)),
         );
 
-        app.add_systems(Update, (insert_world_object_defs, reload_world_object_defs));
+        app.add_systems(
+            Update,
+            insert_world_object_defs.run_if(not(resource_exists::<WorldObjectDefRegistry>)),
+        );
+        app.add_systems(
+            Update,
+            reload_world_object_defs.run_if(in_state(AppState::Ready)),
+        );
 
-        // Register Health for RON component deserialization.
+        // Register types for RON reflect-based component deserialization.
         app.register_type::<crate::Health>();
+        app.register_type::<ObjectCategory>();
+        app.register_type::<VisualKind>();
+        app.register_type::<ColliderConstructor>();
     }
 }
 ```
@@ -635,10 +606,7 @@ fn insert_world_object_defs(
     loaded_folders: Res<Assets<LoadedFolder>>,
     object_assets: Res<Assets<WorldObjectDef>>,
     asset_server: Res<AssetServer>,
-    existing: Option<Res<WorldObjectDefRegistry>>,
 ) {
-    // Only insert once, on first successful load.
-    if existing.is_some() { return; }
     let Some(folder_handle) = folder_handle else { return; };
     let Some(folder) = loaded_folders.get(&folder_handle.0) else { return; };
 
@@ -652,6 +620,8 @@ fn insert_world_object_defs(
     commands.insert_resource(WorldObjectDefRegistry { objects });
 }
 ```
+
+Note: `insert_world_object_defs` uses `run_if(not(resource_exists::<WorldObjectDefRegistry>))` in the plugin instead of an internal `existing: Option<Res<...>>` guard.
 
 **WASM** (`cfg(target_arch = "wasm32")`): Analogous to the ability WASM pattern — load manifest, on manifest ready load individual files.
 
@@ -715,17 +685,21 @@ app.add_plugins(WorldObjectPlugin);
 **File**: `assets/objects/tree_circle.object.ron`
 
 ```ron
-(
-    category: Scenery,
-    visual: Vox("models/trees/tree_circle.vox"),
-    collider: Some(Cylinder(radius: 0.5, height: 3.0)),
-    components: {
-        "protocol::Health": (
-            current: 50.0,
-            max: 50.0,
-        ),
-    },
-)
+{
+    "protocol::world_object::types::ObjectCategory": Scenery,
+    "protocol::world_object::types::VisualKind": Vox("models/trees/tree_circle.vox"),
+    "avian3d::collision::collider::constructor::ColliderConstructor": Cylinder(radius: 0.5, height: 3.0),
+    "protocol::Health": (
+        current: 50.0,
+        max: 50.0,
+    ),
+    "avian3d::dynamics::rigid_body::RigidBody": Static,
+    "avian3d::collision::collider::layers::CollisionLayers": (
+        memberships: (16),
+        filters: (2),
+    ),
+    "avian3d::physics_transform::transform::Position": ((5.0, 5.0, 5.0)),
+}
 ```
 
 **File**: `assets/objects.manifest.ron` (manually maintained)
@@ -749,12 +723,13 @@ app.add_plugins(WorldObjectPlugin);
 
 ### Overview
 
-Register `WorldObjectId` with Lightyear. Server spawns world objects with `Replicate` (no `PredictionTarget` — static objects). Client detects the single `Replicated` confirmed entity and attaches physics + reflected components. No duplication.
+Register `WorldObjectId` with Lightyear. Server spawns world objects with `Replicate` (no `PredictionTarget` — static objects). Client detects the single `Replicated` confirmed entity and attaches reflected components plus a placeholder mesh. No duplication.
 
 ### Replication Flow
 
 ```
-Server: spawn(WorldObjectId, Position, Rotation, MapInstanceId, Replicate)
+Server: spawn(WorldObjectId, Rotation, MapInstanceId, Replicate)
+         + apply_object_components(Position, RigidBody, CollisionLayers, ColliderConstructor, etc.)
                 │
                 │  MapInstanceId observer fires → RoomEvent::AddEntity
                 │  (client on same map now sees this entity)
@@ -765,10 +740,9 @@ Client: receives confirmed entity with Replicated marker
                 │  on_world_object_replicated fires (Added<Replicated> + With<WorldObjectId>)
                 │
                 ▼
-Client entity: WorldObjectId, Position, Rotation, MapInstanceId, Replicated
-             + ColliderConstructor (from def)
-             + reflected components (Health, etc.) (from def)
-             + [visual deferred to vox plan]
+Client entity: WorldObjectId, Replicated
+             + all reflected components from def (Position, ObjectCategory, VisualKind, etc.)
+             + placeholder Mesh3d derived from ColliderConstructor
 ```
 
 Because there is **no `PredictionTarget`**, Lightyear does not create a predicted or interpolated shadow. Each client has exactly one entity per world object.
@@ -786,64 +760,76 @@ app.register_component::<world_object::WorldObjectId>();
 #### 2. Server spawn function
 **File**: `crates/server/src/world_object.rs` (new file)
 
-The server is the sole spawner of world objects. This function belongs in the server crate because it inserts `Replicate`, which is a Lightyear server-only concept:
+The server is the sole spawner of world objects. This function belongs in the server crate because it inserts `Replicate`, which is a Lightyear server-only concept. Note: **no `position` parameter** — `Position` and all other gameplay components come from the definition's reflected components via `apply_object_components`:
 
 ```rust
-use lightyear::prelude::server::{Replicate, NetworkTarget};
-use protocol::world_object::{WorldObjectId, WorldObjectDef, WorldObjectDefRegistry, apply_object_components};
-use protocol::map::MapInstanceId;
+use avian3d::prelude::Rotation;
 use bevy::prelude::*;
+use lightyear::prelude::*;
+use protocol::map::MapInstanceId;
+use protocol::world_object::{apply_object_components, WorldObjectDef, WorldObjectId};
 
 /// Spawns a world object entity on the server.
 ///
 /// Lightyear replicates it to all clients on the same map via the room system.
-/// The `MapInstanceId` component triggers `on_map_instance_id_added`, which
-/// automatically adds the entity to the correct Lightyear room.
+/// `MapInstanceId` triggers `on_map_instance_id_added`, which automatically adds
+/// the entity to the correct Lightyear room.
+///
+/// All gameplay components (Position, RigidBody, CollisionLayers, ColliderConstructor,
+/// ObjectCategory, VisualKind, etc.) come from the definition's reflected components.
 pub fn spawn_world_object(
     commands: &mut Commands,
     id: WorldObjectId,
     def: &WorldObjectDef,
-    position: Vec3,
     map_id: MapInstanceId,
     registry: &AppTypeRegistry,
 ) -> Entity {
-    let mut entity = commands.spawn((
-        id,
-        Position(position),
-        Rotation::default(),
-        map_id,
-        Replicate::to_clients(NetworkTarget::All),
-        // No PredictionTarget — world objects do not need client-side prediction
-    ));
+    let entity = commands
+        .spawn((
+            id,
+            Rotation::default(),
+            map_id,
+            Replicate::to_clients(NetworkTarget::All),
+        ))
+        .id();
 
-    if let Some(collider) = &def.collider {
-        entity.insert(collider.clone());
-    }
-
-    let entity_id = entity.id();
-    let components = def.components.iter().map(|c| c.clone_value()).collect();
-    apply_object_components(commands, entity_id, components, registry.0.clone());
-    entity_id
+    let components = def
+        .components
+        .iter()
+        .map(|c| {
+            c.reflect_clone()
+                .expect("world object component must be cloneable")
+                .into_partial_reflect()
+        })
+        .collect();
+    apply_object_components(commands, entity, components, registry.0.clone());
+    entity
 }
 ```
 
 #### 3. Client-side observer for replicated world objects
 **File**: `crates/client/src/world_object.rs` (new file)
 
+The client hydrates replicated world objects with all definition components and a placeholder mesh derived from the collider shape (temporary until vox loading is implemented):
+
 ```rust
+use avian3d::prelude::ColliderConstructor;
 use bevy::prelude::*;
 use lightyear::prelude::Replicated;
-use protocol::world_object::{WorldObjectId, WorldObjectDefRegistry, apply_object_components};
+use protocol::world_object::{apply_object_components, WorldObjectDefRegistry, WorldObjectId};
 
 /// Reacts when Lightyear replicates a world object entity to this client.
 ///
-/// Attaches physics (collider) and reflected gameplay components from the definition.
-/// Visual attachment is deferred to the vox loading plan.
+/// Attaches all reflected gameplay components (including `RigidBody`, `CollisionLayers`,
+/// `ColliderConstructor`, `ObjectCategory`, `VisualKind`, etc.) from the definition,
+/// then inserts a placeholder mesh derived from the collider shape.
 pub fn on_world_object_replicated(
     query: Query<(Entity, &WorldObjectId), Added<Replicated>>,
     registry: Res<WorldObjectDefRegistry>,
     type_registry: Res<AppTypeRegistry>,
     mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     for (entity, id) in &query {
         let Some(def) = registry.get(id) else {
@@ -851,12 +837,72 @@ pub fn on_world_object_replicated(
             continue;
         };
 
-        if let Some(collider) = &def.collider {
-            commands.entity(entity).insert(collider.clone());
-        }
+        // Extract collider from the components vec for the placeholder mesh.
+        let collider = def
+            .components
+            .iter()
+            .find_map(|c| c.try_downcast_ref::<ColliderConstructor>().cloned());
 
-        let components = def.components.iter().map(|c| c.clone_value()).collect();
+        insert_placeholder_mesh(
+            &mut commands.entity(entity),
+            collider.as_ref(),
+            &mut meshes,
+            &mut materials,
+        );
+
+        let components = def
+            .components
+            .iter()
+            .map(|c| {
+                c.reflect_clone()
+                    .expect("world object component must be cloneable")
+                    .into_partial_reflect()
+            })
+            .collect();
         apply_object_components(&mut commands, entity, components, type_registry.0.clone());
+    }
+}
+
+/// Inserts a `Mesh3d` placeholder derived from the collider shape.
+///
+/// Once the vox loading pipeline is implemented, this will be replaced by the
+/// actual visual from `VisualKind`.
+fn insert_placeholder_mesh(
+    ecmds: &mut EntityCommands,
+    collider: Option<&ColliderConstructor>,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    let Some(mesh) = collider_to_mesh(collider) else {
+        return;
+    };
+    let mesh_handle = meshes.add(mesh);
+    let material_handle = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.3, 0.6, 0.2),
+        ..default()
+    });
+    ecmds.insert((Mesh3d(mesh_handle), MeshMaterial3d(material_handle)));
+}
+
+/// Converts a `ColliderConstructor` into an approximate `Mesh` for visualization.
+fn collider_to_mesh(collider: Option<&ColliderConstructor>) -> Option<Mesh> {
+    match collider? {
+        ColliderConstructor::Sphere { radius } => Some(Sphere::new(*radius).into()),
+        ColliderConstructor::Cuboid {
+            x_length,
+            y_length,
+            z_length,
+        } => Some(Cuboid::new(*x_length, *y_length, *z_length).into()),
+        ColliderConstructor::Cylinder { radius, height } => {
+            Some(Cylinder::new(*radius, *height).into())
+        }
+        ColliderConstructor::Capsule { radius, height } => {
+            Some(Capsule3d::new(*radius, *height).into())
+        }
+        _ => {
+            trace!("No placeholder mesh for collider shape");
+            None
+        }
     }
 }
 ```
@@ -893,24 +939,19 @@ Test the full pipeline: load `.object.ron` → verify `WorldObjectDefRegistry` �
 
 **File**: `crates/protocol/tests/assets/objects/test_tree.object.ron`
 ```ron
-(
-    category: Scenery,
-    visual: Vox("models/trees/tree_circle.vox"),
-    collider: Some(Cylinder(radius: 0.5, height: 3.0)),
-    components: {
-        "protocol::Health": (current: 50.0, max: 50.0),
-    },
-)
+{
+    "protocol::world_object::types::ObjectCategory": Scenery,
+    "protocol::world_object::types::VisualKind": Vox("models/trees/tree_circle.vox"),
+    "protocol::Health": (current: 50.0, max: 50.0),
+}
 ```
 
 **File**: `crates/protocol/tests/assets/objects/bare_rock.object.ron`
 ```ron
-(
-    category: Scenery,
-    visual: None,
-    collider: Some(Sphere(radius: 1.0)),
-    components: {},
-)
+{
+    "protocol::world_object::types::ObjectCategory": Scenery,
+    "protocol::world_object::types::VisualKind": None,
+}
 ```
 
 **File**: `crates/protocol/tests/assets/objects.manifest.ron`
@@ -923,7 +964,7 @@ Test the full pipeline: load `.object.ron` → verify `WorldObjectDefRegistry` �
 
 ```toml
 [dev-dependencies]
-bevy = { workspace = true, features = ["bevy_color", "bevy_state", "bevy_asset", "bevy_log"] }
+bevy = { workspace = true, features = ["bevy_color", "bevy_state", "bevy_mesh", "bevy_asset"] }
 ```
 
 #### 3. Integration test file
@@ -964,9 +1005,7 @@ fn world_object_defs_loaded() {
     let defs = app.world().resource::<WorldObjectDefRegistry>();
     let id = WorldObjectId("test_tree".to_string());
     let def = defs.get(&id).expect("test_tree should be loaded");
-    assert!(matches!(def.category, ObjectCategory::Scenery));
-    assert!(def.collider.is_some());
-    assert_eq!(def.components.len(), 1);
+    assert_eq!(def.components.len(), 3); // ObjectCategory, VisualKind, Health
 }
 
 #[test]
@@ -980,7 +1019,11 @@ fn world_object_reflected_components_deserialize() {
 
     // Spawn with apply_object_components, then verify Health landed on the entity.
     let entity = app.world_mut().spawn_empty().id();
-    let components: Vec<_> = def.components.iter().map(|c| c.clone_value()).collect();
+    let components: Vec<_> = def.components.iter().map(|c| {
+        c.reflect_clone()
+            .expect("component must be cloneable")
+            .into_partial_reflect()
+    }).collect();
     let registry = app.world().resource::<AppTypeRegistry>().0.clone();
 
     app.world_mut().run_system_once(move |mut commands: Commands| {
@@ -994,15 +1037,14 @@ fn world_object_reflected_components_deserialize() {
 }
 
 #[test]
-fn world_object_without_components_loads_clean() {
+fn world_object_without_extra_components_loads_clean() {
     let mut app = test_app();
     tick_until(&mut app, |app| app.world().get_resource::<WorldObjectDefRegistry>().is_some());
 
     let defs = app.world().resource::<WorldObjectDefRegistry>();
     let id = WorldObjectId("bare_rock".to_string());
     let def = defs.get(&id).expect("bare_rock should be loaded");
-    assert!(def.components.is_empty());
-    assert!(def.collider.is_some());
+    assert_eq!(def.components.len(), 2); // ObjectCategory, VisualKind only
 }
 ```
 
@@ -1065,7 +1107,6 @@ pub fn handle_spawn_world_object_request(
                 &mut commands,
                 id,
                 def,
-                request.position,
                 MapInstanceId::Overworld,
                 &registry,
             );
@@ -1091,7 +1132,7 @@ Follow the existing `MapSwitchButton` pattern:
 #### Manual Verification:
 - [ ] Start server + client, click "Spawn Tree" button
 - [ ] Server logs spawn of `tree_circle`
-- [ ] World object entity appears on client (confirmed via entity inspector or log)
+- [ ] World object entity appears on client with placeholder mesh (confirmed via entity inspector or log)
 - [ ] Entity has `Health` component with `current: 50, max: 50`
 
 ---
@@ -1099,21 +1140,20 @@ Follow the existing `MapSwitchButton` pattern:
 ## Testing Strategy
 
 ### Unit Tests (Phase 1):
-- `deserialize_valid_world_object` — valid RON → correct fields
-- `deserialize_empty_components` — empty components map works
+- `deserialize_valid_world_object` — valid RON flat map → correct component count
+- `deserialize_empty_components` — empty map `{}` works
 - `deserialize_unregistered_type_errors` — unregistered type path produces error
 - `deserialize_malformed_ron_errors` — invalid RON produces error
-- `deserialize_missing_field_errors` — missing required fields produces error
 
 ### Integration Tests (Phase 4):
 - `world_object_defs_loaded` — verifies RON → asset → registry pipeline
 - `world_object_reflected_components_deserialize` — verifies reflected components land on entity
-- `world_object_without_components_loads_clean` — verifies empty components map works
+- `world_object_without_extra_components_loads_clean` — verifies minimal component set works
 
 ### Manual Testing:
 1. `cargo server` — verify log shows loaded world object count
 2. Edit `.object.ron` while server runs — verify hot-reload log message
-3. `cargo server` + `cargo client` — click "Spawn Tree", verify replication and component presence
+3. `cargo server` + `cargo client` — click "Spawn Tree", verify replication, placeholder mesh, and component presence
 
 ## Performance Considerations
 

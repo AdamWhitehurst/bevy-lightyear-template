@@ -1,14 +1,13 @@
 use avian3d::prelude::ColliderConstructor;
 use bevy::prelude::*;
 use lightyear::prelude::Replicated;
-use protocol::world_object::{
-    apply_object_components, VisualKind, WorldObjectDefRegistry, WorldObjectId,
-};
+use protocol::world_object::{apply_object_components, WorldObjectDefRegistry, WorldObjectId};
 
 /// Reacts when Lightyear replicates a world object entity to this client.
 ///
-/// Attaches collider, placeholder mesh, and reflected gameplay components
-/// (including `RigidBody`, `CollisionLayers`, etc.) from the definition.
+/// Attaches all reflected gameplay components (including `RigidBody`, `CollisionLayers`,
+/// `ColliderConstructor`, `ObjectCategory`, `VisualKind`, etc.) from the definition,
+/// then inserts a placeholder mesh derived from the collider shape.
 pub fn on_world_object_replicated(
     query: Query<(Entity, &WorldObjectId), Added<Replicated>>,
     registry: Res<WorldObjectDefRegistry>,
@@ -23,14 +22,15 @@ pub fn on_world_object_replicated(
             continue;
         };
 
-        if let Some(collider) = &def.collider {
-            commands.entity(entity).insert(collider.clone());
-        }
+        // Extract collider from the components vec for the placeholder mesh.
+        let collider = def
+            .components
+            .iter()
+            .find_map(|c| c.try_downcast_ref::<ColliderConstructor>().cloned());
 
         insert_placeholder_mesh(
             &mut commands.entity(entity),
-            &def.collider,
-            &def.visual,
+            collider.as_ref(),
             &mut meshes,
             &mut materials,
         );
@@ -54,8 +54,7 @@ pub fn on_world_object_replicated(
 /// actual visual from `VisualKind`.
 fn insert_placeholder_mesh(
     ecmds: &mut EntityCommands,
-    collider: &Option<ColliderConstructor>,
-    _visual: &VisualKind,
+    collider: Option<&ColliderConstructor>,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
 ) {
@@ -71,8 +70,8 @@ fn insert_placeholder_mesh(
 }
 
 /// Converts a `ColliderConstructor` into an approximate `Mesh` for visualization.
-fn collider_to_mesh(collider: &Option<ColliderConstructor>) -> Option<Mesh> {
-    match collider.as_ref()? {
+fn collider_to_mesh(collider: Option<&ColliderConstructor>) -> Option<Mesh> {
+    match collider? {
         ColliderConstructor::Sphere { radius } => Some(Sphere::new(*radius).into()),
         ColliderConstructor::Cuboid {
             x_length,

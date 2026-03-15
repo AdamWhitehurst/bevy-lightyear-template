@@ -1,9 +1,10 @@
+use avian3d::prelude::ColliderConstructor;
 use bevy::prelude::*;
 
 use super::loader::WorldObjectLoader;
 use super::loading::{insert_world_object_defs, load_world_object_defs, reload_world_object_defs};
 use super::registry::WorldObjectDefRegistry;
-use super::types::WorldObjectDef;
+use super::types::{ObjectCategory, VisualKind, WorldObjectDef};
 use crate::app_state::AppState;
 use crate::Health;
 
@@ -45,7 +46,10 @@ impl Plugin for WorldObjectPlugin {
             reload_world_object_defs.run_if(in_state(AppState::Ready)),
         );
 
-        // Register Health for RON component deserialization.
+        // Register types for RON reflect-based component deserialization.
         app.register_type::<Health>();
+        app.register_type::<ObjectCategory>();
+        app.register_type::<VisualKind>();
+        app.register_type::<ColliderConstructor>();
     }
 }

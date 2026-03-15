@@ -1,19 +1,17 @@
-(
-    category: Scenery,
-    visual: Vox("models/trees/tree_circle.vox"),
-    collider: Some(Cylinder(radius: 0.5, height: 3.0)),
-    components: {
-        "protocol::Health": (
-            current: 50.0,
-            max: 50.0,
-        ),
-        // Static — immovable physics body
-        "avian3d::dynamics::rigid_body::RigidBody": Static,
-        // Terrain(16) collides with Character(2)
-        "avian3d::collision::collider::layers::CollisionLayers": (
-            memberships: (16),
-            filters: (2),
-        ),
-        "avian3d::physics_transform::transform::Position": ((5.0, 5.0, 5.0)),
-    },
-)
+{
+    "protocol::world_object::types::ObjectCategory": Scenery,
+    "protocol::world_object::types::VisualKind": Vox("models/trees/tree_circle.vox"),
+    "avian3d::collision::collider::constructor::ColliderConstructor": Cylinder(radius: 0.5, height: 3.0),
+    "protocol::Health": (
+        current: 50.0,
+        max: 50.0,
+    ),
+    // Static — immovable physics body
+    "avian3d::dynamics::rigid_body::RigidBody": Static,
+    // Damageable(32) collides with Character(2), Hitbox(4), Projectile(8)
+    "avian3d::collision::collider::layers::CollisionLayers": (
+        memberships: (32),
+        filters: (14),
+    ),
+    "avian3d::physics_transform::transform::Position": ((5.0, 5.0, 5.0)),
+}

@@ -1,4 +1,3 @@
-use avian3d::prelude::ColliderConstructor;
 use bevy::prelude::*;
 use bevy::reflect::PartialReflect;
 use serde::{Deserialize, Serialize};
@@ -12,7 +11,8 @@ use std::fmt;
 pub struct WorldObjectId(pub String);
 
 /// Broad classification of world objects.
-#[derive(Clone, Debug, Serialize, Deserialize, Reflect)]
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
+#[reflect(Component, Serialize, Deserialize)]
 pub enum ObjectCategory {
     Scenery,
     Interactive,
@@ -25,7 +25,8 @@ pub enum ObjectCategory {
 ///
 /// Visual assets are resolved lazily at spawn time via `asset_server.load`, following
 /// the sprite rig cross-reference pattern. Deferred to the vox loading plan.
-#[derive(Clone, Debug, Serialize, Deserialize, Reflect)]
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
+#[reflect(Component, Serialize, Deserialize)]
 pub enum VisualKind {
     /// Path to a .vox model relative to assets/.
     Vox(String),
@@ -39,14 +40,10 @@ pub enum VisualKind {
 
 /// A loaded world object definition.
 ///
-/// Holds the full data needed to spawn a world object entity on any side.
-/// Components are stored as type-erased reflect values; they are inserted via
+/// All fields are stored as type-erased reflect components. They are inserted via
 /// `apply_object_components`, which uses `ReflectComponent::insert` on each.
 #[derive(Asset, TypePath)]
 pub struct WorldObjectDef {
-    pub category: ObjectCategory,
-    pub visual: VisualKind,
-    pub collider: Option<ColliderConstructor>,
     /// Reflect components deserialized from RON via `TypeRegistry`.
     /// Inserted on both server and client via `apply_object_components`.
     pub components: Vec<Box<dyn PartialReflect>>,
@@ -55,9 +52,6 @@ pub struct WorldObjectDef {
 impl Clone for WorldObjectDef {
     fn clone(&self) -> Self {
         Self {
-            category: self.category.clone(),
-            visual: self.visual.clone(),
-            collider: self.collider.clone(),
             components: self
                 .components
                 .iter()
@@ -74,9 +68,6 @@ impl Clone for WorldObjectDef {
 impl fmt::Debug for WorldObjectDef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("WorldObjectDef")
-            .field("category", &self.category)
-            .field("visual", &self.visual)
-            .field("collider", &self.collider)
             .field(
                 "components",
                 &self

@@ -10,8 +10,8 @@ use protocol::world_object::{apply_object_components, WorldObjectDef, WorldObjec
 /// `MapInstanceId` triggers `on_map_instance_id_added`, which automatically adds
 /// the entity to the correct Lightyear room.
 ///
-/// Position, RigidBody, CollisionLayers, etc. come from the definition's
-/// reflected components map.
+/// All gameplay components (Position, RigidBody, CollisionLayers, ColliderConstructor,
+/// ObjectCategory, VisualKind, etc.) come from the definition's reflected components.
 pub fn spawn_world_object(
     commands: &mut Commands,
     id: WorldObjectId,
@@ -19,18 +19,15 @@ pub fn spawn_world_object(
     map_id: MapInstanceId,
     registry: &AppTypeRegistry,
 ) -> Entity {
-    let mut entity = commands.spawn((
-        id,
-        Rotation::default(),
-        map_id,
-        Replicate::to_clients(NetworkTarget::All),
-    ));
+    let entity = commands
+        .spawn((
+            id,
+            Rotation::default(),
+            map_id,
+            Replicate::to_clients(NetworkTarget::All),
+        ))
+        .id();
 
-    if let Some(collider) = &def.collider {
-        entity.insert(collider.clone());
-    }
-
-    let entity_id = entity.id();
     let components = def
         .components
         .iter()
@@ -40,6 +37,6 @@ pub fn spawn_world_object(
                 .into_partial_reflect()
         })
         .collect();
-    apply_object_components(commands, entity_id, components, registry.0.clone());
-    entity_id
+    apply_object_components(commands, entity, components, registry.0.clone());
+    entity
 }
