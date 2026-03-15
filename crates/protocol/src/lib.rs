@@ -219,6 +219,9 @@ impl Plugin for ProtocolPlugin {
         // Map instance identity
         app.register_component::<MapInstanceId>();
 
+        // World objects — static, no prediction needed
+        app.register_component::<world_object::WorldObjectId>();
+
         // Marker components
         app.register_component::<PlayerId>();
         app.register_component::<ColorComponent>().add_prediction();

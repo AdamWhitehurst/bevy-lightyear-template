@@ -8,6 +8,7 @@ use lightyear::prelude::*;
 use protocol::*;
 
 use crate::map::load_startup_entities;
+use crate::world_object::spawn_world_object;
 use voxel_map_engine::prelude::ChunkTarget;
 
 /// Default spawn position used for respawning and initial player placement.
@@ -31,6 +32,7 @@ impl Plugin for ServerGameplayPlugin {
             ),
         );
         app.add_systems(Update, sync_ability_manifest);
+        app.add_systems(OnEnter(AppState::Ready), spawn_test_tree);
     }
 }
 
@@ -177,6 +179,26 @@ fn expire_invulnerability(
             commands.entity(entity).remove::<Invulnerable>();
         }
     }
+}
+
+/// Spawns a test tree world object. Position is defined in the RON asset.
+fn spawn_test_tree(
+    mut commands: Commands,
+    defs: Res<WorldObjectDefRegistry>,
+    type_registry: Res<AppTypeRegistry>,
+) {
+    let id = WorldObjectId("tree_circle".into());
+    let def = defs
+        .get(&id)
+        .expect("tree_circle world object definition must be loaded");
+    let entity = spawn_world_object(
+        &mut commands,
+        id,
+        def,
+        MapInstanceId::Overworld,
+        &*type_registry,
+    );
+    info!("Spawned test tree (entity {entity:?})");
 }
 
 fn handle_connected(

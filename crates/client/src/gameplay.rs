@@ -4,12 +4,16 @@ use leafwing_input_manager::prelude::*;
 use lightyear::prelude::{Controlled, Interpolated, Predicted, Replicated};
 use protocol::*;
 
+use crate::world_object::on_world_object_replicated;
+
 pub struct ClientGameplayPlugin;
 
 impl Plugin for ClientGameplayPlugin {
     fn build(&self, app: &mut App) {
+        let ready = in_state(AppState::Ready);
         app.add_systems(Update, handle_new_character);
         app.add_systems(FixedUpdate, handle_character_movement);
+        app.add_systems(Update, on_world_object_replicated.run_if(ready));
     }
 }
 

@@ -1,6 +1,7 @@
 pub mod gameplay;
 pub mod map;
 pub mod network;
+pub mod world_object;
 
 use avian3d::prelude::PhysicsDebugPlugin;
 use bevy::prelude::*;

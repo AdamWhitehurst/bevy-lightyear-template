@@ -3,3 +3,4 @@ pub mod gameplay;
 pub mod map;
 pub mod network;
 pub mod persistence;
+pub mod world_object;

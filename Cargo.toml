@@ -30,7 +30,7 @@ exclude = [
 resolver = "2"
 
 [workspace.dependencies]
-avian3d = { version = "0.5.0", default-features = false, features = ["3d", "f32", "parry-f32", "default-collider", "collider-from-mesh"] }
+avian3d = { version = "0.5.0", default-features = false, features = ["3d", "f32", "parry-f32", "default-collider", "collider-from-mesh", "serialize"] }
 bevy = { version = "0.18", default-features = false }
 leafwing-input-manager = "0.20"
 voxel_map_engine = { path = "crates/voxel_map_engine" }
