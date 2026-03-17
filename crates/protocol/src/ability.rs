@@ -10,7 +10,7 @@ use leafwing_input_manager::prelude::ActionState;
 use lightyear::prelude::PredictionDespawnCommandsExt;
 use lightyear::prelude::{
     ControlledBy, DisableRollback, LocalTimeline, NetworkTarget, PreSpawned, PredictionTarget,
-    Replicate, Tick,
+    Replicate, Replicated, Tick,
 };
 use lightyear::utils::collections::EntityHashSet;
 use serde::{Deserialize, Serialize};
@@ -1666,7 +1666,7 @@ pub fn handle_ability_projectile_spawn(
             Option<&OnHitEffects>,
             &MapInstanceId,
         ),
-        Without<AbilityBullets>,
+        (Without<AbilityBullets>, Without<Replicated>),
     >,
 ) {
     for (spawn_entity, spawn_info, on_hit_effects, spawn_map_id) in &spawn_query {
