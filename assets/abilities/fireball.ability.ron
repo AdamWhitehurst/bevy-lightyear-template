@@ -3,7 +3,7 @@
     "protocol::ability::AbilityPhases": (startup: 6, active: 2, recovery: 8, cooldown: 42),
     "protocol::ability::OnTickEffects": ([(tick: 0, effect: Projectile(speed: 30.0, lifetime_ticks: 100))]),
     "protocol::ability::OnHitEffectDefs": ([
-        Damage(amount: 25.0, target: Victim),
+        Damage(amount: 10.0, target: Victim),
         ApplyForce(force: (0.0, 2.4, 7.65), frame: RelativePosition, target: Victim),
     ]),
 }
