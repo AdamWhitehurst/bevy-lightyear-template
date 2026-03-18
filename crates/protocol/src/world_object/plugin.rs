@@ -48,6 +48,7 @@ impl Plugin for WorldObjectPlugin {
 
         // Register types for RON reflect-based component deserialization.
         app.register_type::<Health>();
+        app.register_type::<crate::RespawnTimerConfig>();
         app.register_type::<ObjectCategory>();
         app.register_type::<VisualKind>();
         app.register_type::<ColliderConstructor>();

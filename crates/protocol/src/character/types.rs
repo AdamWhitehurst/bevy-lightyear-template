@@ -69,6 +69,32 @@ pub struct Invulnerable {
     pub expires_at: Tick,
 }
 
+/// Default respawn delay when no `RespawnTimerConfig` is present.
+pub const DEFAULT_RESPAWN_TICKS: u16 = 256;
+
+/// Per-entity configuration for respawn delay. Loadable from RON.
+#[derive(Component, Clone, Debug, PartialEq, Reflect, Serialize, Deserialize)]
+#[type_path = "protocol"]
+#[reflect(Component, Serialize, Deserialize)]
+pub struct RespawnTimerConfig {
+    pub duration_ticks: u16,
+}
+
+impl Default for RespawnTimerConfig {
+    fn default() -> Self {
+        Self {
+            duration_ticks: DEFAULT_RESPAWN_TICKS,
+        }
+    }
+}
+
+/// Marks an entity as dead and awaiting respawn. Inserted when Health reaches 0.
+/// Removed when the timer expires and respawn occurs.
+#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct RespawnTimer {
+    pub expires_at: Tick,
+}
+
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct ColorComponent(pub Color);
 

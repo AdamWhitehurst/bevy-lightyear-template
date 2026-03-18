@@ -28,7 +28,8 @@ pub use app_state::{AppState, AppStatePlugin, TrackedAssets};
 pub use character::{apply_movement, update_facing};
 pub use character::{
     CharacterMarker, CharacterPhysicsBundle, CharacterType, ColorComponent, DummyTarget, Health,
-    Invulnerable, PlayerId, RespawnPoint, CHARACTER_CAPSULE_HEIGHT, CHARACTER_CAPSULE_RADIUS,
+    Invulnerable, PlayerId, RespawnPoint, RespawnTimer, RespawnTimerConfig,
+    CHARACTER_CAPSULE_HEIGHT, CHARACTER_CAPSULE_RADIUS, DEFAULT_RESPAWN_TICKS,
 };
 pub use hit_detection::{
     character_collision_layers, damageable_collision_layers, hitbox_collision_layers,
@@ -156,6 +157,8 @@ impl Plugin for ProtocolPlugin {
         app.register_component::<CharacterType>().add_prediction();
         app.register_component::<Health>().add_prediction();
         app.register_component::<Invulnerable>().add_prediction();
+        app.register_component::<RespawnTimerConfig>();
+        app.register_component::<RespawnTimer>().add_prediction();
 
         // Velocity prediction without visual correction
         app.register_component::<LinearVelocity>()

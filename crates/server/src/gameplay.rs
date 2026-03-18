@@ -28,7 +28,8 @@ impl Plugin for ServerGameplayPlugin {
         app.add_systems(
             FixedUpdate,
             (
-                check_death_and_respawn.after(hit_detection::process_projectile_hits),
+                start_respawn_timer.after(hit_detection::process_projectile_hits),
+                process_respawn_timers.after(start_respawn_timer),
                 expire_invulnerability,
             ),
         );
@@ -77,6 +78,7 @@ fn spawn_dummy_target(mut commands: Commands, registry: Res<MapRegistry>) {
         CharacterType::Humanoid,
         MapInstanceId::Overworld,
         Health::new(100.0),
+        RespawnTimerConfig::default(),
         ChunkTarget::new(registry.get(&MapInstanceId::Overworld), 1),
         DummyTarget,
     ));
@@ -95,7 +97,7 @@ fn handle_character_movement(
             Forces,
             Option<&MapInstanceId>,
         ),
-        With<CharacterMarker>,
+        (With<CharacterMarker>, Without<RespawnTimer>),
     >,
 ) {
     for (entity, action_state, mass, position, mut forces, player_map_id) in &mut query {
@@ -129,12 +131,42 @@ fn validate_respawn_points(
     }
 }
 
-fn check_death_and_respawn(
+/// Detects newly-dead entities and starts their respawn timer.
+/// Only fires for entities that are dead but don't yet have a RespawnTimer.
+fn start_respawn_timer(
     mut commands: Commands,
     timeline: Res<LocalTimeline>,
-    mut dead_query: Query<
+    query: Query<
+        (Entity, &Health, Option<&RespawnTimerConfig>),
+        (Without<RespawnTimer>, Without<RespawnPoint>),
+    >,
+) {
+    let tick = timeline.tick();
+    for (entity, health, config) in &query {
+        if !health.is_dead() {
+            continue;
+        }
+        let duration = config
+            .map(|c| c.duration_ticks)
+            .unwrap_or(DEFAULT_RESPAWN_TICKS);
+        commands.entity(entity).insert((
+            RespawnTimer {
+                expires_at: tick + duration as i16,
+            },
+            RigidBodyDisabled,
+            ColliderDisabled,
+        ));
+    }
+}
+
+/// Processes expired respawn timers: teleports, heals, grants invulnerability.
+fn process_respawn_timers(
+    mut commands: Commands,
+    timeline: Res<LocalTimeline>,
+    mut query: Query<
         (
             Entity,
+            &RespawnTimer,
             &mut Health,
             &mut Position,
             Option<&mut LinearVelocity>,
@@ -145,8 +177,8 @@ fn check_death_and_respawn(
     respawn_query: Query<&Position, (With<RespawnPoint>, Without<CharacterMarker>)>,
 ) {
     let tick = timeline.tick();
-    for (entity, mut health, mut position, velocity, character) in &mut dead_query {
-        if !health.is_dead() {
+    for (entity, timer, mut health, mut position, velocity, character) in &mut query {
+        if tick < timer.expires_at {
             continue;
         }
         let respawn_pos = if character.is_some() {
@@ -154,13 +186,18 @@ fn check_death_and_respawn(
         } else {
             position.0
         };
-
-        info!("Entity {:?} died, respawning at {:?}", entity, respawn_pos);
+        info!(
+            "Entity {:?} respawn timer expired, respawning at {:?}",
+            entity, respawn_pos
+        );
         position.0 = respawn_pos;
         if let Some(mut velocity) = velocity {
             velocity.0 = Vec3::ZERO;
         }
         health.restore_full();
+        commands
+            .entity(entity)
+            .remove::<(RespawnTimer, RigidBodyDisabled, ColliderDisabled)>();
         commands.entity(entity).insert(Invulnerable {
             expires_at: tick + 128i16,
         });
@@ -275,6 +312,7 @@ fn handle_connected(
         ))
         .insert((
             Health::new(100.0),
+            RespawnTimerConfig::default(),
             AbilityCooldowns::default(),
             ChunkTarget::new(registry.get(&MapInstanceId::Overworld), 4),
         ));

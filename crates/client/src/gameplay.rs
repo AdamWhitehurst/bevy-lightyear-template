@@ -15,6 +15,9 @@ impl Plugin for ClientGameplayPlugin {
         app.add_systems(Update, handle_new_character);
         app.add_systems(FixedUpdate, handle_character_movement);
         app.add_systems(Update, on_world_object_replicated.run_if(ready));
+
+        app.add_observer(on_respawn_timer_added);
+        app.add_observer(on_respawn_timer_removed);
     }
 }
 
@@ -70,7 +73,11 @@ fn handle_character_movement(
             Forces,
             Option<&MapInstanceId>,
         ),
-        (With<Predicted>, With<CharacterMarker>),
+        (
+            With<Predicted>,
+            With<CharacterMarker>,
+            Without<RespawnTimer>,
+        ),
     >,
 ) {
     for (entity, action_state, mass, position, mut forces, player_map_id) in &mut query {
@@ -85,5 +92,53 @@ fn handle_character_movement(
             player_map_id,
             &map_ids,
         );
+    }
+}
+
+/// Hides entity and descendants when a respawn timer is added.
+fn on_respawn_timer_added(
+    trigger: On<Add, RespawnTimer>,
+    mut commands: Commands,
+    children_query: Query<&Children>,
+) {
+    let entity = trigger.entity;
+    commands
+        .entity(entity)
+        .insert((Visibility::Hidden, RigidBodyDisabled, ColliderDisabled));
+    set_descendants_visibility(&mut commands, entity, &children_query, Visibility::Hidden);
+}
+
+/// Restores entity and descendants when respawn timer is removed.
+fn on_respawn_timer_removed(
+    trigger: On<Remove, RespawnTimer>,
+    mut commands: Commands,
+    children_query: Query<&Children>,
+) {
+    let entity = trigger.entity;
+    commands
+        .entity(entity)
+        .remove::<(RigidBodyDisabled, ColliderDisabled)>()
+        .insert(Visibility::Inherited);
+    set_descendants_visibility(
+        &mut commands,
+        entity,
+        &children_query,
+        Visibility::Inherited,
+    );
+}
+
+/// Recursively sets visibility on all descendants of an entity.
+fn set_descendants_visibility(
+    commands: &mut Commands,
+    entity: Entity,
+    children_query: &Query<&Children>,
+    visibility: Visibility,
+) {
+    let Ok(children) = children_query.get(entity) else {
+        return;
+    };
+    for &child in children {
+        commands.entity(child).insert(visibility);
+        set_descendants_visibility(commands, child, children_query, visibility);
     }
 }

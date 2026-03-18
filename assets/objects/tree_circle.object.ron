@@ -6,6 +6,7 @@
         current: 50.0,
         max: 50.0,
     ),
+    "protocol::RespawnTimerConfig": (duration_ticks: 384),
     // Static — immovable physics body
     "avian3d::dynamics::rigid_body::RigidBody": Static,
     // Damageable(32) collides with Character(2), Hitbox(4), Projectile(8)
