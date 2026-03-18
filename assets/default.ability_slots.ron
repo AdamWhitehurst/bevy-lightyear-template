@@ -5,6 +5,6 @@
         AbilityId("punch"), 
         AbilityId("speed_burst"),
         AbilityId("ground_pound"), 
-        AbilityId("fireball"), 
+        AbilityId("blink_strike"), 
     )
 )

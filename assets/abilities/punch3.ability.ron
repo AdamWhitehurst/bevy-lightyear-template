@@ -1,6 +1,6 @@
 #![enable(implicit_some)]
 {
-    "protocol::ability::AbilityPhases": (startup: 4, active: 6, recovery: 10, cooldown: 0),
+    "protocol::ability::AbilityPhases": (startup: 20, active: 6, recovery: 10, cooldown: 0),
     "protocol::ability::OnTickEffects": ([(tick: 0, effect: Melee())]),
     "protocol::ability::OnHitEffectDefs": ([
         Damage(amount: 10.0, target: Victim),

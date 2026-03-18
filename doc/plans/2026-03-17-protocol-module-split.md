@@ -17,10 +17,10 @@ area of concern.
 
 ## Reference: `world_object/` Pattern
 
-`world_object/mod.rs` declares all subfiles as `mod` (private), then selectively re-exports what
-the rest of the crate needs. Internal files import each other with `super::` or `crate::`. This is
+`world_object/mod.rs` declares most subfiles as `mod` (private), then selectively re-exports what
+the rest of the crate needs. Public submodules like `loading` and `plugin` use `pub mod` to allow
+direct downstream access. Internal files import each other with `super::` or `crate::`. This is
 the exact pattern each new submodule follows.
-%% [SUGGESTION] Coherence — "all subfiles as `mod` (private)" is inaccurate: `world_object/mod.rs` uses `pub mod loading` for at least one submodule. The `ability/mod.rs` plan also uses `pub mod loading` and `pub mod plugin`. Rephrase to "most subfiles as `mod` (private); public submodules like `loading` and `plugin` use `pub mod` to allow direct downstream access."
 
 ---
 
@@ -29,8 +29,7 @@ the exact pattern each new submodule follows.
 This is the simplest split and a good warm-up. `hit_detection.rs` has 361 lines with clear
 boundaries:
 
-- Lines 1–73: constants, `GameLayer`, and collision-layer fns
-%% [VIOLATION] Coherence — lines 1-12 are imports (not part of any subfile), lines 14-15 are the two constants, lines 17-26 are `GameLayer`, lines 28-73 are collision-layer fns. The first bullet should read "Lines 14–73: constants, `GameLayer`, and collision-layer fns" to correctly reflect the boundary.
+- Lines 14–73: constants, `GameLayer`, and collision-layer fns
 - Lines 75–220: hitbox and projectile systems
 - Lines 221–361: private effect-application helpers
 
@@ -44,8 +43,7 @@ crates/protocol/src/hit_detection/
   effects.rs
 ```
 
-**`layers.rs`** — everything from `hit_detection.rs` lines 17–73:
-%% [VIOLATION] Coherence — the range "lines 17–73" omits the constants `MELEE_HITBOX_OFFSET` and `MELEE_HITBOX_HALF_EXTENTS` which live at lines 14–15 and are supposed to go in `layers.rs` (per the Note below). Change to "lines 14–73".
+**`layers.rs`** — everything from `hit_detection.rs` lines 14–73:
 - `GameLayer` enum
 - `character_collision_layers()`, `terrain_collision_layers()`, `projectile_collision_layers()`,
   `hitbox_collision_layers()`, `damageable_collision_layers()`
@@ -81,9 +79,8 @@ use super::layers::{MELEE_HITBOX_OFFSET, MELEE_HITBOX_HALF_EXTENTS};
 - `resolve_on_hit_target` (private)
 - `apply_damage_buffs` (private)
 - `resolve_force_frame` (private)
-- `apply_on_hit_effects` — stays `pub(crate)` (called by `systems.rs` and also directly by
+- `apply_on_hit_effects` — promote to `pub(crate)` (called by `systems.rs` and also directly by
   `ability/effects.rs` if needed in future)
-%% [VIOLATION] Coherence — `apply_on_hit_effects` is currently **private** (no visibility modifier at line 271). "Stays `pub(crate)`" implies it already is `pub(crate)`. Change to "promote to `pub(crate)`".
 
 Imports needed:
 ```rust
@@ -98,30 +95,8 @@ use crate::ability::{
 use crate::{Health, Invulnerable, PlayerId};
 ```
 
-**`mod.rs`**:
-```rust
-mod effects;
-mod layers;
-mod systems;
-
-pub use layers::{
-    character_collision_layers, damageable_collision_layers, hitbox_collision_layers,
-    projectile_collision_layers, terrain_collision_layers, GameLayer,
-};
-pub use systems::{
-    cleanup_hitbox_entities, process_hitbox_hits, process_projectile_hits,
-    update_hitbox_positions,
-};
-
-pub(crate) use effects::apply_on_hit_effects;
-
-pub const MELEE_HITBOX_OFFSET: f32 = layers::MELEE_HITBOX_OFFSET_INNER;
-pub const MELEE_HITBOX_HALF_EXTENTS: bevy::prelude::Vec3 = layers::MELEE_HITBOX_HALF_EXTENTS_INNER;
-```
-%% [VIOLATION] Coherence — this `mod.rs` block contradicts the Note directly below: it uses `_INNER` suffix names that don't exist in the current codebase. The Note immediately supersedes this approach with simpler direct re-exports. Delete this entire code block and keep only the corrected version shown in the Note.
-
-Note: keep the two constants directly in `layers.rs` with their original names and re-export
-through `mod.rs`. Simpler than renaming — just put them in `layers.rs` and re-export:
+**`mod.rs`**: keep the two constants directly in `layers.rs` with their original names and
+re-export through `mod.rs`:
 
 ```rust
 // layers.rs
@@ -178,7 +153,6 @@ crates/protocol/src/map/
 ```rust
 use std::collections::HashMap;
 use avian3d::prelude::ActiveCollisionHooks;
-%% [SUGGESTION] Coherence — `ActiveCollisionHooks` may be unused in `types.rs`. `map.rs` uses a glob `use avian3d::prelude::*`; verify which specific avian type is actually needed by `MapInstanceId`, `MapRegistry`, `MapSwitchTarget`, or the `#[cfg(test)]` block before narrowing to this import. Use `use avian3d::prelude::*` if uncertain.
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 ```
@@ -310,10 +284,11 @@ crates/protocol/src/ability/
 
 ### File Contents
 
-**`types.rs`** — all type/struct/enum definitions. Approximately lines 30–600 of `ability.rs`:
-%% [VIOLATION] Coherence — two problems: (1) Lines 30–38 contain constants `PROJECTILE_SPAWN_OFFSET`, `BULLET_COLLIDER_RADIUS`, and `ABILITY_ACTIONS` that are not mentioned anywhere in this plan. These must be assigned to a file (most naturally `types.rs`). (2) The upper bound "~600" is wrong: `AbilityPlugin` struct is at line 579 and `impl Plugin` runs through line 667 — these belong in `plugin.rs`, not `types.rs`. The range should be "lines 30–577" and should explicitly list the three constants.
-- `facing_direction` (line 40–42)
-%% [SUGGESTION] Elegance — `facing_direction` is a free function (not a type), making its placement in `types.rs` semantically misleading. Consider `spawn.rs` or a small `util.rs` file. If it stays in `types.rs`, add a comment or section header noting it's a geometry helper.
+**`types.rs`** — all type/struct/enum definitions plus module-level constants. Lines 30–577 of
+`ability.rs` (excluding `AbilityPlugin` at line 579 which belongs in `plugin.rs`):
+- `PROJECTILE_SPAWN_OFFSET`, `BULLET_COLLIDER_RADIUS`, `ABILITY_ACTIONS` (lines 30–38)
+- `facing_direction` (line 40–42) — geometry helper; a section header in the file clarifies it is
+  not a type definition
 - `AbilityId`, `EffectTarget`, `ForceFrame`, `AbilityEffect`, `EffectTrigger`
 - `AbilityDef` + impl
 - `AbilityPhases` + impl
@@ -360,9 +335,8 @@ use super::types::{AbilityAsset, AbilityPhases};
 use crate::reflect_loader;
 ```
 
-Note: `apply_ability_archetype` is called by `loading.rs` and `activation.rs` — keep it `pub(crate)`
-in `loader.rs` and re-export from `mod.rs`.
-%% [VIOLATION] Coherence — `apply_ability_archetype` is currently **private** (no visibility modifier at line 443 of `ability.rs`). "Keep it `pub(crate)`" implies no change. Change to "promote to `pub(crate)` in `loader.rs`".
+Note: `apply_ability_archetype` is called by `loading.rs` and `activation.rs` — promote to
+`pub(crate)` in `loader.rs` and re-export from `mod.rs`.
 
 **`loading.rs`** — all asset-loading systems plus handle resources:
 - `AbilityFolderHandle` (cfg native), `AbilityManifestHandle` / `PendingAbilityHandles` (cfg wasm)
@@ -410,9 +384,7 @@ use super::types::{
 - `apply_on_end_effects`
 - `apply_on_input_effects`
 - `resolve_caster_target`
-%% [VIOLATION] Coherence — `resolve_caster_target` was not found as a named function in `ability.rs`. Verify this function exists; if it is an inline closure or unnamed helper embedded in one of the effect systems, remove it from this list or give its actual name.
 - `compute_sub_ability_salt`
-%% [VIOLATION] Coherence — `compute_sub_ability_salt` was not found as a named function in `ability.rs`. Same issue as above: verify existence or remove from list.
 - `apply_teleport`
 - `apply_buff`
 
@@ -486,8 +458,6 @@ use super::effects::{
 };
 use super::spawn::{
     ability_projectile_spawn, despawn_ability_projectile_spawn, handle_ability_projectile_spawn,
-    spawn_sub_ability,
-%% [VIOLATION] Coherence — `spawn_sub_ability` is not used directly by `AbilityPlugin`; it is called by effect and activation systems, not registered as a system by the plugin. This import will produce an unused-import warning. Remove it.
 };
 use super::lifecycle::{
     ability_bullet_lifetime, aoe_hitbox_lifetime, cleanup_effect_markers_on_removal, expire_buffs,
@@ -518,8 +488,7 @@ pub use loading::DefaultAbilitySlots;
 pub use plugin::AbilityPlugin;
 pub use types::{
     AbilityAsset, AbilityBulletOf, AbilityBullets, AbilityCooldowns, AbilityDef, AbilityDefs,
-    AbilityEffect, AbilityId, AbilityManifest, AbilityPhase, AbilityPhases, AbilityPlugin,
-%% [VIOLATION] Coherence — `AbilityPlugin` appears in `pub use types::` but it is not defined in `types.rs`; it comes from `plugin.rs` and is already re-exported two lines above. Remove `AbilityPlugin` from this list. (The corrective note below acknowledges this but the error must be fixed in-place, not just noted.)
+    AbilityEffect, AbilityId, AbilityManifest, AbilityPhase, AbilityPhases,
     AbilityProjectileSpawn, AbilitySlots, ActiveAbility, ActiveBuff, ActiveBuffs, ActiveShield,
     AoEHitbox, EffectTarget, EffectTrigger, ForceFrame, HitTargets, HitboxOf,
     ActiveAbilityHitboxes, InputEffect, MeleeHitbox, OnEndEffects, OnHitEffectDefs, OnHitEffects,
@@ -528,9 +497,8 @@ pub use types::{
 };
 ```
 
-Note: remove `AbilityPlugin` from the `pub use types::` line — it comes from `plugin::`. The list
-above must exactly cover what `lib.rs` currently imports from `crate::ability` (lines 17–24 of
-`lib.rs`) plus what `hit_detection/` imports.
+The list above must exactly cover what `lib.rs` currently imports from `crate::ability` (lines
+17–24 of `lib.rs`) plus what `hit_detection/` imports.
 
 ### Changes to Other Files
 
@@ -563,8 +531,8 @@ crates/protocol/src/character/
   movement.rs
 ```
 
-**`types.rs`** — character type definitions (lib.rs lines 43–147):
-%% [VIOLATION] Coherence — `lib.rs` lines 43–147 include `PlayerActions` at lines 46–65, which the "What We're NOT Doing" section explicitly says must stay in `lib.rs`. "Replace lines 43–147 with re-exports" will move `PlayerActions` if taken literally. Clarify: keep `PlayerActions` (lines 46–65) in `lib.rs`; only extract the types listed below.
+**`types.rs`** — character type definitions. Extract from `lib.rs` lines 43–147, but keep
+`PlayerActions` (lines 46–65) in `lib.rs` as specified in "What We're NOT Doing":
 - `CHARACTER_CAPSULE_RADIUS`, `CHARACTER_CAPSULE_HEIGHT`
 - `PlayerId`, `CharacterMarker`, `DummyTarget`, `CharacterType`
 - `RespawnPoint`
@@ -635,16 +603,9 @@ pub use types::{
    pub use character::{apply_movement, update_facing};
    ```
 
-4. In `SharedGameplayPlugin::build`, change:
-   ```rust
-   app.add_systems(FixedUpdate, update_facing.run_if(ready));
-   ```
-   to:
-   ```rust
-   app.add_systems(FixedUpdate, character::update_facing.run_if(ready));
-   ```
-   Or keep the `pub use character::update_facing;` re-export so the unqualified name resolves.
-%% [SUGGESTION] Elegance — step 3 already adds `pub use character::{apply_movement, update_facing}` to `lib.rs`, which keeps `update_facing` in scope unqualified within `lib.rs`. No change to `SharedGameplayPlugin::build` is needed. Remove the "change to `character::update_facing`" option; it only creates noise.
+4. The `pub use character::{apply_movement, update_facing}` re-export added in step 3 keeps
+   `update_facing` in scope unqualified within `lib.rs`. No change to `SharedGameplayPlugin::build`
+   is needed.
 
 5. `ProtocolPlugin` references `PlayerId`, `ColorComponent`, `CharacterMarker`, etc. — these are
    all still in scope via the `pub use character::{...}` re-exports in `lib.rs`, so no changes
@@ -733,8 +694,47 @@ After all four phases complete:
   `ability/mod.rs` so `hit_detection/effects.rs` can call `crate::ability::spawn_sub_ability`.
 - `facing_direction` must be re-exported from `ability/mod.rs` as `pub` so
   `hit_detection/systems.rs` can call `crate::ability::facing_direction`.
-- `apply_ability_archetype` is called in both `activation.rs` and `spawn.rs` — keep it `pub(crate)`
-%% [VIOLATION] Coherence — same issue as noted in loader.rs section: `apply_ability_archetype` is currently private. "Keep it `pub(crate)`" should read "make it `pub(crate)`".
+- `apply_ability_archetype` is called in both `activation.rs` and `spawn.rs` — make it `pub(crate)`
   in `loader.rs`, re-export as `pub(crate)` from `mod.rs`.
 - All `#[cfg(not(target_arch = "wasm32"))]` / `#[cfg(target_arch = "wasm32")]` gates in
   `ability.rs` must be preserved exactly in the split files.
+
+## TypePath Preservation (CRITICAL)
+
+Moving a type into a submodule changes its `TypePath`. Bevy derives `TypePath` from the definition
+site, not re-export paths. RON asset files embed type paths as strings — if the path changes, asset
+loading silently fails with "no registration found for `protocol::ability::AbilityPhases`".
+
+**Every `#[derive(Reflect)]` type that moves to a submodule must carry a `#[type_path]` attribute
+restoring its original stable path.** Place it on the line immediately after `#[derive(...)]` and
+before any `#[reflect(...)]`.
+
+```rust
+#[derive(Component, Clone, Debug, PartialEq, Reflect, Serialize, Deserialize, Default)]
+#[type_path = "protocol::ability"]   // ← restores pre-split path
+#[reflect(Component, Serialize, Deserialize)]
+pub struct AbilityPhases { ... }
+```
+
+### Required attributes by file
+
+**`ability/types.rs`** — `#[type_path = "protocol::ability"]` on:
+`AbilityId`, `EffectTarget`, `ForceFrame`, `AbilityEffect`, `EffectTrigger`, `AbilityDef`,
+`AbilityPhases`, `AbilityPhase`, `TickEffect`, `OnTickEffects`, `WhileActiveEffects`,
+`OnEndEffects`, `InputEffect`, `OnInputEffects`, `OnHitEffectDefs`, `AbilityProjectileSpawn`
+
+(`AbilitySlots` already has it.)
+
+**`character/types.rs`** — `#[type_path = "protocol"]` on:
+`PlayerId`, `CharacterType`, `Health`
+
+(Types were in `lib.rs`; their original paths were `protocol::TypeName`.)
+
+**`map/types.rs`** — `#[type_path = "protocol::map"]` on:
+`MapInstanceId`, `MapSwitchTarget`
+
+**`map/transition.rs`** — `#[type_path = "protocol::map"]` on:
+`PlayerMapSwitchRequest`, `MapTransitionStart`, `MapTransitionReady`, `MapTransitionEnd`
+
+**`map/voxel.rs`** — `#[type_path = "protocol::map"]` on:
+`VoxelEditRequest`, `VoxelEditBroadcast`, `VoxelEditAck`, `VoxelEditReject`, `SectionBlocksUpdate`

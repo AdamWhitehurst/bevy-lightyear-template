@@ -1,10 +1,10 @@
 #![enable(implicit_some)]
 {
-    "protocol::ability::AbilityPhases": (startup: 4, active: 20, recovery: 0, cooldown: 16),
-    "protocol::ability::OnTickEffects": ([(tick: 10, effect: Melee())]),
+    "protocol::ability::AbilityPhases": (startup: 20, active: 10, recovery: 100, cooldown: 16),
+    "protocol::ability::OnTickEffects": ([(tick: 1, effect: Melee())]),
     "protocol::ability::OnHitEffectDefs": ([
         Damage(amount: 5.0, target: Victim),
-        ApplyForce(force: (0.0, 0.9, 2.85), frame: RelativePosition, target: Victim),
+        ApplyForce(force: (0.0, 0.9, 0.5), frame: RelativePosition, target: Victim),
     ]),
     "protocol::ability::OnInputEffects": ([(action: Ability1, effect: Ability(id: "punch2", target: Caster))]),
 }

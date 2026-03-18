@@ -1,4 +1,4 @@
-use avian3d::prelude::{forces::ForcesItem, *};
+use avian3d::prelude::*;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
 use lightyear::input::config::InputConfig;
@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod ability;
 pub mod app_state;
+pub mod character;
 pub mod hit_detection;
 pub mod map;
 pub mod physics;
@@ -23,6 +24,11 @@ pub use ability::{
     ProjectileSpawnEffect, TickEffect, WhileActiveEffects,
 };
 pub use app_state::{AppState, AppStatePlugin, TrackedAssets};
+pub use character::{apply_movement, update_facing};
+pub use character::{
+    CharacterMarker, CharacterPhysicsBundle, CharacterType, ColorComponent, DummyTarget, Health,
+    Invulnerable, PlayerId, RespawnPoint, CHARACTER_CAPSULE_HEIGHT, CHARACTER_CAPSULE_RADIUS,
+};
 pub use hit_detection::{
     character_collision_layers, damageable_collision_layers, hitbox_collision_layers,
     projectile_collision_layers, terrain_collision_layers, GameLayer,
@@ -39,9 +45,6 @@ pub use world_object::{WorldObjectDefRegistry, WorldObjectId, WorldObjectPlugin}
 pub const PROTOCOL_ID: u64 = 0;
 pub const PRIVATE_KEY: [u8; 32] = [0; 32];
 pub const FIXED_TIMESTEP_HZ: f64 = 64.0;
-
-pub const CHARACTER_CAPSULE_RADIUS: f32 = 2.0;
-pub const CHARACTER_CAPSULE_HEIGHT: f32 = 2.0;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, Hash, Reflect)]
 pub enum PlayerActions {
@@ -60,88 +63,6 @@ impl Actionlike for PlayerActions {
         match self {
             Self::Move => InputControlKind::DualAxis,
             _ => InputControlKind::Button,
-        }
-    }
-}
-
-/// Identifies which client owns this character. Replicated to all clients so
-/// shared systems (e.g. prespawn salt computation) can access the owner's
-/// `PeerId` without server-only queries.
-#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Reflect)]
-pub struct PlayerId(pub PeerId);
-
-#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct CharacterMarker;
-
-/// Marker to distinguish dummy targets from player characters.
-#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct DummyTarget;
-
-/// Determines which sprite rig and animation set a character uses on the client.
-#[derive(
-    Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash, Reflect, Default,
-)]
-pub enum CharacterType {
-    #[default]
-    Humanoid,
-}
-
-/// Marks a respawn location. Server-only, not replicated.
-#[derive(Component, Clone, Debug)]
-#[require(MapSaveTarget)]
-pub struct RespawnPoint;
-
-#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Default)]
-#[reflect(Component, Default)]
-pub struct Health {
-    pub current: f32,
-    pub max: f32,
-}
-
-impl Health {
-    pub fn new(max: f32) -> Self {
-        Self { current: max, max }
-    }
-
-    pub fn apply_damage(&mut self, damage: f32) {
-        self.current = (self.current - damage).max(0.0);
-    }
-
-    pub fn is_dead(&self) -> bool {
-        self.current <= 0.0
-    }
-
-    pub fn restore_full(&mut self) {
-        self.current = self.max;
-    }
-}
-
-/// Post-respawn invulnerability. Prevents damage while present.
-#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct Invulnerable {
-    pub expires_at: Tick,
-}
-
-#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct ColorComponent(pub Color);
-
-#[derive(Bundle)]
-pub struct CharacterPhysicsBundle {
-    pub collider: Collider,
-    pub rigid_body: RigidBody,
-    pub locked_axes: LockedAxes,
-    pub friction: Friction,
-    pub collision_layers: CollisionLayers,
-}
-
-impl Default for CharacterPhysicsBundle {
-    fn default() -> Self {
-        Self {
-            collider: Collider::capsule(CHARACTER_CAPSULE_RADIUS, CHARACTER_CAPSULE_HEIGHT),
-            rigid_body: RigidBody::Dynamic,
-            locked_axes: LockedAxes::ROTATION_LOCKED,
-            friction: Friction::default(),
-            collision_layers: hit_detection::character_collision_layers(),
         }
     }
 }
@@ -311,81 +232,6 @@ impl Plugin for SharedGameplayPlugin {
         let ready = in_state(AppState::Ready);
 
         app.add_systems(FixedUpdate, update_facing.run_if(ready));
-    }
-}
-
-/// Apply movement based on input direction and jump flag.
-/// Movement uses acceleration-based physics with ground detection for jumping.
-pub fn apply_movement(
-    entity: Entity,
-    mass: &ComputedMass,
-    delta_secs: f32,
-    spatial_query: &SpatialQuery,
-    action_state: &ActionState<PlayerActions>,
-    position: &Position,
-    forces: &mut ForcesItem,
-    player_map_id: Option<&MapInstanceId>,
-    map_ids: &Query<&MapInstanceId>,
-) {
-    const MAX_SPEED: f32 = 10.0;
-    const MAX_ACCELERATION: f32 = 40.0;
-
-    let max_velocity_delta_per_tick = MAX_ACCELERATION * delta_secs;
-
-    // Jump with raycast ground detection
-    if action_state.just_pressed(&PlayerActions::Jump) {
-        let ray_cast_origin = position.0;
-
-        let filter = SpatialQueryFilter::from_excluded_entities([entity]);
-
-        if spatial_query
-            .cast_ray_predicate(
-                ray_cast_origin,
-                Dir3::NEG_Y,
-                4.0,
-                false,
-                &filter,
-                &|hit_entity| match (player_map_id, map_ids.get(hit_entity).ok()) {
-                    (Some(a), Some(b)) => a == b,
-                    _ => true,
-                },
-            )
-            .is_some()
-        {
-            forces.apply_linear_impulse(Vec3::new(0.0, 400.0, 0.0));
-        }
-    }
-
-    // Horizontal movement
-    let move_dir = action_state
-        .axis_pair(&PlayerActions::Move)
-        .clamp_length_max(1.0);
-    let move_dir = Vec3::new(-move_dir.x, 0.0, move_dir.y);
-
-    let linear_velocity = forces.linear_velocity();
-    let ground_linear_velocity = Vec3::new(linear_velocity.x, 0.0, linear_velocity.z);
-
-    let desired_ground_linear_velocity = move_dir * MAX_SPEED;
-    let new_ground_linear_velocity = ground_linear_velocity
-        .move_towards(desired_ground_linear_velocity, max_velocity_delta_per_tick);
-
-    let required_acceleration = (new_ground_linear_velocity - ground_linear_velocity) / delta_secs;
-
-    forces.apply_force(required_acceleration * mass.value());
-}
-
-/// Update character facing direction based on movement input.
-/// Separate from `apply_movement` because `Forces` already accesses `Rotation`.
-pub fn update_facing(
-    mut query: Query<(&ActionState<PlayerActions>, &mut Rotation), With<CharacterMarker>>,
-) {
-    for (action_state, mut rotation) in &mut query {
-        let move_dir = action_state
-            .axis_pair(&PlayerActions::Move)
-            .clamp_length_max(1.0);
-        if move_dir != Vec2::ZERO {
-            *rotation = Rotation(Quat::from_rotation_y(f32::atan2(move_dir.x, -move_dir.y)));
-        }
     }
 }
 
