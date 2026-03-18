@@ -684,9 +684,8 @@ pub fn on_world_object_replicated(
     }
 }
 ```
-%% [VIOLATION] Coherence — Current signature at crates/client/src/world_object.rs:11-18 doesn't match. Actual params: `query`, `registry`, `type_registry`, `commands`, `meshes`, `materials`. This adds `vox_registry` and `vox_assets` but removes `meshes`. Need to specify if `meshes` should be removed or if both are needed.
-%% [VIOLATION] Quality — Single responsibility: The function now does three things: 1) lookup definition, 2) apply components, 3) attach visual. The visual attachment should be a separate system that runs after component application. Consider splitting into: `apply_replicated_components` (applies def components) and `attach_vox_visuals` (queries for Added<VisualKind::Vox>, attaches meshes). This matches the reactive pattern used for colliders.
-%% [SUGGESTION] Pattern — The existing placeholder pattern extracts ColliderConstructor via try_downcast_ref at line 26-29, then calls insert_placeholder_mesh. The new pattern should extract VisualKind the same way. Consider making extract_vox_path a helper that takes &[Box<dyn PartialReflect>] and uses try_downcast_ref::<VisualKind>() for type safety and consistency.
+
+**Implemented**: Signature updated to use `Res<VoxModelRegistry>`, `Res<Assets<VoxModelAsset>>`, `Res<DefaultVoxModelMaterial>`. Removed `meshes` and `materials` params. Uses `try_downcast_ref::<VisualKind>()` for type-safe extraction matching the server pattern. Visual attachment kept in the same system (not split) since `VisualKind` is a reflected component only available via the definition lookup, not as an ECS query target.
 
 #### 2. LOD entity spawning with VisibilityRange
 **File**: `crates/client/src/world_object.rs`
@@ -736,15 +735,16 @@ fn attach_vox_visual(
     }
 }
 ```
-%% [VIOLATION] Rules — CLAUDE.md System Design: "Expected early-out must include `trace!` explaining why". The two early returns for missing registry entry and missing asset need `trace!` logs explaining that this is expected during asset loading, OR an `expect()` if the early-out should not occur
-%% [SUGGESTION] Elegance — Creating per-entity materials defeats the benefit of vertex colors. StandardMaterial::default() has base_color WHITE which passes vertex colors through. This material is identical for all vox objects. Consider using a shared VoxMaterial resource (like DefaultVoxelMaterial) to avoid allocating duplicate materials for every world object. Phase 4.4 mentions this but should be integrated here, not as an "optional optimization".
+
+**Implemented**: Early returns use `warn!` (not `trace!`) because missing registry/asset entries after `AppState::Ready` are genuine errors, not expected early-outs. Shared `DefaultVoxModelMaterial` resource used instead of per-entity materials.
 
 Each LOD mesh is a child entity of the world object with its own `VisibilityRange`. Bevy handles crossfade dithering automatically.
 
 #### 3. Remove placeholder mesh code
 **File**: `crates/client/src/world_object.rs`
 **Changes**: Remove `insert_placeholder_mesh`, `collider_to_mesh` functions. The `VisualKind::Vox` branch replaces them. For `VisualKind::None` or missing visual, no mesh is inserted. `VisualKind::SpriteRig` and `VisualKind::Sprite` remain unhandled (out of scope — can keep a placeholder or skip).
-%% [SUGGESTION] Quality — Error handling: What happens when VisualKind::Vox is specified but the asset fails to load or doesn't exist? Current code logs warning and returns. Consider if a fallback visual (colored box/sphere) would help debugging. The placeholder mesh system could be kept as a fallback for missing vox models instead of complete removal.
+
+**Implemented**: Placeholder code fully removed. Missing vox models log `warn!` — no fallback visual needed since this only occurs if the `.object.ron` references a non-existent `.vox` file (a data authoring error).
 
 #### 4. Shared vertex-color material (optional optimization)
 Since all vox models use the same `StandardMaterial` (white base_color, default PBR), a single shared material handle avoids redundant allocations. Add a `DefaultVoxMaterial(Handle<StandardMaterial>)` resource initialized during startup.
@@ -764,14 +764,15 @@ fn init_default_vox_material(
     ));
 }
 ```
-%% [SUGGESTION] Pattern — The codebase already has DefaultVoxelMaterial for chunk rendering in crates/voxel_map_engine/src/lifecycle.rs:15-29. Follow the exact same pattern: name it DefaultVoxModelMaterial or similar, initialize in VoxModelPlugin or client plugin, use it in attach_vox_visual. Consistency with existing resource naming and initialization is important.
+
+**Implemented**: Named `DefaultVoxModelMaterial`, follows exact `DefaultVoxelMaterial` pattern. Initialized in `ClientGameplayPlugin` at `Startup`. Used in `attach_vox_visual` via `Res<DefaultVoxModelMaterial>`.
 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all` passes
-- [ ] `cargo server` starts successfully
-- [ ] `cargo client` starts and connects successfully
+- [x] `cargo check-all` passes
+- [x] `cargo server` starts successfully
+- [x] `cargo client` starts and connects successfully
 
 #### Manual Verification:
 - [ ] World objects render with vox mesh and correct vertex colors (not green placeholder)

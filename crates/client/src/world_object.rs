@@ -1,20 +1,41 @@
-use avian3d::prelude::ColliderConstructor;
+use avian3d::prelude::{Collider, ColliderConstructor};
 use bevy::prelude::*;
 use lightyear::prelude::Replicated;
-use protocol::world_object::{apply_object_components, WorldObjectDefRegistry, WorldObjectId};
+use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
+use protocol::world_object::{
+    apply_object_components, VisualKind, WorldObjectDef, WorldObjectDefRegistry, WorldObjectId,
+};
+
+/// Shared PBR material for all vox model meshes.
+///
+/// Vertex colors from the vox model are multiplied with `base_color` (white),
+/// so the palette colors pass through unmodified.
+#[derive(Resource)]
+pub struct DefaultVoxModelMaterial(pub Handle<StandardMaterial>);
+
+/// Creates the shared vox model material at startup.
+pub fn init_default_vox_model_material(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let handle = materials.add(StandardMaterial::default());
+    commands.insert_resource(DefaultVoxModelMaterial(handle));
+}
 
 /// Reacts when Lightyear replicates a world object entity to this client.
 ///
-/// Attaches all reflected gameplay components (including `RigidBody`, `CollisionLayers`,
-/// `ColliderConstructor`, `ObjectCategory`, `VisualKind`, etc.) from the definition,
-/// then inserts a placeholder mesh derived from the collider shape.
+/// Mirrors the server's `spawn_world_object` pattern: if a vox model exists,
+/// generates a trimesh collider and filters out the RON `ColliderConstructor`
+/// to prevent avian from overwriting it.
 pub fn on_world_object_replicated(
     query: Query<(Entity, &WorldObjectId), Added<Replicated>>,
     registry: Res<WorldObjectDefRegistry>,
+    vox_registry: Res<VoxModelRegistry>,
+    vox_assets: Res<Assets<VoxModelAsset>>,
+    meshes: Res<Assets<Mesh>>,
     type_registry: Res<AppTypeRegistry>,
+    default_material: Res<DefaultVoxModelMaterial>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     for (entity, id) in &query {
         let Some(def) = registry.get(id) else {
@@ -22,71 +43,122 @@ pub fn on_world_object_replicated(
             continue;
         };
 
-        // Extract collider from the components vec for the placeholder mesh.
-        let collider = def
-            .components
-            .iter()
-            .find_map(|c| c.try_downcast_ref::<ColliderConstructor>().cloned());
+        let vox_collider = vox_trimesh_collider(def, &vox_registry, &vox_assets, &meshes);
+        let has_vox_collider = vox_collider.is_some();
 
-        insert_placeholder_mesh(
-            &mut commands.entity(entity),
-            collider.as_ref(),
-            &mut meshes,
-            &mut materials,
-        );
-
-        let components = def
-            .components
-            .iter()
-            .map(|c| {
-                c.reflect_clone()
-                    .expect("world object component must be cloneable")
-                    .into_partial_reflect()
-            })
-            .collect();
+        let components = clone_def_components(def, has_vox_collider);
         apply_object_components(&mut commands, entity, components, type_registry.0.clone());
+
+        if let Some(collider) = vox_collider {
+            commands.entity(entity).insert(collider);
+        }
+
+        attach_visual(
+            &mut commands,
+            entity,
+            def,
+            &vox_registry,
+            &vox_assets,
+            &default_material,
+        );
     }
 }
 
-/// Inserts a `Mesh3d` placeholder derived from the collider shape.
+/// Clones the definition's reflected components for insertion.
 ///
-/// Once the vox loading pipeline is implemented, this will be replaced by the
-/// actual visual from `VisualKind`.
-fn insert_placeholder_mesh(
-    ecmds: &mut EntityCommands,
-    collider: Option<&ColliderConstructor>,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
-) {
-    let Some(mesh) = collider_to_mesh(collider) else {
-        return;
-    };
-    let mesh_handle = meshes.add(mesh);
-    let material_handle = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.3, 0.6, 0.2),
-        ..default()
-    });
-    ecmds.insert((Mesh3d(mesh_handle), MeshMaterial3d(material_handle)));
+/// When `filter_collider_constructor` is true, `ColliderConstructor` is excluded
+/// because a vox trimesh collider takes priority.
+fn clone_def_components(
+    def: &WorldObjectDef,
+    filter_collider_constructor: bool,
+) -> Vec<Box<dyn bevy::reflect::PartialReflect>> {
+    def.components
+        .iter()
+        .filter(|c| {
+            !filter_collider_constructor || c.try_downcast_ref::<ColliderConstructor>().is_none()
+        })
+        .map(|c| {
+            c.reflect_clone()
+                .expect("world object component must be cloneable")
+                .into_partial_reflect()
+        })
+        .collect()
 }
 
-/// Converts a `ColliderConstructor` into an approximate `Mesh` for visualization.
-fn collider_to_mesh(collider: Option<&ColliderConstructor>) -> Option<Mesh> {
-    match collider? {
-        ColliderConstructor::Sphere { radius } => Some(Sphere::new(*radius).into()),
-        ColliderConstructor::Cuboid {
-            x_length,
-            y_length,
-            z_length,
-        } => Some(Cuboid::new(*x_length, *y_length, *z_length).into()),
-        ColliderConstructor::Cylinder { radius, height } => {
-            Some(Cylinder::new(*radius, *height).into())
-        }
-        ColliderConstructor::Capsule { radius, height } => {
-            Some(Capsule3d::new(*radius, *height).into())
+/// Derives a trimesh `Collider` from the vox model mesh referenced by `VisualKind::Vox`.
+fn vox_trimesh_collider(
+    def: &WorldObjectDef,
+    vox_registry: &VoxModelRegistry,
+    vox_assets: &Assets<VoxModelAsset>,
+    meshes: &Assets<Mesh>,
+) -> Option<Collider> {
+    let vox_path =
+        def.components
+            .iter()
+            .find_map(|c| match c.try_downcast_ref::<VisualKind>()? {
+                VisualKind::Vox(path) => Some(path.as_str()),
+                _ => None,
+            })?;
+
+    let mesh = vox_registry.get_lod0_mesh(vox_path, vox_assets, meshes)?;
+    Collider::trimesh_from_mesh(mesh)
+}
+
+/// Attaches the vox mesh as a child entity if `VisualKind::Vox` is present.
+fn attach_visual(
+    commands: &mut Commands,
+    entity: Entity,
+    def: &WorldObjectDef,
+    vox_registry: &VoxModelRegistry,
+    vox_assets: &Assets<VoxModelAsset>,
+    default_material: &DefaultVoxModelMaterial,
+) {
+    let visual_kind = def
+        .components
+        .iter()
+        .find_map(|c| c.try_downcast_ref::<VisualKind>());
+
+    match visual_kind {
+        Some(VisualKind::Vox(path)) => {
+            attach_vox_mesh(
+                commands,
+                entity,
+                path,
+                vox_registry,
+                vox_assets,
+                default_material,
+            );
         }
         _ => {
-            trace!("No placeholder mesh for collider shape");
-            None
+            trace!("World object entity {entity:?} has no Vox visual, skipping mesh attachment");
         }
     }
+}
+
+/// Attaches the LOD 0 (full-resolution) vox mesh as a child of the world object entity.
+fn attach_vox_mesh(
+    commands: &mut Commands,
+    entity: Entity,
+    vox_path: &str,
+    vox_registry: &VoxModelRegistry,
+    vox_assets: &Assets<VoxModelAsset>,
+    default_material: &DefaultVoxModelMaterial,
+) {
+    let Some(asset_handle) = vox_registry.get(vox_path) else {
+        warn!("Vox model not found in registry: {vox_path}");
+        return;
+    };
+    let Some(asset) = vox_assets.get(asset_handle) else {
+        warn!("VoxModelAsset not yet loaded: {vox_path}");
+        return;
+    };
+    let Some(mesh_handle) = asset.lod_meshes.first() else {
+        warn!("VoxModelAsset has no LOD meshes: {vox_path}");
+        return;
+    };
+
+    commands.entity(entity).with_child((
+        Mesh3d(mesh_handle.clone()),
+        MeshMaterial3d(default_material.0.clone()),
+    ));
 }
