@@ -42,6 +42,21 @@ impl VoxModelRegistry {
     pub fn get(&self, path: &str) -> Option<&Handle<VoxModelAsset>> {
         self.models.get(path)
     }
+
+    /// Resolves the full-resolution (LOD 0) mesh for a vox model by asset path.
+    ///
+    /// Two-step lookup: path → `VoxModelAsset` → `lod_meshes[0]` → `&Mesh`.
+    pub fn get_lod0_mesh<'a>(
+        &self,
+        path: &str,
+        vox_assets: &Assets<VoxModelAsset>,
+        meshes: &'a Assets<Mesh>,
+    ) -> Option<&'a Mesh> {
+        let handle = self.models.get(path)?;
+        let asset = vox_assets.get(handle)?;
+        let mesh_handle = asset.lod_meshes.first()?;
+        meshes.get(mesh_handle)
+    }
 }
 
 /// Starts loading all model assets at app startup via `load_folder` (native).
@@ -188,9 +203,10 @@ fn collect_model_handles(
 ) -> HashMap<String, Handle<VoxModelAsset>> {
     let mut models = HashMap::new();
     for handle in handles {
-        let Some(path) = asset_server.get_path(handle.id()) else {
-            continue;
-        };
+        let path = asset_server
+            .get_path(handle.id())
+            .expect("Handle<VoxModelAsset> to have file path after loading");
+
         models.insert(path.path().to_string_lossy().into_owned(), handle);
     }
     models

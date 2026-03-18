@@ -9,6 +9,7 @@ use protocol::*;
 
 use crate::map::load_startup_entities;
 use crate::world_object::spawn_world_object;
+use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
 use voxel_map_engine::prelude::ChunkTarget;
 
 /// Default spawn position used for respawning and initial player placement.
@@ -199,6 +200,9 @@ fn spawn_test_tree(
     mut commands: Commands,
     defs: Res<WorldObjectDefRegistry>,
     type_registry: Res<AppTypeRegistry>,
+    vox_registry: Res<VoxModelRegistry>,
+    vox_assets: Res<Assets<VoxModelAsset>>,
+    meshes: Res<Assets<Mesh>>,
 ) {
     let id = WorldObjectId("tree_circle".into());
     let def = defs
@@ -210,6 +214,9 @@ fn spawn_test_tree(
         def,
         MapInstanceId::Overworld,
         &*type_registry,
+        &*vox_registry,
+        &*vox_assets,
+        &*meshes,
     );
     info!("Spawned test tree (entity {entity:?})");
 }

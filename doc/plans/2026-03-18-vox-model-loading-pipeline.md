@@ -602,7 +602,7 @@ pub struct VoxModelManifest(pub Vec<String>);
 ## Phase 3: Server Integration — Trimesh Colliders from Vox Mesh
 
 ### Overview
-When the server spawns a world object with `VisualKind::Vox`, generate a trimesh collider from the loaded vox mesh instead of relying solely on the manual `ColliderConstructor` in the `.object.ron`. If a `ColliderConstructor` is present in the RON, it takes priority.
+When the server spawns a world object with `VisualKind::Vox`, generate a trimesh collider from the loaded vox mesh. The vox trimesh is the primary collider (accurate to model shape). `ColliderConstructor` from RON is used as a fallback when no vox mesh is available. When vox trimesh is used, `ColliderConstructor` is filtered out of the applied components to prevent Avian from overwriting it.
 
 ### Changes Required:
 
@@ -610,86 +610,32 @@ When the server spawns a world object with `VisualKind::Vox`, generate a trimesh
 **File**: `crates/server/src/world_object.rs`
 **Changes**: After spawning, check if the entity has a `ColliderConstructor`. If not, look up `VisualKind::Vox` path in `VoxModelRegistry`, get the LOD 0 mesh, and insert `Collider::trimesh_from_mesh`.
 
-```rust
-pub fn spawn_world_object(
-    commands: &mut Commands,
-    id: WorldObjectId,
-    def: &WorldObjectDef,
-    map_id: MapInstanceId,
-    registry: &AppTypeRegistry,
-    vox_registry: &VoxModelRegistry,
-    meshes: &Assets<Mesh>,
-) -> Entity {
-    // ... existing spawn logic ...
-
-    // If no ColliderConstructor in def, derive from vox mesh
-    let has_collider_constructor = def.components.iter().any(|c| {
-        c.reflect_type_path().contains("ColliderConstructor")
-    });
-
-    if !has_collider_constructor {
-        if let Some(vox_path) = extract_vox_path(&def.components) {
-            if let Some(mesh) = vox_registry.get_lod0_mesh(vox_path, meshes) {
-                if let Some(collider) = Collider::trimesh_from_mesh(mesh) {
-                    commands.entity(entity).insert((
-                        collider,
-                        RigidBody::Static,
-                        terrain_collision_layers(),
-                    ));
-                }
-            }
-        }
-    }
-
-    entity
-}
-```
-%% [VIOLATION] Coherence — Current `spawn_world_object` signature at crates/server/src/world_object.rs:15 takes 5 params, not 7. Actual: `(commands, id, def, map_id, registry)`. This pseudocode adds `vox_registry` and `meshes` params without showing where they come from. Need to specify the system that calls this function and how it acquires these resources.
-%% [VIOLATION] Quality — Naming: `has_collider_constructor` uses a broad string match on `reflect_type_path()`. The actual pattern in crates/client/src/world_object.rs:26-29 uses `try_downcast_ref::<ColliderConstructor>()` which is type-safe. Use the same pattern for consistency.
-%% [VIOLATION] Pattern — World object components are stored as `Vec<Box<dyn PartialReflect>>` in WorldObjectDef.components. The codebase uses `try_downcast_ref::<T>()` to extract specific types (see client/world_object.rs:29). Use this pattern instead of string matching on `reflect_type_path()`.
+Implemented in `crates/server/src/world_object.rs`. Signature takes 8 params: `commands`, `id`, `def`, `map_id`, `type_registry`, `vox_registry`, `vox_assets`, `meshes`. Uses `try_downcast_ref::<ColliderConstructor>()` for type-safe detection and `try_downcast_ref::<VisualKind>()` to extract the vox path, matching the codebase pattern from `client/world_object.rs`.
 
 #### 2. Add `VoxModelRegistry` helper method
 **File**: `crates/protocol/src/vox_model/loading.rs`
 
-```rust
-impl VoxModelRegistry {
-    /// Returns the LOD 0 mesh for the given vox path (relative to assets/).
-    pub fn get_lod0_mesh<'a>(
-        &self,
-        path: &str,
-        meshes: &'a Assets<Mesh>,
-    ) -> Option<&'a Mesh> {
-        let asset_handle = self.models.get(path)?;
-        // LOD 0 mesh is the labeled sub-asset "mesh_lod0"
-        // Need access to Assets<VoxModelAsset> to get the handle
-        None // placeholder — actual implementation needs Assets<VoxModelAsset>
-    }
-}
-```
-
-The actual pattern: `VoxModelRegistry` stores `Handle<VoxModelAsset>`. The server spawn system takes `Res<Assets<VoxModelAsset>>` + `Res<Assets<Mesh>>` as parameters, resolves `VoxModelAsset` → `lod_meshes[0]` → `Mesh`.
-%% [SUGGESTION] Elegance — The helper method signature is incomplete. Actual pattern should be: `get_lod0_mesh(&self, path: &str, vox_assets: &Assets<VoxModelAsset>, meshes: &Assets<Mesh>) -> Option<&Mesh>`. This requires resolving VoxModelAsset first to get the mesh handle, then resolving that handle to the mesh. Consider if this helper adds value or if the call site should do the two-step lookup directly for clarity.
+Implemented in `crates/protocol/src/vox_model/loading.rs`. Signature: `get_lod0_mesh(&self, path: &str, vox_assets: &Assets<VoxModelAsset>, meshes: &Assets<Mesh>) -> Option<&Mesh>`. Two-step lookup: path → `VoxModelAsset` handle → `lod_meshes[0]` → `&Mesh`.
 
 #### 3. Update server gameplay to pass new resources
 **File**: `crates/server/src/gameplay.rs`
-**Changes**: Update call sites of `spawn_world_object` to pass `Res<VoxModelRegistry>` and `Res<Assets<Mesh>>`.
-%% [VIOLATION] Coherence — The plan doesn't specify which system in gameplay.rs calls spawn_world_object. Need to verify actual call site and specify the exact system to modify. From the signature analysis, spawn_world_object is called from other systems — find and document those call sites.
+**Changes**: Updated `spawn_test_tree` (the only call site) to accept `Res<VoxModelRegistry>`, `Res<Assets<VoxModelAsset>>`, and `Res<Assets<Mesh>>`, passing them through to `spawn_world_object`.
 
 #### 4. Update `.object.ron` files (optional)
 Remove `ColliderConstructor` from `.object.ron` files where the trimesh from the vox mesh is preferred. The cylinder collider currently on `tree_circle.object.ron` could be kept for performance (simpler collision shape) or removed to use the accurate trimesh.
 
-**Decision**: Keep existing `ColliderConstructor` entries as-is. The trimesh fallback only activates when no `ColliderConstructor` is present. This lets us add new objects with just `VisualKind::Vox` and get automatic colliders.
+**Decision**: Keep existing `ColliderConstructor` entries in RON as fallback definitions. The vox trimesh is used when available; `ColliderConstructor` only activates when no vox mesh can be resolved. When a vox trimesh is used, `ColliderConstructor` is filtered out of the components applied to the entity.
 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all` passes
-- [ ] `cargo server` starts successfully
+- [x] `cargo check-all` passes
+- [x] `cargo server` starts successfully
 
 #### Manual Verification:
-- [ ] Server log shows world objects spawning with colliders
-- [ ] Objects with `ColliderConstructor` in RON use the manual collider
-- [ ] Objects without `ColliderConstructor` use trimesh from vox mesh
+- [x] Server log shows world objects spawning with colliders
+- [x] Objects with `VisualKind::Vox` use vox trimesh collider (primary)
+- [x] Objects without vox mesh fall back to `ColliderConstructor` from RON
 - [ ] Characters collide correctly with world objects
 
 ---
