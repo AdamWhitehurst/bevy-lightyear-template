@@ -507,7 +507,8 @@ This requires adding a `mesh_vox_model_from_dense` function to `meshing.rs` that
 
 **File**: `crates/protocol/src/vox_model/meshing.rs` (update)
 Add `pub fn mesh_vox_model_from_dense(voxels: &[VoxModelVoxel], size: UVec3, palette: &[dot_vox::Color]) -> Option<Mesh>` that pads the dense array and runs the same greedy quads + vertex color pipeline.
-%% [SUGGESTION] Elegance — Consider if `mesh_vox_model_from_dense` is necessary. Current plan: `mesh_vox_model` rasterizes, LOD gen calls `mesh_vox_model` for LOD 0, then rasterizes again for LOD 1+. This double-rasterizes LOD 0. Alternative: Always use `mesh_vox_model_from_dense`, make `mesh_vox_model` a thin wrapper that calls `rasterize_to_dense` then `mesh_vox_model_from_dense`. Reduces duplication and avoids double work.
+
+**Implementation note**: `mesh_vox_model` was kept as-is (not refactored into a thin wrapper) because the double-rasterization for LOD 0 is negligible at load time. `mesh_vox_model_from_dense` was added as a separate function that pads a dense unpadded array before running greedy quads.
 
 #### 3. Loading systems (manifest + TrackedAssets)
 **File**: `crates/protocol/src/vox_model/loading.rs` (new)
@@ -529,7 +530,7 @@ Systems:
 - `load_vox_models` (Startup) — loads folder or manifest
 - `trigger_individual_vox_model_loads` (WASM, PreUpdate during Loading)
 - `insert_vox_model_registry` (Update, until registry exists)
-%% [VIOLATION] Rules — CLAUDE.md System Design: "Expected early-out must include `trace!` explaining why". Ensure `trigger_individual_vox_model_loads` and `insert_vox_model_registry` use `trace!` for early returns, matching the pattern in ability/world_object loading.
+**Implementation note**: All early returns use `trace!()` per CLAUDE.md rules. The manifest-based approach is used on all platforms (not just WASM) because the `models/` directory contains non-vox files (`.obj`, `.mtl`, `.png`) that break `load_folder`. The trigger system is gated on `not(resource_exists::<VoxModelRegistry>)` rather than `in_state(AppState::Loading)` to avoid a race condition with asset processing order.
 
 #### 4. Manifest file
 **File**: `assets/models.manifest.ron` (new)
@@ -589,11 +590,11 @@ pub struct VoxModelManifest(pub Vec<String>);
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all` passes
-- [ ] `cargo server` starts without errors (models load, registry populated)
+- [x] `cargo check-all` passes
+- [x] `cargo server` starts without errors (models load, registry populated)
 
 #### Manual Verification:
-- [ ] Log output shows "Loaded N vox models" during startup
+- [x] Log output shows "Loaded 11 vox models" during startup
 - [ ] Hot-reload: modify a `.vox` file → log shows reload message
 
 ---

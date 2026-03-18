@@ -31,6 +31,58 @@ pub fn mesh_vox_model(model: &dot_vox::Model, palette: &[dot_vox::Color]) -> Opt
     build_mesh(&buffer, &faces, &voxels, &shape, palette, center)
 }
 
+/// Converts a pre-rasterized dense voxel array into a Bevy `Mesh` centered at the origin.
+///
+/// The input must be in Bevy Y-up coordinates (no padding, no axis remap needed).
+/// Used by LOD generation where the dense array is already downsampled.
+///
+/// Returns `None` if the array contains no visible voxels.
+pub fn mesh_vox_model_from_dense(
+    voxels: &[VoxModelVoxel],
+    size: UVec3,
+    palette: &[dot_vox::Color],
+) -> Option<Mesh> {
+    let padded = pad_dense_array(voxels, size);
+    let padded_dims = [size.x + 2, size.y + 2, size.z + 2];
+    let shape = RuntimeShape::<u32, 3>::new(padded_dims);
+
+    let mut buffer = GreedyQuadsBuffer::new(shape.usize());
+    let max = [padded_dims[0] - 1, padded_dims[1] - 1, padded_dims[2] - 1];
+    let faces = RIGHT_HANDED_Y_UP_CONFIG.faces;
+    greedy_quads(&padded, &shape, [0; 3], max, &faces, &mut buffer);
+
+    if buffer.quads.num_quads() == 0 {
+        trace!("No quads found in dense voxel array");
+        return None;
+    }
+
+    let center = Vec3::new(
+        size.x as f32 / 2.0,
+        size.y as f32 / 2.0,
+        size.z as f32 / 2.0,
+    );
+    build_mesh(&buffer, &faces, &padded, &shape, palette, center)
+}
+
+/// Wraps a dense unpadded voxel array in a 1-wide empty border.
+fn pad_dense_array(voxels: &[VoxModelVoxel], size: UVec3) -> Vec<VoxModelVoxel> {
+    let padded_dims = [size.x + 2, size.y + 2, size.z + 2];
+    let shape = RuntimeShape::<u32, 3>::new(padded_dims);
+    let mut padded = vec![VoxModelVoxel::Empty; shape.usize()];
+
+    for z in 0..size.z {
+        for y in 0..size.y {
+            for x in 0..size.x {
+                let src_idx = (x + y * size.x + z * size.x * size.y) as usize;
+                let dst_idx = shape.linearize([x + 1, y + 1, z + 1]) as usize;
+                padded[dst_idx] = voxels[src_idx];
+            }
+        }
+    }
+
+    padded
+}
+
 /// Padded dimensions: model size + 2 in each axis (1 border on each side), with Z-up to Y-up remap.
 fn padded_dimensions(model: &dot_vox::Model) -> [u32; 3] {
     [model.size.x + 2, model.size.z + 2, model.size.y + 2]

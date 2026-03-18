@@ -41,6 +41,7 @@ pub use map::{
     SavedEntityKind, SectionBlocksUpdate, TransitionReadySent, VoxelChannel, VoxelChunk,
     VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
 };
+pub use vox_model::{VoxModelAsset, VoxModelPlugin, VoxModelRegistry};
 pub use world_object::{WorldObjectDefRegistry, WorldObjectId, WorldObjectPlugin};
 
 pub const PROTOCOL_ID: u64 = 0;
@@ -215,6 +216,7 @@ impl Plugin for SharedGameplayPlugin {
         app.add_plugins(ProtocolPlugin);
         app.add_plugins(AbilityPlugin);
         app.add_plugins(world_object::WorldObjectPlugin);
+        app.add_plugins(vox_model::VoxModelPlugin);
 
         app.add_plugins(lightyear::avian3d::plugin::LightyearAvianPlugin {
             replication_mode: lightyear::avian3d::plugin::AvianReplicationMode::Position,
