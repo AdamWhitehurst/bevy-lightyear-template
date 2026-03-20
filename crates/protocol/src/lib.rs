@@ -37,11 +37,11 @@ pub use hit_detection::{
     projectile_collision_layers, terrain_collision_layers, GameLayer,
 };
 pub use map::{
-    attach_chunk_colliders, ChunkChannel, ChunkDataSync, ChunkRequest, ChunkUnload, MapChannel,
-    MapInstanceId, MapRegistry, MapSaveTarget, MapSwitchTarget, MapTransitionEnd,
-    MapTransitionReady, MapTransitionStart, PendingTransition, PlayerMapSwitchRequest, SavedEntity,
-    SavedEntityKind, SectionBlocksUpdate, TransitionReadySent, VoxelChannel, VoxelChunk,
-    VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
+    attach_chunk_colliders, ChunkChannel, ChunkDataSync, ChunkRequest, MapChannel, MapInstanceId,
+    MapRegistry, MapSaveTarget, MapSwitchTarget, MapTransitionEnd, MapTransitionReady,
+    MapTransitionStart, PendingTransition, PlayerMapSwitchRequest, SavedEntity, SavedEntityKind,
+    SectionBlocksUpdate, TransitionReadySent, VoxelChannel, VoxelChunk, VoxelEditAck,
+    VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
 };
 pub use terrain::{TerrainDefRegistry, TerrainPlugin};
 pub use vox_model::{VoxModelAsset, VoxModelPlugin, VoxModelRegistry};
@@ -120,8 +120,6 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<ChunkRequest>()
             .add_direction(NetworkDirection::ClientToServer);
-        app.register_message::<ChunkUnload>()
-            .add_direction(NetworkDirection::ServerToClient);
 
         // Map transition channel
         app.add_channel::<MapChannel>(ChannelSettings {

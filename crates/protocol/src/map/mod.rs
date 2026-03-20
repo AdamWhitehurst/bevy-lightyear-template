@@ -7,7 +7,7 @@ mod voxel;
 
 pub use voxel_map_engine::prelude::{VoxelChunk, VoxelType};
 
-pub use chunk::{ChunkChannel, ChunkDataSync, ChunkRequest, ChunkUnload};
+pub use chunk::{ChunkChannel, ChunkDataSync, ChunkRequest};
 pub use colliders::attach_chunk_colliders;
 pub use persistence::{MapSaveTarget, SavedEntity, SavedEntityKind};
 pub use transition::{

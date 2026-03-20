@@ -101,12 +101,12 @@ fn inserts_ready_sent_after_chunks_load() {
     let map = spawn_map(&mut app);
     let player = spawn_frozen_player(&mut app, map);
 
-    // Manually simulate received: insert a chunk coord into ClientChunkState
+    // Manually simulate received: insert a chunk coord into loaded_chunks
     app.world_mut()
         .entity_mut(map)
-        .get_mut::<ClientChunkState>()
+        .get_mut::<VoxelMapInstance>()
         .unwrap()
-        .received
+        .loaded_chunks
         .insert(IVec3::ZERO);
 
     set_transitioning(&mut app, player);

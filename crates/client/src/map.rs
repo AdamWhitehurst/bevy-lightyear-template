@@ -7,9 +7,9 @@ use leafwing_input_manager::prelude::*;
 use lightyear::prelude::{Controlled, DisableRollback, MessageReceiver, MessageSender, Predicted};
 use protocol::map::{MapChannel, MapTransitionEnd, MapTransitionReady, MapTransitionStart};
 use protocol::{
-    CharacterMarker, ChunkChannel, ChunkDataSync, ChunkRequest, ChunkUnload, MapInstanceId,
-    MapRegistry, PendingTransition, PlayerActions, SectionBlocksUpdate, TransitionReadySent,
-    VoxelChannel, VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
+    CharacterMarker, ChunkChannel, ChunkDataSync, ChunkRequest, MapInstanceId, MapRegistry,
+    PendingTransition, PlayerActions, SectionBlocksUpdate, TransitionReadySent, VoxelChannel,
+    VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
 };
 use ui::MapTransitionState;
 use voxel_map_engine::prelude::{
@@ -23,22 +23,11 @@ const RAYCAST_MAX_DISTANCE: f32 = 100.0;
 /// How often (in seconds) to retry requesting chunks that haven't arrived.
 const CHUNK_REQUEST_RETRY_INTERVAL: f32 = 0.1;
 
-/// Tracks which chunks the client has received from the server.
-#[derive(Component)]
+/// Tracks in-flight chunk requests to avoid duplicate sends.
+#[derive(Component, Default)]
 pub struct ClientChunkState {
-    pub received: HashSet<IVec3>,
     pending_requests: HashSet<IVec3>,
     retry_timer: f32,
-}
-
-impl Default for ClientChunkState {
-    fn default() -> Self {
-        Self {
-            received: HashSet::new(),
-            pending_requests: HashSet::new(),
-            retry_timer: 0.0,
-        }
-    }
 }
 
 /// Tracks pending predictions for block edits awaiting server acknowledgment.
@@ -84,7 +73,6 @@ impl Plugin for ClientMapPlugin {
                     handle_voxel_edit_reject,
                     request_missing_chunks,
                     handle_chunk_data_sync,
-                    handle_chunk_unload,
                     protocol::attach_chunk_colliders,
                 )
                     .run_if(in_state(ui::ClientState::InGame)),
@@ -200,9 +188,6 @@ fn request_missing_chunks(
         if instance.loaded_chunks.contains(&chunk_pos) {
             continue;
         }
-        if state.received.contains(&chunk_pos) {
-            continue;
-        }
         if state.pending_requests.contains(&chunk_pos) {
             continue;
         }
@@ -213,7 +198,6 @@ fn request_missing_chunks(
         state.pending_requests.insert(chunk_pos);
     }
 
-    state.received.retain(|pos| desired.contains(pos));
     state.pending_requests.retain(|pos| desired.contains(pos));
 }
 
@@ -256,7 +240,6 @@ fn handle_chunk_data_sync(
             instance.loaded_chunks.insert(sync.chunk_pos);
 
             chunk_state.pending_requests.remove(&sync.chunk_pos);
-            chunk_state.received.insert(sync.chunk_pos);
 
             let Some(mesh) = mesh_chunk_greedy(&voxels) else {
                 continue;
@@ -289,32 +272,6 @@ fn handle_chunk_data_sync(
                 ))
                 .id();
             commands.entity(map_entity).add_child(chunk_entity);
-        }
-    }
-}
-
-/// Handles server chunk unload messages.
-fn handle_chunk_unload(
-    mut receivers: Query<&mut MessageReceiver<ChunkUnload>>,
-    mut map_query: Query<&mut VoxelMapInstance>,
-    mut chunk_state_query: Query<&mut ClientChunkState>,
-    player_query: Query<&ChunkTarget, (With<Predicted>, With<CharacterMarker>, With<Controlled>)>,
-) {
-    let Ok(chunk_target) = player_query.single() else {
-        trace!("handle_chunk_unload: no controlled predicted player with ChunkTarget");
-        return;
-    };
-    let Ok(mut instance) = map_query.get_mut(chunk_target.map_entity) else {
-        return;
-    };
-
-    for mut receiver in &mut receivers {
-        for unload in receiver.receive() {
-            instance.loaded_chunks.remove(&unload.chunk_pos);
-            instance.remove_chunk_data(unload.chunk_pos);
-            if let Ok(mut state) = chunk_state_query.get_mut(chunk_target.map_entity) {
-                state.received.remove(&unload.chunk_pos);
-            }
         }
     }
 }
@@ -634,26 +591,27 @@ pub fn check_transition_chunks_loaded(
         ),
     >,
     registry: Res<MapRegistry>,
-    chunk_state_query: Query<&ClientChunkState>,
+    map_query: Query<&VoxelMapInstance>,
     mut senders: Query<&mut MessageSender<MapTransitionReady>>,
 ) {
     let Ok((player, pending)) = player_query.single() else {
         return;
     };
     let map_entity = registry.get(&pending.0);
-    let Ok(chunk_state) = chunk_state_query.get(map_entity) else {
-        trace!("check_transition_chunks_loaded: no ClientChunkState on map entity yet");
+
+    let Ok(instance) = map_query.get(map_entity) else {
+        trace!("check_transition_chunks_loaded: no VoxelMapInstance on map entity yet");
         return;
     };
 
-    if chunk_state.received.is_empty() {
+    if instance.loaded_chunks.is_empty() {
         return;
     }
 
     info!(
-        "Transition chunks loaded for {:?} ({} received), sending ready to server",
+        "Transition chunks loaded for {:?} ({} chunks), sending ready to server",
         pending.0,
-        chunk_state.received.len()
+        instance.loaded_chunks.len()
     );
 
     commands.entity(player).insert(TransitionReadySent);

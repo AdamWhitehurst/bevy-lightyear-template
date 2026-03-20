@@ -17,9 +17,3 @@ pub struct ChunkDataSync {
 pub struct ChunkRequest {
     pub chunk_pos: IVec3,
 }
-
-/// Server tells client to discard a chunk (left view range).
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
-pub struct ChunkUnload {
-    pub chunk_pos: IVec3,
-}
