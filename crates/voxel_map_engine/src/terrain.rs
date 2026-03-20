@@ -294,18 +294,14 @@ pub fn select_biome<'a>(rules: &'a [BiomeRule], height: f64, moisture: f64) -> &
         .unwrap_or(&rules[0])
 }
 
-/// Build a [`VoxelGenerator`] closure from terrain components.
+/// Build a [`VoxelGenerator`] closure from terrain components on a map entity.
 ///
+/// Reads [`HeightMap`], [`MoistureMap`], and [`BiomeRules`] from the entity.
 /// If no `HeightMap` is present, falls back to [`flat_terrain_voxels`].
-pub fn build_generator(
-    seed: u64,
-    height: Option<&HeightMap>,
-    moisture: Option<&MoistureMap>,
-    biomes: Option<&BiomeRules>,
-) -> VoxelGenerator {
-    let height = height.cloned();
-    let moisture = moisture.cloned();
-    let biomes = biomes.cloned();
+pub fn build_generator(entity: EntityRef, seed: u64) -> VoxelGenerator {
+    let height = entity.get::<HeightMap>().cloned();
+    let moisture = entity.get::<MoistureMap>().cloned();
+    let biomes = entity.get::<BiomeRules>().cloned();
 
     debug_assert!(
         moisture.is_none() || height.is_some(),

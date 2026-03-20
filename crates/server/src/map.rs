@@ -22,7 +22,6 @@ use voxel_map_engine::prelude::{
     build_generator, seed_from_id, ChunkTarget, VoxelGenerator, VoxelMapConfig, VoxelMapInstance,
     VoxelPlugin, VoxelWorld, WorldVoxel,
 };
-use voxel_map_engine::terrain;
 
 use crate::persistence::{
     load_entities, load_map_meta, map_save_dir, save_entities, save_map_meta, MapMeta,
@@ -170,29 +169,25 @@ fn clone_terrain_components(
         .collect()
 }
 
-/// Builds `VoxelGenerator` for map entities that have terrain components but no generator yet.
+/// Builds `VoxelGenerator` for map entities whose terrain components have been flushed.
 ///
-/// Runs after terrain def components have been flushed onto the entity.
-fn build_terrain_generators(
-    mut commands: Commands,
-    query: Query<
-        (
-            Entity,
-            &VoxelMapConfig,
-            Option<&terrain::HeightMap>,
-            Option<&terrain::MoistureMap>,
-            Option<&terrain::BiomeRules>,
-        ),
-        (
-            With<VoxelMapInstance>,
-            With<TerrainDefApplied>,
-            Without<VoxelGenerator>,
-        ),
-    >,
-) {
-    for (entity, config, height, moisture, biomes) in &query {
-        let generator = build_generator(config.seed, height, moisture, biomes);
-        commands.entity(entity).insert(generator);
+/// Exclusive system: needs `&mut World` to pass `EntityRef` to `build_generator`,
+/// keeping that function extensible to new terrain components without signature changes.
+fn build_terrain_generators(world: &mut World) {
+    let mut query = world.query_filtered::<(Entity, &VoxelMapConfig), (
+        With<VoxelMapInstance>,
+        With<TerrainDefApplied>,
+        Without<VoxelGenerator>,
+    )>();
+    let entities: Vec<(Entity, u64)> = query
+        .iter(world)
+        .map(|(e, config)| (e, config.seed))
+        .collect();
+
+    for (entity, seed) in entities {
+        let entity_ref = world.entity(entity);
+        let generator = build_generator(entity_ref, seed);
+        world.entity_mut(entity).insert(generator);
         info!("Built terrain generator for map entity {entity:?}");
     }
 }
@@ -425,6 +420,7 @@ impl Plugin for ServerMapPlugin {
                 Update,
                 (
                     apply_terrain_defs.run_if(resource_exists::<TerrainDefRegistry>),
+                    ApplyDeferred,
                     build_terrain_generators,
                 )
                     .chain()
