@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
 
 use avian3d::prelude::{ColliderDisabled, Position, RigidBodyDisabled};
 use bevy::app::AppExit;
@@ -18,17 +17,20 @@ use protocol::{
     PendingTransition, SectionBlocksUpdate, VoxelChannel, VoxelEditAck, VoxelEditBroadcast,
     VoxelEditReject, VoxelEditRequest, VoxelType,
 };
+use voxel_map_engine::lifecycle;
 use voxel_map_engine::prelude::{
-    flat_terrain_voxels, seed_from_id, ChunkTarget, VoxelMapConfig, VoxelMapInstance, VoxelPlugin,
-    VoxelWorld, WorldVoxel,
+    build_generator, seed_from_id, ChunkTarget, VoxelGenerator, VoxelMapConfig, VoxelMapInstance,
+    VoxelPlugin, VoxelWorld, WorldVoxel,
 };
+use voxel_map_engine::terrain;
 
 use crate::persistence::{
     load_entities, load_map_meta, map_save_dir, save_entities, save_map_meta, MapMeta,
     WorldSavePath,
 };
 use protocol::map::{MapSaveTarget, SavedEntity, SavedEntityKind};
-use protocol::RespawnPoint;
+use protocol::world_object::apply_object_components;
+use protocol::{RespawnPoint, TerrainDefRegistry};
 use voxel_map_engine::persistence as chunk_persist;
 
 /// Plugin managing server-side voxel map functionality.
@@ -102,14 +104,7 @@ pub fn spawn_overworld(
         _ => (DEFAULT_OVERWORLD_SEED, GENERATION_VERSION),
     };
 
-    let mut config = VoxelMapConfig::new(
-        seed,
-        generation_version,
-        2,
-        None,
-        5,
-        Arc::new(flat_terrain_voxels),
-    );
+    let mut config = VoxelMapConfig::new(seed, generation_version, 2, None, 5);
     config.save_dir = Some(map_dir);
 
     let map = commands
@@ -120,8 +115,86 @@ pub fn spawn_overworld(
             MapInstanceId::Overworld,
         ))
         .id();
+
+    // Terrain components applied later by apply_terrain_defs (when TerrainDefRegistry is loaded).
+    // VoxelGenerator is then built by build_terrain_generators.
+
     commands.insert_resource(OverworldMap(map));
     registry.insert(MapInstanceId::Overworld, map);
+}
+
+/// Marker indicating terrain definition components have been applied to this map entity.
+#[derive(Component)]
+struct TerrainDefApplied;
+
+/// Applies terrain definition components from `TerrainDefRegistry` to map entities.
+///
+/// Waits for `TerrainDefRegistry` to be loaded (async asset pipeline), then applies
+/// terrain components from the matching `.terrain.ron` file onto each map entity.
+fn apply_terrain_defs(
+    mut commands: Commands,
+    query: Query<(Entity, &MapInstanceId), (With<VoxelMapInstance>, Without<TerrainDefApplied>)>,
+    terrain_registry: Res<TerrainDefRegistry>,
+    type_registry: Res<AppTypeRegistry>,
+) {
+    for (entity, map_id) in &query {
+        let def_name = terrain_def_name(map_id);
+        if let Some(terrain_def) = terrain_registry.get(&def_name) {
+            let components = clone_terrain_components(terrain_def);
+            apply_object_components(&mut commands, entity, components, type_registry.0.clone());
+        }
+        commands.entity(entity).insert(TerrainDefApplied);
+        info!("Applied terrain def '{def_name}' to map entity {entity:?}");
+    }
+}
+
+/// Maps a `MapInstanceId` to its terrain definition name.
+fn terrain_def_name(map_id: &MapInstanceId) -> String {
+    match map_id {
+        MapInstanceId::Overworld => "overworld".to_string(),
+        MapInstanceId::Homebase { .. } => "homebase".to_string(),
+    }
+}
+
+/// Clone terrain definition components via `reflect_clone`.
+fn clone_terrain_components(
+    def: &protocol::terrain::TerrainDef,
+) -> Vec<Box<dyn bevy::reflect::PartialReflect>> {
+    def.components
+        .iter()
+        .map(|c| {
+            c.reflect_clone()
+                .expect("terrain component must be cloneable")
+                .into_partial_reflect()
+        })
+        .collect()
+}
+
+/// Builds `VoxelGenerator` for map entities that have terrain components but no generator yet.
+///
+/// Runs after terrain def components have been flushed onto the entity.
+fn build_terrain_generators(
+    mut commands: Commands,
+    query: Query<
+        (
+            Entity,
+            &VoxelMapConfig,
+            Option<&terrain::HeightMap>,
+            Option<&terrain::MoistureMap>,
+            Option<&terrain::BiomeRules>,
+        ),
+        (
+            With<VoxelMapInstance>,
+            With<TerrainDefApplied>,
+            Without<VoxelGenerator>,
+        ),
+    >,
+) {
+    for (entity, config, height, moisture, biomes) in &query {
+        let generator = build_generator(config.seed, height, moisture, biomes);
+        commands.entity(entity).insert(generator);
+        info!("Built terrain generator for map entity {entity:?}");
+    }
 }
 
 fn save_dirty_chunks_debounced(
@@ -348,6 +421,15 @@ impl Plugin for ServerMapPlugin {
             .init_resource::<PendingVoxelBroadcasts>()
             .init_resource::<WorldSavePath>()
             .add_systems(Startup, (spawn_overworld, load_startup_entities).chain())
+            .add_systems(
+                Update,
+                (
+                    apply_terrain_defs.run_if(resource_exists::<TerrainDefRegistry>),
+                    build_terrain_generators,
+                )
+                    .chain()
+                    .before(lifecycle::ensure_pending_chunks),
+            )
             .add_systems(
                 Update,
                 (
@@ -791,8 +873,7 @@ fn spawn_homebase(
     let seed = load_homebase_seed(&map_dir, owner);
 
     let bounds = IVec3::new(4, 4, 4);
-    let (instance, mut config, marker) =
-        VoxelMapInstance::homebase(owner, bounds, Arc::new(flat_terrain_voxels));
+    let (instance, mut config, marker) = VoxelMapInstance::homebase(owner, bounds);
     config.seed = seed;
     config.save_dir = Some(map_dir);
 
@@ -801,6 +882,7 @@ fn spawn_homebase(
         generation_version: config.generation_version,
         bounds: config.bounds,
     };
+    // No VoxelGenerator here — build_terrain_generators will add it next frame.
     let entity = commands
         .spawn((
             instance,

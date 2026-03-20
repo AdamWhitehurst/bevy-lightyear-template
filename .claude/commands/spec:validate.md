@@ -29,7 +29,7 @@ When invoked:
 
 If starting fresh or need more context:
 
-1. **Read the implementation plan** completely
+1. **Read the implementation plan** COMPLETELY
 2. **Identify what should have changed**:
    - List all files that should be modified
    - Note all success criteria (automated and manual)
@@ -77,7 +77,7 @@ For each phase in the plan:
 
 ### Step 3: Generate Validation Report
 
-Create comprehensive validation summary:
+Use this template to create comprehensive validation summary:
 
 ```markdown
 ## Validation Report: [Plan Name]
@@ -153,9 +153,9 @@ Always verify:
 ## Relationship to Other Commands
 
 Recommended workflow:
-1. `/implement_plan` - Execute the implementation
+1. `/spec:implement` - Execute the implementation
 2. `/commit` - Create atomic commits for changes
-3. `/validate_plan` - Verify implementation correctness
+3. `/spec:validate` - Verify implementation correctness
 4. `/describe_pr` - Generate PR description
 
 The validation works best after commits are made, as it can analyze the git history to understand what was implemented.

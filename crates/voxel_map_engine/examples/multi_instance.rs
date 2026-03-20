@@ -51,13 +51,13 @@ fn setup(mut commands: Commands) {
 }
 
 fn spawn_overworld(commands: &mut Commands) -> Entity {
-    let (mut instance, config, marker) =
-        VoxelMapInstance::overworld(42, Arc::new(flat_terrain_voxels));
+    let (mut instance, config, marker) = VoxelMapInstance::overworld(42);
     instance.debug_colors = true;
     commands
         .spawn((
             instance,
             config,
+            VoxelGenerator(Arc::new(flat_terrain_voxels)),
             marker,
             PendingChunks::default(),
             Transform::default(),
@@ -66,13 +66,13 @@ fn spawn_overworld(commands: &mut Commands) -> Entity {
 }
 
 fn spawn_homebase(commands: &mut Commands) -> Entity {
-    let (mut instance, config, marker) =
-        VoxelMapInstance::homebase(0, IVec3::new(8, 4, 8), Arc::new(raised_terrain_voxels));
+    let (mut instance, config, marker) = VoxelMapInstance::homebase(0, IVec3::new(8, 4, 8));
     instance.debug_colors = true;
     commands
         .spawn((
             instance,
             config,
+            VoxelGenerator(Arc::new(raised_terrain_voxels)),
             marker,
             PendingChunks::default(),
             Transform::from_translation(Vec3::new(200.0, 0.0, 0.0)),
@@ -81,13 +81,13 @@ fn spawn_homebase(commands: &mut Commands) -> Entity {
 }
 
 fn spawn_arena(commands: &mut Commands) -> Entity {
-    let (mut instance, config, marker) =
-        VoxelMapInstance::arena(1, 99, IVec3::new(10, 4, 10), Arc::new(bowl_terrain_voxels));
+    let (mut instance, config, marker) = VoxelMapInstance::arena(1, 99, IVec3::new(10, 4, 10));
     instance.debug_colors = true;
     commands
         .spawn((
             instance,
             config,
+            VoxelGenerator(Arc::new(bowl_terrain_voxels)),
             marker,
             PendingChunks::default(),
             Transform::from_translation(Vec3::new(-200.0, 0.0, 0.0)),

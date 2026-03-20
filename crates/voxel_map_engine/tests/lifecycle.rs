@@ -14,11 +14,11 @@ fn test_app() -> App {
 }
 
 fn spawn_map(app: &mut App, spawning_distance: u32) -> Entity {
-    let generator: VoxelGenerator = Arc::new(flat_terrain_voxels);
     app.world_mut()
         .spawn((
             VoxelMapInstance::new(5),
-            VoxelMapConfig::new(0, 0, spawning_distance, None, 5, generator),
+            VoxelMapConfig::new(0, 0, spawning_distance, None, 5),
+            VoxelGenerator(Arc::new(flat_terrain_voxels)),
             Transform::default(),
         ))
         .id()
@@ -117,12 +117,12 @@ fn chunks_despawn_outside_range() {
 #[test]
 fn bounded_map_respects_bounds() {
     let mut app = test_app();
-    let generator: VoxelGenerator = Arc::new(flat_terrain_voxels);
     let map = app
         .world_mut()
         .spawn((
             VoxelMapInstance::new(5),
-            VoxelMapConfig::new(0, 0, 5, Some(IVec3::new(2, 2, 2)), 5, generator),
+            VoxelMapConfig::new(0, 0, 5, Some(IVec3::new(2, 2, 2)), 5),
+            VoxelGenerator(Arc::new(flat_terrain_voxels)),
             Transform::default(),
         ))
         .id();

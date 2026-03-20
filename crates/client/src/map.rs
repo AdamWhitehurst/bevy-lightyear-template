@@ -14,7 +14,8 @@ use protocol::{
 use ui::MapTransitionState;
 use voxel_map_engine::prelude::{
     flat_terrain_voxels, mesh_chunk_greedy, ChunkData, ChunkTarget, DefaultVoxelMaterial,
-    VoxelChunk, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
+    VoxelChunk, VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld,
+    WorldVoxel,
 };
 
 const RAYCAST_MAX_DISTANCE: f32 = 100.0;
@@ -108,13 +109,14 @@ impl Plugin for ClientMapPlugin {
 pub struct OverworldMap(pub Entity);
 
 fn spawn_overworld(mut commands: Commands, mut registry: ResMut<MapRegistry>) {
-    let mut config = VoxelMapConfig::new(0, 0, 2, None, 5, Arc::new(flat_terrain_voxels));
+    let mut config = VoxelMapConfig::new(0, 0, 2, None, 5);
     config.generates_chunks = false;
 
     let map = commands
         .spawn((
             VoxelMapInstance::new(5),
             config,
+            VoxelGenerator(Arc::new(flat_terrain_voxels)),
             ClientChunkState::default(),
             Transform::default(),
             MapInstanceId::Overworld,
@@ -581,12 +583,10 @@ fn despawn_old_map(
     }
 }
 
-fn generator_for_map(
-    map_id: &MapInstanceId,
-) -> Arc<dyn Fn(IVec3) -> Vec<WorldVoxel> + Send + Sync> {
+fn generator_for_map(map_id: &MapInstanceId) -> VoxelGenerator {
     match map_id {
-        MapInstanceId::Overworld => Arc::new(flat_terrain_voxels),
-        MapInstanceId::Homebase { .. } => Arc::new(flat_terrain_voxels),
+        MapInstanceId::Overworld => VoxelGenerator(Arc::new(flat_terrain_voxels)),
+        MapInstanceId::Homebase { .. } => VoxelGenerator(Arc::new(flat_terrain_voxels)),
     }
 }
 
@@ -595,7 +595,7 @@ fn spawn_map_instance(
     map_id: &MapInstanceId,
     seed: u64,
     bounds: Option<IVec3>,
-    generator: Arc<dyn Fn(IVec3) -> Vec<WorldVoxel> + Send + Sync>,
+    generator: VoxelGenerator,
 ) -> Entity {
     let tree_height = match map_id {
         MapInstanceId::Overworld => 5,
@@ -603,14 +603,14 @@ fn spawn_map_instance(
     };
     let spawning_distance = bounds.map(|b| b.max_element().max(1) as u32).unwrap_or(10);
 
-    let mut config =
-        VoxelMapConfig::new(seed, 0, spawning_distance, bounds, tree_height, generator);
+    let mut config = VoxelMapConfig::new(seed, 0, spawning_distance, bounds, tree_height);
     config.generates_chunks = false;
 
     let entity = commands
         .spawn((
             VoxelMapInstance::new(tree_height),
             config,
+            generator,
             ClientChunkState::default(),
             Transform::default(),
             map_id.clone(),

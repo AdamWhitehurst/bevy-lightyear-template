@@ -32,7 +32,7 @@ pub fn spawn_chunk_gen_task(
     generator: &VoxelGenerator,
     save_dir: Option<PathBuf>,
 ) {
-    let generator = Arc::clone(generator);
+    let generator = Arc::clone(&generator.0);
     let pool = AsyncComputeTaskPool::get();
 
     let task = pool.spawn(async move {
@@ -55,14 +55,14 @@ pub fn spawn_chunk_gen_task(
             }
         }
 
-        generate_chunk(position, &generator)
+        generate_chunk(position, &*generator)
     });
 
     pending.tasks.push(task);
     pending.pending_positions.insert(position);
 }
 
-fn generate_chunk(position: IVec3, generator: &VoxelGenerator) -> ChunkGenResult {
+fn generate_chunk(position: IVec3, generator: &dyn Fn(IVec3) -> Vec<WorldVoxel>) -> ChunkGenResult {
     let voxels = generator(position);
     let mesh = mesh_chunk_greedy(&voxels);
     ChunkGenResult {

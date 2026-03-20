@@ -16,14 +16,19 @@ fn test_app() -> App {
 }
 
 fn spawn_map(app: &mut App, spawning_distance: u32) -> Entity {
-    spawn_map_with(app, spawning_distance, Arc::new(flat_terrain_voxels))
+    spawn_map_with(
+        app,
+        spawning_distance,
+        VoxelGenerator(Arc::new(flat_terrain_voxels)),
+    )
 }
 
 fn spawn_map_with(app: &mut App, spawning_distance: u32, generator: VoxelGenerator) -> Entity {
     app.world_mut()
         .spawn((
             VoxelMapInstance::new(5),
-            VoxelMapConfig::new(0, 0, spawning_distance, None, 5, generator),
+            VoxelMapConfig::new(0, 0, spawning_distance, None, 5),
+            generator,
             Transform::default(),
         ))
         .id()
@@ -313,7 +318,7 @@ fn all_air_voxels(_chunk_pos: IVec3) -> Vec<WorldVoxel> {
 fn raycast_isolated_between_instances() {
     let mut app = test_app();
     let map_a = spawn_map(&mut app, 1);
-    let map_b = spawn_map_with(&mut app, 1, Arc::new(all_air_voxels));
+    let map_b = spawn_map_with(&mut app, 1, VoxelGenerator(Arc::new(all_air_voxels)));
     tick(&mut app, 1);
 
     app.world_mut()

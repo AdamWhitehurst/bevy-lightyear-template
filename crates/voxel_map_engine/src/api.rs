@@ -2,7 +2,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use ndshape::ConstShape;
 
-use crate::config::VoxelMapConfig;
+use crate::config::{VoxelGenerator, VoxelMapConfig};
 use crate::instance::VoxelMapInstance;
 use crate::raycast::{VoxelRaycastResult, voxel_line_traversal};
 use crate::types::{CHUNK_SIZE, PaddedChunkShape, WorldVoxel};
@@ -12,7 +12,15 @@ use crate::types::{CHUNK_SIZE, PaddedChunkShape, WorldVoxel};
 /// Every operation takes a `map: Entity` parameter to select which map instance to operate on.
 #[derive(SystemParam)]
 pub struct VoxelWorld<'w, 's> {
-    maps: Query<'w, 's, (&'static mut VoxelMapInstance, &'static VoxelMapConfig)>,
+    maps: Query<
+        'w,
+        's,
+        (
+            &'static mut VoxelMapInstance,
+            &'static VoxelMapConfig,
+            &'static VoxelGenerator,
+        ),
+    >,
 }
 
 impl VoxelWorld<'_, '_> {
@@ -20,7 +28,7 @@ impl VoxelWorld<'_, '_> {
     ///
     /// Checks the octree first, then evaluates the voxel generator as fallback.
     pub fn get_voxel(&self, map: Entity, pos: IVec3) -> WorldVoxel {
-        let Ok((instance, config)) = self.maps.get(map) else {
+        let Ok((instance, _config, generator)) = self.maps.get(map) else {
             warn!("get_voxel: entity {map:?} has no VoxelMapInstance");
             return WorldVoxel::Unset;
         };
@@ -37,7 +45,7 @@ impl VoxelWorld<'_, '_> {
             return chunk_data.voxels.get(index);
         }
 
-        evaluate_voxel_at(pos, &config.generator)
+        evaluate_voxel_at(pos, generator)
     }
 
     /// Mutate a voxel directly in the octree. Marks the chunk dirty and queues remesh.
@@ -47,7 +55,7 @@ impl VoxelWorld<'_, '_> {
             "set_voxel: cannot write Unset (internal sentinel)"
         );
 
-        let Ok((mut instance, _)) = self.maps.get_mut(map) else {
+        let Ok((mut instance, _, _)) = self.maps.get_mut(map) else {
             warn!("set_voxel: entity {map:?} has no VoxelMapInstance");
             return;
         };
@@ -66,7 +74,7 @@ impl VoxelWorld<'_, '_> {
         max_distance: f32,
         filter: impl Fn(WorldVoxel) -> bool,
     ) -> Option<VoxelRaycastResult> {
-        let Ok((instance, config)) = self.maps.get(map) else {
+        let Ok((instance, _config, generator)) = self.maps.get(map) else {
             warn!("raycast: entity {map:?} has no VoxelMapInstance");
             return None;
         };
@@ -79,7 +87,7 @@ impl VoxelWorld<'_, '_> {
         let mut result = None;
 
         voxel_line_traversal(start, end, |voxel_pos, t, face| {
-            let voxel = lookup_voxel(voxel_pos, &instance, &config.generator, &mut cached_chunk);
+            let voxel = lookup_voxel(voxel_pos, &instance, generator, &mut cached_chunk);
 
             if filter(voxel) {
                 result = Some(VoxelRaycastResult {
@@ -101,7 +109,7 @@ impl VoxelWorld<'_, '_> {
 fn lookup_voxel(
     voxel_pos: IVec3,
     instance: &VoxelMapInstance,
-    generator: &crate::config::VoxelGenerator,
+    generator: &VoxelGenerator,
     cached_chunk: &mut Option<(IVec3, Vec<WorldVoxel>)>,
 ) -> WorldVoxel {
     let chunk_pos = voxel_to_chunk_pos(voxel_pos);
@@ -122,7 +130,7 @@ fn lookup_voxel(
         _ => true,
     };
     if needs_generate {
-        *cached_chunk = Some((chunk_pos, generator(chunk_pos)));
+        *cached_chunk = Some((chunk_pos, (generator.0)(chunk_pos)));
     }
 
     let (_, voxels) = cached_chunk.as_ref().unwrap();
@@ -130,9 +138,9 @@ fn lookup_voxel(
 }
 
 /// Evaluate the voxel generator at a single world-space position.
-fn evaluate_voxel_at(pos: IVec3, generator: &crate::config::VoxelGenerator) -> WorldVoxel {
+fn evaluate_voxel_at(pos: IVec3, generator: &VoxelGenerator) -> WorldVoxel {
     let chunk_pos = voxel_to_chunk_pos(pos);
-    let voxels = generator(chunk_pos);
+    let voxels = (generator.0)(chunk_pos);
     lookup_voxel_in_chunk(&voxels, pos, chunk_pos)
 }
 
@@ -178,7 +186,7 @@ mod tests {
     fn evaluate_voxel_flat_terrain() {
         use crate::meshing::flat_terrain_voxels;
         use std::sync::Arc;
-        let generator: crate::config::VoxelGenerator = Arc::new(flat_terrain_voxels);
+        let generator = VoxelGenerator(Arc::new(flat_terrain_voxels));
 
         let voxel = evaluate_voxel_at(IVec3::new(0, -1, 0), &generator);
         assert_eq!(voxel, WorldVoxel::Solid(0));

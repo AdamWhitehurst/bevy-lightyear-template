@@ -23,7 +23,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use ui::{ClientState, MapTransitionState};
-use voxel_map_engine::prelude::{flat_terrain_voxels, VoxelMapConfig, VoxelMapInstance};
+use voxel_map_engine::prelude::{
+    flat_terrain_voxels, VoxelGenerator, VoxelMapConfig, VoxelMapInstance,
+};
 
 /// Simplified test stepper for crossbeam transport testing
 /// Based on lightyear's ClientServerStepper pattern
@@ -847,7 +849,8 @@ fn register_overworld_on_server(stepper: &mut CrossbeamTestStepper) -> Entity {
         .world_mut()
         .spawn((
             VoxelMapInstance::new(3),
-            VoxelMapConfig::new(0, 0, 1, None, 3, Arc::new(flat_terrain_voxels)),
+            VoxelMapConfig::new(0, 0, 1, None, 3),
+            VoxelGenerator(Arc::new(flat_terrain_voxels)),
             Transform::default(),
             MapInstanceId::Overworld,
         ))
@@ -1193,7 +1196,8 @@ fn server_and_client_spawn_matching_homebase_configs() {
         .world_mut()
         .spawn((
             VoxelMapInstance::new(3),
-            VoxelMapConfig::new(0, 0, 1, None, 3, Arc::new(flat_terrain_voxels)),
+            VoxelMapConfig::new(0, 0, 1, None, 3),
+            VoxelGenerator(Arc::new(flat_terrain_voxels)),
             Transform::default(),
             MapInstanceId::Overworld,
         ))
@@ -1340,7 +1344,8 @@ fn test_client_requests_chunk_and_receives_data() {
         .world_mut()
         .spawn((
             instance,
-            VoxelMapConfig::new(0, 0, 1, None, 3, Arc::new(flat_terrain_voxels)),
+            VoxelMapConfig::new(0, 0, 1, None, 3),
+            VoxelGenerator(Arc::new(flat_terrain_voxels)),
             Transform::default(),
             MapInstanceId::Overworld,
         ))
@@ -1451,7 +1456,8 @@ fn test_voxel_edit_ack_received() {
         .world_mut()
         .spawn((
             instance,
-            VoxelMapConfig::new(0, 0, 1, None, 3, Arc::new(flat_terrain_voxels)),
+            VoxelMapConfig::new(0, 0, 1, None, 3),
+            VoxelGenerator(Arc::new(flat_terrain_voxels)),
             Transform::default(),
             MapInstanceId::Overworld,
         ))

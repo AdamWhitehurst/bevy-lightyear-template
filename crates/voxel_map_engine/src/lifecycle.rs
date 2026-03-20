@@ -4,7 +4,7 @@ use bevy::tasks::{AsyncComputeTaskPool, Task};
 use std::collections::HashSet;
 
 use crate::chunk::{ChunkTarget, VoxelChunk};
-use crate::config::VoxelMapConfig;
+use crate::config::{VoxelGenerator, VoxelMapConfig};
 use crate::generation::{PendingChunks, spawn_chunk_gen_task};
 use crate::instance::VoxelMapInstance;
 use crate::meshing::mesh_chunk_greedy;
@@ -42,10 +42,26 @@ pub struct PendingRemeshes {
 }
 
 /// Auto-insert `PendingChunks` and `PendingRemeshes` on map entities that lack them.
+///
+/// Gated on `With<VoxelGenerator>` — maps without a generator don't start loading chunks.
 pub fn ensure_pending_chunks(
     mut commands: Commands,
-    chunks_query: Query<Entity, (With<VoxelMapInstance>, Without<PendingChunks>)>,
-    remesh_query: Query<Entity, (With<VoxelMapInstance>, Without<PendingRemeshes>)>,
+    chunks_query: Query<
+        Entity,
+        (
+            With<VoxelMapInstance>,
+            With<VoxelGenerator>,
+            Without<PendingChunks>,
+        ),
+    >,
+    remesh_query: Query<
+        Entity,
+        (
+            With<VoxelMapInstance>,
+            With<VoxelGenerator>,
+            Without<PendingRemeshes>,
+        ),
+    >,
 ) {
     for entity in &chunks_query {
         info!("ensure_pending_chunks: adding PendingChunks to {entity:?}");
@@ -64,6 +80,7 @@ pub fn update_chunks(
         Entity,
         &mut VoxelMapInstance,
         &VoxelMapConfig,
+        &VoxelGenerator,
         &mut PendingChunks,
         &GlobalTransform,
     )>,
@@ -75,7 +92,8 @@ pub fn update_chunks(
     if map_count > 0 && *tick % 300 == 0 {
         trace!("update_chunks: iterating {map_count} map(s)");
     }
-    for (map_entity, mut instance, config, mut pending, map_transform) in &mut map_query {
+    for (map_entity, mut instance, config, generator, mut pending, map_transform) in &mut map_query
+    {
         let desired = collect_desired_positions(map_entity, map_transform, config, &target_query);
 
         if desired.is_empty() && !instance.loaded_chunks.is_empty() {
@@ -87,7 +105,7 @@ pub fn update_chunks(
 
         remove_out_of_range_chunks(&mut instance, &desired, config.save_dir.as_deref());
         if config.generates_chunks {
-            spawn_missing_chunks(&mut instance, &mut pending, config, &desired);
+            spawn_missing_chunks(&mut instance, &mut pending, config, generator, &desired);
         }
     }
 }
@@ -166,6 +184,7 @@ fn spawn_missing_chunks(
     instance: &mut VoxelMapInstance,
     pending: &mut PendingChunks,
     config: &VoxelMapConfig,
+    generator: &VoxelGenerator,
     desired: &HashSet<IVec3>,
 ) {
     let mut spawned = 0;
@@ -181,7 +200,7 @@ fn spawn_missing_chunks(
             continue;
         }
 
-        spawn_chunk_gen_task(pending, pos, &config.generator, config.save_dir.clone());
+        spawn_chunk_gen_task(pending, pos, generator, config.save_dir.clone());
         spawned += 1;
     }
 }

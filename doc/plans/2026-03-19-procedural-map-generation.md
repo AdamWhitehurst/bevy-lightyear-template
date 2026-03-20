@@ -775,8 +775,8 @@ This requires adding `generation_version` to `ChunkData` (it's already in `Voxel
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all` passes
-- [ ] Existing tests pass (may need updates for new system parameters)
+- [x] `cargo check-all` passes
+- [x] Existing tests pass (may need updates for new system parameters)
 
 #### Manual Verification:
 - [ ] `cargo server` generates non-flat overworld terrain

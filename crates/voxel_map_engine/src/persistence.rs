@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::ChunkData;
 
-const CHUNK_SAVE_VERSION: u32 = 1;
+const CHUNK_SAVE_VERSION: u32 = 2;
 const ZSTD_COMPRESSION_LEVEL: i32 = 3;
 
 /// Versioned envelope wrapping chunk data on disk.

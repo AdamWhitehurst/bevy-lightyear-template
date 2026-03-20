@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use bevy::prelude::*;
 use ndshape::ConstShape;
 use noise::{
@@ -6,6 +8,8 @@ use noise::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::config::VoxelGenerator;
+use crate::meshing::flat_terrain_voxels;
 use crate::types::{CHUNK_SIZE, PaddedChunkShape, WorldVoxel};
 
 /// Base noise algorithm.
@@ -288,6 +292,40 @@ pub fn select_biome<'a>(rules: &'a [BiomeRule], height: f64, moisture: f64) -> &
                 && moisture <= r.moisture_range.1
         })
         .unwrap_or(&rules[0])
+}
+
+/// Build a [`VoxelGenerator`] closure from terrain components.
+///
+/// If no `HeightMap` is present, falls back to [`flat_terrain_voxels`].
+pub fn build_generator(
+    seed: u64,
+    height: Option<&HeightMap>,
+    moisture: Option<&MoistureMap>,
+    biomes: Option<&BiomeRules>,
+) -> VoxelGenerator {
+    let height = height.cloned();
+    let moisture = moisture.cloned();
+    let biomes = biomes.cloned();
+
+    debug_assert!(
+        moisture.is_none() || height.is_some(),
+        "MoistureMap without HeightMap is meaningless"
+    );
+    debug_assert!(
+        biomes.is_none() || height.is_some(),
+        "BiomeRules without HeightMap is meaningless"
+    );
+    debug_assert!(
+        moisture.is_some() || biomes.is_none(),
+        "BiomeRules without MoistureMap: biome selection needs moisture values"
+    );
+
+    match height {
+        Some(h) => VoxelGenerator(Arc::new(move |chunk_pos| {
+            generate_heightmap_chunk(chunk_pos, seed, &h, moisture.as_ref(), biomes.as_ref())
+        })),
+        None => VoxelGenerator(Arc::new(flat_terrain_voxels)),
+    }
 }
 
 #[cfg(test)]
