@@ -545,11 +545,11 @@ Both functions are defined in `crates/protocol/src/terrain/loading.rs` (section 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all` passes
-- [ ] `.terrain.ron` files parse without errors at startup (verified via `cargo server` log output)
+- [x] `cargo check-all` passes
+- [x] `.terrain.ron` files parse without errors at startup (verified via `cargo server` log output)
 
 #### Manual Verification:
-- [ ] `cargo server` starts and logs "Loaded N terrain definitions"
+- [x] `cargo server` starts and logs "Loaded N terrain definitions"
 
 ---
 

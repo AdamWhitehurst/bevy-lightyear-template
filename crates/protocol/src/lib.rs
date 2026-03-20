@@ -13,6 +13,7 @@ pub mod hit_detection;
 pub mod map;
 pub mod physics;
 pub mod reflect_loader;
+pub mod terrain;
 pub mod vox_model;
 pub mod world_object;
 
@@ -42,6 +43,7 @@ pub use map::{
     SavedEntityKind, SectionBlocksUpdate, TransitionReadySent, VoxelChannel, VoxelChunk,
     VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
 };
+pub use terrain::{TerrainDefRegistry, TerrainPlugin};
 pub use vox_model::{VoxModelAsset, VoxModelPlugin, VoxModelRegistry};
 pub use world_object::{WorldObjectDefRegistry, WorldObjectId, WorldObjectPlugin};
 
@@ -218,6 +220,7 @@ impl Plugin for SharedGameplayPlugin {
         app.add_plugins(AppStatePlugin);
         app.add_plugins(ProtocolPlugin);
         app.add_plugins(AbilityPlugin);
+        app.add_plugins(terrain::TerrainPlugin);
         app.add_plugins(world_object::WorldObjectPlugin);
         app.add_plugins(vox_model::VoxModelPlugin);
 

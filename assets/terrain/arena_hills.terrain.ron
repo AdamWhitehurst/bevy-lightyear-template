@@ -1,0 +1,12 @@
+{
+    "voxel_map_engine::terrain::HeightMap": (
+        noise: (noise_type: Perlin, fractal: Fbm, seed_offset: 0,
+                octaves: 3, frequency: 0.02, lacunarity: 2.0, persistence: 0.4),
+        base_height: 0,
+        amplitude: 5.0,
+    ),
+    "voxel_map_engine::terrain::BiomeRules": ([
+        (biome_id: "sand", height_range: (-100.0, 100.0), moisture_range: (-1.0, 1.0),
+         surface_material: 2, subsurface_material: 2, subsurface_depth: 99),
+    ]),
+}

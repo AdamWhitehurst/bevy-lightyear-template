@@ -1,3 +1,5 @@
+# TODO
+
 - update world object system on hot reload by first remove WorldObjectId's components using old loaded Def, load new Def, insert_if_new(...) ?
 - /spec:update - test on adding tracing > output txt file
 - client --autoconnect flag
