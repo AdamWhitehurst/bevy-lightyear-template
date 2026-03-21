@@ -111,7 +111,7 @@ fn dirty_instance_save_then_reload() {
     let chunk_pos = IVec3::ZERO;
     let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
     instance.insert_chunk_data(chunk_pos, ChunkData::from_voxels(&voxels));
-    instance.loaded_chunks.insert(chunk_pos);
+    instance.chunk_levels.insert(chunk_to_column(chunk_pos), 0);
 
     // Mutate a voxel (marks chunk dirty)
     instance.set_voxel(IVec3::new(5, 5, 5), WorldVoxel::Solid(99));

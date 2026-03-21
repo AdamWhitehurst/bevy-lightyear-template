@@ -34,14 +34,12 @@ fn spawn_map_with(app: &mut App, spawning_distance: u32, generator: VoxelGenerat
         .id()
 }
 
-fn spawn_target(app: &mut App, map_entity: Entity, position: Vec3, distance: u32) -> Entity {
+fn spawn_ticket(app: &mut App, map_entity: Entity, position: Vec3, distance: u32) -> Entity {
     app.world_mut()
         .spawn((
-            ChunkTarget {
-                map_entity,
-                distance,
-            },
+            ChunkTicket::new(map_entity, TicketType::Player, distance),
             Transform::from_translation(position),
+            GlobalTransform::default(),
         ))
         .id()
 }
@@ -69,7 +67,7 @@ fn tick_until(app: &mut App, condition: impl Fn(&App) -> bool) {
 fn set_get_voxel_round_trip() {
     let mut app = test_app();
     let map = spawn_map(&mut app, 1);
-    spawn_target(&mut app, map, Vec3::ZERO, 0);
+    spawn_ticket(&mut app, map, Vec3::ZERO, 0);
 
     // Wait for chunk at origin to load
     tick_until(&mut app, |app| has_loaded_chunk(app, map, IVec3::ZERO));
@@ -120,8 +118,8 @@ fn has_loaded_chunk(app: &App, map: Entity, pos: IVec3) -> bool {
     app.world()
         .get::<VoxelMapInstance>(map)
         .unwrap()
-        .loaded_chunks
-        .contains(&pos)
+        .get_chunk_data(pos)
+        .is_some()
 }
 
 /// Test: set_voxel marks the chunk for remesh, and the remesh system processes it.
@@ -129,7 +127,7 @@ fn has_loaded_chunk(app: &App, map: Entity, pos: IVec3) -> bool {
 fn set_voxel_triggers_remesh() {
     let mut app = test_app();
     let map = spawn_map(&mut app, 1);
-    spawn_target(&mut app, map, Vec3::ZERO, 0);
+    spawn_ticket(&mut app, map, Vec3::ZERO, 0);
 
     tick_until(&mut app, |app| has_loaded_chunk(app, map, IVec3::ZERO));
 
@@ -159,7 +157,9 @@ fn set_voxel_triggers_remesh() {
 
     // Chunk should still be loaded (not invalidated)
     assert!(
-        instance.loaded_chunks.contains(&IVec3::ZERO),
+        instance
+            .chunk_levels
+            .contains_key(&chunk_to_column(IVec3::ZERO)),
         "chunk should remain loaded after in-place edit"
     );
 }
@@ -169,7 +169,7 @@ fn set_voxel_triggers_remesh() {
 fn edited_voxel_persists_in_octree() {
     let mut app = test_app();
     let map = spawn_map(&mut app, 1);
-    spawn_target(&mut app, map, Vec3::ZERO, 0);
+    spawn_ticket(&mut app, map, Vec3::ZERO, 0);
 
     tick_until(&mut app, |app| has_loaded_chunk(app, map, IVec3::ZERO));
 
@@ -233,8 +233,8 @@ fn get_voxel_independent_between_instances() {
     let mut app = test_app();
     let map_a = spawn_map(&mut app, 1);
     let map_b = spawn_map(&mut app, 1);
-    spawn_target(&mut app, map_a, Vec3::ZERO, 0);
-    spawn_target(&mut app, map_b, Vec3::ZERO, 0);
+    spawn_ticket(&mut app, map_a, Vec3::ZERO, 0);
+    spawn_ticket(&mut app, map_b, Vec3::ZERO, 0);
 
     // Wait for both maps to load the origin chunk
     tick_until(&mut app, |app| {
@@ -270,8 +270,8 @@ fn set_voxel_isolated_between_instances() {
     let mut app = test_app();
     let map_a = spawn_map(&mut app, 1);
     let map_b = spawn_map(&mut app, 1);
-    spawn_target(&mut app, map_a, Vec3::ZERO, 0);
-    spawn_target(&mut app, map_b, Vec3::ZERO, 0);
+    spawn_ticket(&mut app, map_a, Vec3::ZERO, 0);
+    spawn_ticket(&mut app, map_b, Vec3::ZERO, 0);
 
     // Wait for both maps to load the origin chunk
     tick_until(&mut app, |app| {

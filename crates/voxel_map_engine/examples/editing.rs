@@ -36,10 +36,7 @@ fn setup(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_translation(Vec3::new(8.0, 15.0, 30.0)).looking_at(Vec3::ZERO, Vec3::Y),
-        ChunkTarget {
-            map_entity,
-            distance: 5,
-        },
+        ChunkTicket::new(map_entity, TicketType::Player, 5),
     ));
 
     commands.spawn((

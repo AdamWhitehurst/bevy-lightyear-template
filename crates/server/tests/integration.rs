@@ -923,9 +923,9 @@ fn map_switch_request_triggers_transition_start() {
         });
     }
 
-    // Give character a ChunkTarget pointing at the overworld map
+    // Give character a ChunkTicket pointing at the overworld map
     stepper.server_app.world_mut().entity_mut(character).insert(
-        voxel_map_engine::prelude::ChunkTarget::new(overworld_map, 4),
+        voxel_map_engine::prelude::ChunkTicket::map_transition(overworld_map),
     );
 
     // Client sends map switch request (ClientToServer direction)
@@ -1337,7 +1337,9 @@ fn test_client_requests_chunk_and_receives_data() {
             hash: 0,
         },
     );
-    instance.loaded_chunks.insert(chunk_pos);
+    instance
+        .chunk_levels
+        .insert(voxel_map_engine::prelude::chunk_to_column(chunk_pos), 0);
 
     let map_entity = stepper
         .server_app
@@ -1449,7 +1451,9 @@ fn test_voxel_edit_ack_received() {
             hash: 0,
         },
     );
-    instance.loaded_chunks.insert(chunk_pos);
+    instance
+        .chunk_levels
+        .insert(voxel_map_engine::prelude::chunk_to_column(chunk_pos), 0);
 
     let overworld = stepper
         .server_app

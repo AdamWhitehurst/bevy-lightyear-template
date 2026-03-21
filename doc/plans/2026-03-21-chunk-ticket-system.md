@@ -1181,8 +1181,8 @@ Replace all `ChunkTarget` imports with `ChunkTicket`.
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all` passes
-- [ ] `cargo test-all` passes — all tests across all crates
+- [x] `cargo check-all` passes
+- [x] `cargo test-all` passes — all tests across all crates
 - [ ] `cargo server` builds and runs
 - [ ] `cargo client -c 1` builds and runs
 

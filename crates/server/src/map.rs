@@ -19,8 +19,8 @@ use protocol::{
 };
 use voxel_map_engine::lifecycle;
 use voxel_map_engine::prelude::{
-    build_generator, seed_from_id, ChunkTarget, VoxelGenerator, VoxelMapConfig, VoxelMapInstance,
-    VoxelPlugin, VoxelWorld, WorldVoxel,
+    build_generator, chunk_to_column, seed_from_id, ChunkTicket, VoxelGenerator, VoxelMapConfig,
+    VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
 };
 
 use crate::persistence::{
@@ -662,7 +662,10 @@ pub fn handle_chunk_requests(
 
             let data = if let Some(chunk_data) = instance.get_chunk_data(request.chunk_pos) {
                 Some(chunk_data.voxels.clone())
-            } else if instance.loaded_chunks.contains(&request.chunk_pos) {
+            } else if instance
+                .chunk_levels
+                .contains_key(&chunk_to_column(request.chunk_pos))
+            {
                 // Chunk was generated but is empty (all air) — tell client so it stops requesting.
                 Some(voxel_map_engine::prelude::PalettedChunk::SingleValue(
                     WorldVoxel::Air,
@@ -803,7 +806,7 @@ fn execute_server_transition(
         ensure_map_exists(commands, target_map_id, registry, config_query, save_path);
     commands
         .entity(player_entity)
-        .insert(ChunkTarget::new(map_entity, 10));
+        .insert(ChunkTicket::player(map_entity));
 
     let spawn_position = crate::gameplay::DEFAULT_SPAWN_POS;
     commands.entity(player_entity).insert((

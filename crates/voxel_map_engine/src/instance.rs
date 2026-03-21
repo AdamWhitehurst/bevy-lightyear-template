@@ -28,9 +28,7 @@ pub struct Arena {
 #[derive(Component)]
 pub struct VoxelMapInstance {
     pub tree: OctreeI32<Option<ChunkData>>,
-    pub loaded_chunks: HashSet<IVec3>,
     /// Effective level per loaded column (level ≤ LOAD_LEVEL_THRESHOLD only).
-    /// Coexists with `loaded_chunks` temporarily — Phase 3 removes `loaded_chunks`.
     pub chunk_levels: HashMap<IVec2, u32>,
     /// Chunks with unsaved voxel modifications.
     pub dirty_chunks: HashSet<IVec3>,
@@ -43,7 +41,6 @@ impl VoxelMapInstance {
     pub fn new(tree_height: u32) -> Self {
         Self {
             tree: OctreeI32::new(tree_height as u8),
-            loaded_chunks: HashSet::new(),
             chunk_levels: HashMap::new(),
             dirty_chunks: HashSet::new(),
             chunks_needing_remesh: HashSet::new(),
@@ -204,7 +201,7 @@ mod tests {
     #[test]
     fn new_creates_empty_instance() {
         let instance = VoxelMapInstance::new(3);
-        assert!(instance.loaded_chunks.is_empty());
+        assert!(instance.chunk_levels.is_empty());
         assert!(instance.dirty_chunks.is_empty());
         assert!(instance.chunks_needing_remesh.is_empty());
     }
@@ -237,7 +234,7 @@ mod tests {
         assert_eq!(config.tree_height, 5);
         assert_eq!(config.spawning_distance, 10);
         assert!(config.bounds.is_none());
-        assert!(instance.loaded_chunks.is_empty());
+        assert!(instance.chunk_levels.is_empty());
     }
 
     #[test]
@@ -250,7 +247,7 @@ mod tests {
         assert_eq!(config.spawning_distance, 8);
         assert_eq!(config.bounds, Some(bounds));
         assert_eq!(marker.owner, owner_id);
-        assert!(instance.loaded_chunks.is_empty());
+        assert!(instance.chunk_levels.is_empty());
     }
 
     #[test]
@@ -262,7 +259,7 @@ mod tests {
         assert_eq!(config.spawning_distance, 5);
         assert_eq!(config.bounds, Some(bounds));
         assert_eq!(marker.id, 99);
-        assert!(instance.loaded_chunks.is_empty());
+        assert!(instance.chunk_levels.is_empty());
     }
 
     #[test]
@@ -346,7 +343,6 @@ mod tests {
         let chunk_pos = IVec3::ZERO;
         let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
         instance.insert_chunk_data(chunk_pos, ChunkData::from_voxels(&voxels));
-        instance.loaded_chunks.insert(chunk_pos);
 
         let world_pos = IVec3::new(5, 5, 5);
         instance.set_voxel(world_pos, WorldVoxel::Solid(42));
@@ -378,7 +374,6 @@ mod tests {
         let chunk_pos = IVec3::ZERO;
         let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
         instance.insert_chunk_data(chunk_pos, ChunkData::from_voxels(&voxels));
-        instance.loaded_chunks.insert(chunk_pos);
 
         instance.set_voxel(IVec3::new(1, 1, 1), WorldVoxel::Solid(1));
         instance.set_voxel(IVec3::new(2, 2, 2), WorldVoxel::Solid(2));
@@ -398,8 +393,6 @@ mod tests {
         let voxels_b = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
         instance.insert_chunk_data(chunk_a, ChunkData::from_voxels(&voxels_a));
         instance.insert_chunk_data(chunk_b, ChunkData::from_voxels(&voxels_b));
-        instance.loaded_chunks.insert(chunk_a);
-        instance.loaded_chunks.insert(chunk_b);
 
         // Edit at x=15 (last voxel in chunk_a along x) — boundary with chunk_b
         let world_pos = IVec3::new(15, 5, 5);
@@ -433,8 +426,6 @@ mod tests {
         let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
         instance.insert_chunk_data(chunk_a, ChunkData::from_voxels(&voxels));
         instance.insert_chunk_data(chunk_neg, ChunkData::from_voxels(&voxels));
-        instance.loaded_chunks.insert(chunk_a);
-        instance.loaded_chunks.insert(chunk_neg);
 
         // Edit at x=0 (first voxel in chunk_a along x) — boundary with chunk_neg
         let world_pos = IVec3::new(0, 3, 3);

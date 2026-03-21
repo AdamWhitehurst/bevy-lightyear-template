@@ -7,39 +7,9 @@ pub struct VoxelChunk {
     pub lod_level: u8,
 }
 
-/// Attach to entities whose Transform drives chunk loading for a specific map.
-/// Local-only — each side derives this from `MapInstanceId` + `MapRegistry`.
-#[derive(Component, Clone, Debug, PartialEq)]
-pub struct ChunkTarget {
-    pub map_entity: Entity,
-    pub distance: u32,
-}
-
-impl ChunkTarget {
-    pub fn new(map_entity: Entity, distance: u32) -> Self {
-        debug_assert!(
-            map_entity != Entity::PLACEHOLDER,
-            "ChunkTarget::new called with Entity::PLACEHOLDER — must point to a real map entity"
-        );
-        Self {
-            map_entity,
-            distance,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn chunk_target_construction() {
-        let target = ChunkTarget {
-            map_entity: Entity::PLACEHOLDER,
-            distance: 4,
-        };
-        assert_eq!(target.distance, 4);
-    }
 
     #[test]
     fn voxel_chunk_construction() {

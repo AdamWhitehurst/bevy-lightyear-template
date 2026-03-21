@@ -24,14 +24,12 @@ fn spawn_map(app: &mut App, spawning_distance: u32) -> Entity {
         .id()
 }
 
-fn spawn_target(app: &mut App, map_entity: Entity, position: Vec3, distance: u32) -> Entity {
+fn spawn_ticket(app: &mut App, map_entity: Entity, position: Vec3, distance: u32) -> Entity {
     app.world_mut()
         .spawn((
-            ChunkTarget {
-                map_entity,
-                distance,
-            },
+            ChunkTicket::new(map_entity, TicketType::Player, distance),
             Transform::from_translation(position),
+            GlobalTransform::default(),
         ))
         .id()
 }
@@ -52,7 +50,7 @@ fn loaded_chunk_count(app: &App, map_entity: Entity) -> usize {
     app.world()
         .get::<VoxelMapInstance>(map_entity)
         .unwrap()
-        .loaded_chunks
+        .chunk_levels
         .len()
 }
 
@@ -70,16 +68,16 @@ fn chunks_spawn_within_range() {
     let mut app = test_app();
     let map = spawn_map(&mut app, 1);
 
-    // Target at origin with distance=1 -> 3x3x3 = 27 chunk positions
-    spawn_target(&mut app, map, Vec3::ZERO, 1);
+    // Target at origin with distance=1 -> 3x3 = 9 columns
+    spawn_ticket(&mut app, map, Vec3::ZERO, 1);
 
     // Poll until async chunk generation tasks complete
-    tick_until(&mut app, |app| loaded_chunk_count(app, map) == 27);
+    tick_until(&mut app, |app| loaded_chunk_count(app, map) == 9);
 
     assert_eq!(
         loaded_chunk_count(&app, map),
-        27,
-        "distance=1 around origin should load 3^3=27 chunks"
+        9,
+        "distance=1 around origin should load 3x3=9 columns"
     );
 }
 
@@ -87,7 +85,7 @@ fn chunks_spawn_within_range() {
 fn chunks_despawn_outside_range() {
     let mut app = test_app();
     let map = spawn_map(&mut app, 1);
-    let target = spawn_target(&mut app, map, Vec3::ZERO, 1);
+    let target = spawn_ticket(&mut app, map, Vec3::ZERO, 1);
 
     tick_until(&mut app, |app| loaded_chunk_count(app, map) > 0);
 
@@ -100,16 +98,16 @@ fn chunks_despawn_outside_range() {
         !app.world()
             .get::<VoxelMapInstance>(map)
             .unwrap()
-            .loaded_chunks
-            .contains(&IVec3::ZERO)
+            .chunk_levels
+            .contains_key(&chunk_to_column(IVec3::ZERO))
     });
 
     assert!(
         !app.world()
             .get::<VoxelMapInstance>(map)
             .unwrap()
-            .loaded_chunks
-            .contains(&IVec3::ZERO),
+            .chunk_levels
+            .contains_key(&chunk_to_column(IVec3::ZERO)),
         "origin chunk should be unloaded after target moved away"
     );
 }
@@ -127,26 +125,26 @@ fn bounded_map_respects_bounds() {
         ))
         .id();
 
-    // Target at origin with distance=5 but bounds=2 -> only -1..1 per axis = 3^3 = 27
-    spawn_target(&mut app, map, Vec3::ZERO, 5);
+    // Target at origin with distance=5 but bounds=2 -> only -1..1 per axis = 3x3 = 9 columns
+    spawn_ticket(&mut app, map, Vec3::ZERO, 5);
 
-    tick_until(&mut app, |app| loaded_chunk_count(app, map) == 27);
+    tick_until(&mut app, |app| loaded_chunk_count(app, map) == 9);
 
     assert_eq!(
         loaded_chunk_count(&app, map),
-        27,
-        "bounded map with bounds=2 should limit to 3^3=27 chunks (range -1..1)"
+        9,
+        "bounded map with bounds=2 should limit to 3x3=9 columns (range -1..1)"
     );
 }
 
 #[test]
-fn chunk_target_routes_to_correct_map() {
+fn chunk_ticket_routes_to_correct_map() {
     let mut app = test_app();
     let map_a = spawn_map(&mut app, 1);
     let map_b = spawn_map(&mut app, 1);
 
     // Target only points at map_a
-    spawn_target(&mut app, map_a, Vec3::ZERO, 0);
+    spawn_ticket(&mut app, map_a, Vec3::ZERO, 0);
 
     tick_until(&mut app, |app| loaded_chunk_count(app, map_a) == 1);
 
@@ -163,21 +161,20 @@ fn chunk_target_routes_to_correct_map() {
 }
 
 #[test]
-fn switching_chunk_target_between_maps() {
+fn switching_chunk_ticket_between_maps() {
     let mut app = test_app();
     let map_a = spawn_map(&mut app, 1);
     let map_b = spawn_map(&mut app, 1);
 
-    let target = spawn_target(&mut app, map_a, Vec3::ZERO, 0);
+    let target = spawn_ticket(&mut app, map_a, Vec3::ZERO, 0);
 
     tick_until(&mut app, |app| loaded_chunk_count(app, map_a) == 1);
     assert_eq!(loaded_chunk_count(&app, map_b), 0);
 
     // Switch target to map_b
-    app.world_mut().entity_mut(target).insert(ChunkTarget {
-        map_entity: map_b,
-        distance: 0,
-    });
+    app.world_mut()
+        .entity_mut(target)
+        .insert(ChunkTicket::new(map_b, TicketType::Player, 0));
 
     tick_until(&mut app, |app| {
         loaded_chunk_count(app, map_a) == 0 && loaded_chunk_count(app, map_b) == 1
@@ -202,17 +199,17 @@ fn multiple_targets_on_different_maps() {
     let map_b = spawn_map(&mut app, 1);
 
     // Target A at origin → map_a, Target B at origin → map_b
-    spawn_target(&mut app, map_a, Vec3::ZERO, 1);
-    spawn_target(&mut app, map_b, Vec3::ZERO, 0);
+    spawn_ticket(&mut app, map_a, Vec3::ZERO, 1);
+    spawn_ticket(&mut app, map_b, Vec3::ZERO, 0);
 
     tick_until(&mut app, |app| {
-        loaded_chunk_count(app, map_a) == 27 && loaded_chunk_count(app, map_b) == 1
+        loaded_chunk_count(app, map_a) == 9 && loaded_chunk_count(app, map_b) == 1
     });
 
     assert_eq!(
         loaded_chunk_count(&app, map_a),
-        27,
-        "map_a should have 3^3=27 chunks (distance=1)"
+        9,
+        "map_a should have 3x3=9 columns (distance=1)"
     );
     assert_eq!(
         loaded_chunk_count(&app, map_b),
@@ -226,35 +223,33 @@ fn player_entity_drives_chunk_loading() {
     let mut app = test_app();
     let map = spawn_map(&mut app, 1);
 
-    // Simulate player entity with ChunkTarget (instead of camera)
+    // Simulate player entity with ChunkTicket (instead of camera)
     let player = app
         .world_mut()
         .spawn((
-            ChunkTarget {
-                map_entity: map,
-                distance: 1,
-            },
+            ChunkTicket::new(map, TicketType::Player, 1),
             Transform::from_translation(Vec3::ZERO),
+            GlobalTransform::default(),
         ))
         .id();
 
-    tick_until(&mut app, |app| loaded_chunk_count(app, map) == 27);
+    tick_until(&mut app, |app| loaded_chunk_count(app, map) == 9);
 
     assert_eq!(
         loaded_chunk_count(&app, map),
-        27,
-        "player-driven ChunkTarget should load 3^3 chunks"
+        9,
+        "player-driven ChunkTicket should load 3x3 columns"
     );
 
-    // Remove ChunkTarget — chunks should unload
-    app.world_mut().entity_mut(player).remove::<ChunkTarget>();
+    // Remove ChunkTicket — chunks should unload
+    app.world_mut().entity_mut(player).remove::<ChunkTicket>();
 
     tick_until(&mut app, |app| loaded_chunk_count(app, map) == 0);
 
     assert_eq!(
         loaded_chunk_count(&app, map),
         0,
-        "chunks should unload after ChunkTarget removed from player"
+        "chunks should unload after ChunkTicket removed from player"
     );
 }
 
@@ -262,7 +257,7 @@ fn player_entity_drives_chunk_loading() {
 fn chunk_entities_are_children_of_map() {
     let mut app = test_app();
     let map = spawn_map(&mut app, 1);
-    spawn_target(&mut app, map, Vec3::ZERO, 0);
+    spawn_ticket(&mut app, map, Vec3::ZERO, 0);
 
     tick_until(&mut app, |app| loaded_chunk_count(app, map) == 1);
 

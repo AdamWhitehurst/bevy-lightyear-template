@@ -10,7 +10,7 @@ use protocol::*;
 use crate::map::load_startup_entities;
 use crate::world_object::spawn_world_object;
 use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
-use voxel_map_engine::prelude::ChunkTarget;
+use voxel_map_engine::prelude::ChunkTicket;
 
 /// Default spawn position used for respawning and initial player placement.
 pub const DEFAULT_SPAWN_POS: Vec3 = Vec3::new(0.0, 5.0, 0.0);
@@ -79,7 +79,7 @@ fn spawn_dummy_target(mut commands: Commands, registry: Res<MapRegistry>) {
         MapInstanceId::Overworld,
         Health::new(100.0),
         RespawnTimerConfig::default(),
-        ChunkTarget::new(registry.get(&MapInstanceId::Overworld), 1),
+        ChunkTicket::npc(registry.get(&MapInstanceId::Overworld)),
         DummyTarget,
     ));
 }
@@ -314,7 +314,7 @@ fn handle_connected(
             Health::new(100.0),
             RespawnTimerConfig::default(),
             AbilityCooldowns::default(),
-            ChunkTarget::new(registry.get(&MapInstanceId::Overworld), 10),
+            ChunkTicket::player(registry.get(&MapInstanceId::Overworld)),
         ));
 
     let room = room_registry.get_or_create(&MapInstanceId::Overworld, &mut commands);

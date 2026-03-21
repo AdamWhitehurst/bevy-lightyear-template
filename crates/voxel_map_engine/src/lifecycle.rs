@@ -4,11 +4,16 @@ use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use std::collections::{HashMap, HashSet};
 
-use crate::chunk::{ChunkTarget, VoxelChunk};
+use crate::chunk::VoxelChunk;
 use crate::config::{VoxelGenerator, VoxelMapConfig};
 use crate::generation::{PendingChunks, spawn_chunk_gen_task};
 use crate::instance::VoxelMapInstance;
 use crate::meshing::mesh_chunk_greedy;
+use crate::propagator::TicketLevelPropagator;
+use crate::ticket::{
+    ChunkTicket, DEFAULT_COLUMN_Y_MAX, DEFAULT_COLUMN_Y_MIN, TicketType, chunk_to_column,
+    column_to_chunks,
+};
 use crate::types::CHUNK_SIZE;
 
 const MAX_TASKS_PER_FRAME: usize = 32;
@@ -42,9 +47,24 @@ pub struct PendingRemeshes {
     tasks: Vec<RemeshTask>,
 }
 
-/// Auto-insert `PendingChunks` and `PendingRemeshes` on map entities that lack them.
+/// Cached state for a single ticket, used to detect changes.
+pub(crate) struct CachedTicket {
+    column: IVec2,
+    map_entity: Entity,
+    ticket_type: TicketType,
+    radius: u32,
+}
+
+/// Convert a world-space position to a 2D column position (drop Y).
+pub fn world_to_column_pos(translation: Vec3) -> IVec2 {
+    let chunk = world_to_chunk_pos(translation);
+    IVec2::new(chunk.x, chunk.z)
+}
+
+/// Auto-insert `PendingChunks`, `PendingRemeshes`, and `TicketLevelPropagator`
+/// on map entities that lack them.
 ///
-/// Gated on `With<VoxelGenerator>` — maps without a generator don't start loading chunks.
+/// Gated on `With<VoxelGenerator>` -- maps without a generator don't start loading chunks.
 pub fn ensure_pending_chunks(
     mut commands: Commands,
     chunks_query: Query<
@@ -63,6 +83,14 @@ pub fn ensure_pending_chunks(
             Without<PendingRemeshes>,
         ),
     >,
+    propagator_query: Query<
+        Entity,
+        (
+            With<VoxelMapInstance>,
+            With<VoxelGenerator>,
+            Without<TicketLevelPropagator>,
+        ),
+    >,
 ) {
     for entity in &chunks_query {
         info!("ensure_pending_chunks: adding PendingChunks to {entity:?}");
@@ -72,244 +100,213 @@ pub fn ensure_pending_chunks(
         info!("ensure_pending_chunks: adding PendingRemeshes to {entity:?}");
         commands.entity(entity).insert(PendingRemeshes::default());
     }
+    for entity in &propagator_query {
+        info!("ensure_pending_chunks: adding TicketLevelPropagator to {entity:?}");
+        commands
+            .entity(entity)
+            .insert(TicketLevelPropagator::default());
+    }
 }
 
-/// Per-target cached state for desired chunk positions.
-///
-/// Opaque to external consumers; only exposed as `pub` because Bevy's system
-/// parameter inference requires the type to be visible at the function's visibility.
-pub struct TargetCache {
-    chunk_pos: IVec3,
-    map_entity: Entity,
-    distance: u32,
-    desired: HashSet<IVec3>,
-}
-
-/// Determine which chunk positions should be loaded based on all targets for a map.
-/// Spawn async generation tasks for missing chunks and mark out-of-range chunks for removal.
-///
-/// Caches each target's desired chunk set and only recomputes when the target
-/// crosses a chunk boundary, changes map, or changes distance.
-pub fn update_chunks(
+/// Collect tickets, propagate levels, and spawn/remove chunks based on the diff.
+pub(crate) fn update_chunks(
     mut map_query: Query<(
         Entity,
         &mut VoxelMapInstance,
         &VoxelMapConfig,
         &VoxelGenerator,
         &mut PendingChunks,
+        &mut TicketLevelPropagator,
         &GlobalTransform,
     )>,
-    target_query: Query<(Entity, &ChunkTarget, &GlobalTransform)>,
+    ticket_query: Query<(Entity, &ChunkTicket, &GlobalTransform)>,
     mut tick: Local<u32>,
-    mut target_cache: Local<HashMap<Entity, TargetCache>>,
-    mut desired_cache: Local<HashMap<Entity, HashSet<IVec3>>>,
+    mut ticket_cache: Local<HashMap<Entity, CachedTicket>>,
 ) {
-    let map_count = map_query.iter().count();
     *tick += 1;
-    if map_count > 0 && *tick % 300 == 0 {
-        trace!("update_chunks: iterating {map_count} map(s)");
-    }
 
-    let mut maps_needing_update = purge_stale_targets(&target_query, &mut target_cache);
+    collect_tickets(&mut map_query, &ticket_query, &mut ticket_cache);
 
-    for (map_entity, mut instance, config, generator, mut pending, map_transform) in &mut map_query
+    let y_min = DEFAULT_COLUMN_Y_MIN;
+    let y_max = DEFAULT_COLUMN_Y_MAX;
+
+    for (_map_entity, mut instance, config, generator, mut pending, mut propagator, _) in
+        &mut map_query
     {
-        let map_inv = map_transform.affine().inverse();
-        let targets_changed = update_target_caches_for_map(
-            map_entity,
-            &map_inv,
-            config.bounds,
-            &target_query,
-            &mut target_cache,
-        );
-        if targets_changed {
-            maps_needing_update.insert(map_entity);
+        let diff = {
+            let _span = info_span!("propagate_ticket_levels").entered();
+            propagator.propagate()
+        };
+
+        for &col in &diff.unloaded {
+            remove_column_chunks(&mut instance, col, config.save_dir.as_deref(), y_min, y_max);
         }
-
-        if maps_needing_update.contains(&map_entity) {
-            let desired = {
-                let _span = info_span!("collect_desired_positions").entered();
-                union_desired_from_cache(&target_cache, map_entity)
-            };
-
-            if desired.is_empty() && !instance.loaded_chunks.is_empty() {
-                info!(
-                    "update_chunks: map {map_entity:?} has {} loaded chunks but 0 desired — will clean up",
-                    instance.loaded_chunks.len()
-                );
+        for &(col, level) in &diff.loaded {
+            if is_column_within_bounds(col, config.bounds) {
+                instance.chunk_levels.insert(col, level);
             }
-
-            {
-                let _span = info_span!("remove_out_of_range_chunks").entered();
-                remove_out_of_range_chunks(&mut instance, &desired, config.save_dir.as_deref());
+        }
+        for &(col, level) in &diff.changed {
+            if is_column_within_bounds(col, config.bounds) {
+                instance.chunk_levels.insert(col, level);
             }
-
-            desired_cache.insert(map_entity, desired);
         }
 
         if config.generates_chunks {
-            if let Some(desired) = desired_cache.get(&map_entity) {
-                spawn_missing_chunks(&mut instance, &mut pending, config, generator, desired);
-            }
+            spawn_missing_chunks(&instance, &mut pending, config, generator, y_min, y_max);
         }
     }
 }
 
-/// Remove cache entries for despawned targets. Returns the set of map entities
-/// that had targets removed (and thus need their desired sets rebuilt).
-fn purge_stale_targets(
-    target_query: &Query<(Entity, &ChunkTarget, &GlobalTransform)>,
-    cache: &mut HashMap<Entity, TargetCache>,
-) -> HashSet<Entity> {
-    let active: HashSet<Entity> = target_query.iter().map(|(e, _, _)| e).collect();
-    let stale: Vec<Entity> = cache
+/// Detect stale and changed tickets, updating propagator sources accordingly.
+fn collect_tickets(
+    map_query: &mut Query<(
+        Entity,
+        &mut VoxelMapInstance,
+        &VoxelMapConfig,
+        &VoxelGenerator,
+        &mut PendingChunks,
+        &mut TicketLevelPropagator,
+        &GlobalTransform,
+    )>,
+    ticket_query: &Query<(Entity, &ChunkTicket, &GlobalTransform)>,
+    ticket_cache: &mut HashMap<Entity, CachedTicket>,
+) {
+    let _span = info_span!("collect_tickets").entered();
+
+    let active: HashSet<Entity> = ticket_query.iter().map(|(e, _, _)| e).collect();
+    let stale: Vec<Entity> = ticket_cache
         .keys()
         .filter(|e| !active.contains(e))
         .copied()
         .collect();
-    let mut affected_maps = HashSet::new();
     for entity in stale {
-        if let Some(cached) = cache.remove(&entity) {
-            affected_maps.insert(cached.map_entity);
+        if let Some(cached) = ticket_cache.remove(&entity) {
+            if let Ok((_, _, _, _, _, mut prop, _)) = map_query.get_mut(cached.map_entity) {
+                prop.remove_source(entity);
+            }
         }
     }
-    affected_maps
-}
 
-/// Check each target on this map and update its cache if its chunk position changed.
-/// Returns true if any target was added or changed.
-fn update_target_caches_for_map(
-    map_entity: Entity,
-    map_inv: &bevy::math::Affine3A,
-    bounds: Option<IVec3>,
-    target_query: &Query<(Entity, &ChunkTarget, &GlobalTransform)>,
-    cache: &mut HashMap<Entity, TargetCache>,
-) -> bool {
-    let mut changed = false;
+    for (ticket_entity, ticket, transform) in ticket_query.iter() {
+        // Compute column from immutable access; borrow drops at end of block.
+        let column = {
+            let Ok((_, _, _, _, _, _, map_transform)) = map_query.get(ticket.map_entity) else {
+                trace!(
+                    "collect_tickets: ticket {ticket_entity:?} references non-existent map {:?}, expected during deferred command application",
+                    ticket.map_entity
+                );
+                continue;
+            };
+            let map_inv = map_transform.affine().inverse();
+            let local_pos = map_inv.transform_point3(transform.translation());
+            world_to_column_pos(local_pos)
+        };
 
-    for (target_entity, target, transform) in target_query.iter() {
-        if target.map_entity != map_entity {
-            continue;
-        }
-
-        let local_pos = map_inv.transform_point3(transform.translation());
-        let chunk_pos = world_to_chunk_pos(local_pos);
-
-        let needs_update = match cache.get(&target_entity) {
+        let needs_update = match ticket_cache.get(&ticket_entity) {
             Some(cached) => {
-                cached.chunk_pos != chunk_pos
-                    || cached.map_entity != map_entity
-                    || cached.distance != target.distance
+                cached.column != column
+                    || cached.map_entity != ticket.map_entity
+                    || cached.ticket_type != ticket.ticket_type
+                    || cached.radius != ticket.radius
             }
             None => true,
         };
 
         if needs_update {
-            let desired = compute_target_desired(chunk_pos, target.distance, bounds);
-            cache.insert(
-                target_entity,
-                TargetCache {
-                    chunk_pos,
-                    map_entity,
-                    distance: target.distance,
-                    desired,
-                },
-            );
-            changed = true;
-        }
-    }
-
-    changed
-}
-
-/// Compute the set of chunk positions desired by a single target.
-fn compute_target_desired(center: IVec3, distance: u32, bounds: Option<IVec3>) -> HashSet<IVec3> {
-    let dist = distance as i32;
-    let mut desired = HashSet::new();
-    for x in -dist..=dist {
-        for y in -dist..=dist {
-            for z in -dist..=dist {
-                let pos = center + IVec3::new(x, y, z);
-                if is_within_bounds(pos, bounds) {
-                    desired.insert(pos);
-                }
-            }
-        }
-    }
-    desired
-}
-
-/// Union all cached desired sets for a given map.
-fn union_desired_from_cache(
-    cache: &HashMap<Entity, TargetCache>,
-    map_entity: Entity,
-) -> HashSet<IVec3> {
-    cache
-        .values()
-        .filter(|c| c.map_entity == map_entity)
-        .flat_map(|c| c.desired.iter().copied())
-        .collect()
-}
-
-fn world_to_chunk_pos(translation: Vec3) -> IVec3 {
-    (translation / CHUNK_SIZE as f32).floor().as_ivec3()
-}
-
-fn is_within_bounds(pos: IVec3, bounds: Option<IVec3>) -> bool {
-    match bounds {
-        Some(b) => pos.x.abs() < b.x && pos.y.abs() < b.y && pos.z.abs() < b.z,
-        None => true,
-    }
-}
-
-fn remove_out_of_range_chunks(
-    instance: &mut VoxelMapInstance,
-    desired: &HashSet<IVec3>,
-    save_dir: Option<&std::path::Path>,
-) {
-    let removed: Vec<IVec3> = instance
-        .loaded_chunks
-        .iter()
-        .filter(|pos| !desired.contains(pos))
-        .copied()
-        .collect();
-    for pos in removed {
-        if instance.dirty_chunks.remove(&pos) {
-            if let Some(dir) = save_dir {
-                if let Some(chunk_data) = instance.get_chunk_data(pos) {
-                    if let Err(e) = crate::persistence::save_chunk(dir, pos, chunk_data) {
-                        error!("Failed to save evicted dirty chunk at {pos}: {e}");
+            // If map changed, remove source from old map's propagator first
+            if let Some(cached) = ticket_cache.get(&ticket_entity) {
+                if cached.map_entity != ticket.map_entity {
+                    if let Ok((_, _, _, _, _, mut old_prop, _)) =
+                        map_query.get_mut(cached.map_entity)
+                    {
+                        old_prop.remove_source(ticket_entity);
                     }
                 }
             }
+            if let Ok((_, _, _, _, _, mut prop, _)) = map_query.get_mut(ticket.map_entity) {
+                prop.set_source(
+                    ticket_entity,
+                    column,
+                    ticket.ticket_type.base_level(),
+                    ticket.radius,
+                );
+            }
+            ticket_cache.insert(
+                ticket_entity,
+                CachedTicket {
+                    column,
+                    map_entity: ticket.map_entity,
+                    ticket_type: ticket.ticket_type,
+                    radius: ticket.radius,
+                },
+            );
         }
-        instance.loaded_chunks.remove(&pos);
-        instance.remove_chunk_data(pos);
     }
 }
 
-fn spawn_missing_chunks(
+/// Remove all chunk data for a column being unloaded.
+fn remove_column_chunks(
     instance: &mut VoxelMapInstance,
+    col: IVec2,
+    save_dir: Option<&std::path::Path>,
+    y_min: i32,
+    y_max: i32,
+) {
+    let _span = info_span!("remove_column_chunks").entered();
+    for chunk_pos in column_to_chunks(col, y_min, y_max) {
+        if instance.dirty_chunks.remove(&chunk_pos) {
+            if let Some(dir) = save_dir {
+                if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
+                    let data = chunk_data.clone();
+                    let dir = dir.to_path_buf();
+                    AsyncComputeTaskPool::get()
+                        .spawn(async move {
+                            if let Err(e) = crate::persistence::save_chunk(&dir, chunk_pos, &data) {
+                                error!("Failed to save evicted dirty chunk at {chunk_pos}: {e}");
+                            }
+                        })
+                        .detach();
+                }
+            }
+        }
+        instance.remove_chunk_data(chunk_pos);
+    }
+    instance.chunk_levels.remove(&col);
+}
+
+/// Spawn generation tasks for chunks in loaded columns that lack data.
+fn spawn_missing_chunks(
+    instance: &VoxelMapInstance,
     pending: &mut PendingChunks,
     config: &VoxelMapConfig,
     generator: &VoxelGenerator,
-    desired: &HashSet<IVec3>,
+    y_min: i32,
+    y_max: i32,
 ) {
+    let _span = info_span!("spawn_missing_chunks").entered();
     let mut spawned = 0;
 
-    for &pos in desired {
-        if spawned >= MAX_TASKS_PER_FRAME {
-            break;
-        }
-        if instance.loaded_chunks.contains(&pos) {
-            continue;
-        }
-        if is_already_pending(pending, pos) {
-            continue;
-        }
+    let mut cols: Vec<_> = instance.chunk_levels.iter().collect();
+    cols.sort_by_key(|(_, lvl)| **lvl);
 
-        spawn_chunk_gen_task(pending, pos, generator, config.save_dir.clone());
-        spawned += 1;
+    for (&col, &_level) in cols {
+        for chunk_pos in column_to_chunks(col, y_min, y_max) {
+            if spawned >= MAX_TASKS_PER_FRAME {
+                return;
+            }
+            if !is_within_bounds(chunk_pos, config.bounds) {
+                continue;
+            }
+            if instance.get_chunk_data(chunk_pos).is_some() {
+                continue;
+            }
+            if is_already_pending(pending, chunk_pos) {
+                continue;
+            }
+            spawn_chunk_gen_task(pending, chunk_pos, generator, config.save_dir.clone());
+            spawned += 1;
+        }
     }
 }
 
@@ -374,7 +371,6 @@ fn handle_completed_chunk(
     map_entity: Entity,
     result: crate::generation::ChunkGenResult,
 ) {
-    instance.loaded_chunks.insert(result.position);
     instance.insert_chunk_data(result.position, result.chunk_data);
 
     let Some(mesh) = result.mesh else {
@@ -409,11 +405,31 @@ fn handle_completed_chunk(
     commands.entity(map_entity).add_child(chunk_entity);
 }
 
+/// Whether a 2D column is within the map's optional bounds.
+fn is_column_within_bounds(col: IVec2, bounds: Option<IVec3>) -> bool {
+    match bounds {
+        Some(b) => col.x.abs() < b.x && col.y.abs() < b.z,
+        None => true,
+    }
+}
+
+/// Whether a 3D chunk position is within the map's optional bounds.
+fn is_within_bounds(pos: IVec3, bounds: Option<IVec3>) -> bool {
+    match bounds {
+        Some(b) => pos.x.abs() < b.x && pos.y.abs() < b.y && pos.z.abs() < b.z,
+        None => true,
+    }
+}
+
+fn world_to_chunk_pos(translation: Vec3) -> IVec3 {
+    (translation / CHUNK_SIZE as f32).floor().as_ivec3()
+}
+
 fn chunk_world_offset(chunk_pos: IVec3) -> Vec3 {
     chunk_pos.as_vec3() * CHUNK_SIZE as f32 - Vec3::ONE
 }
 
-/// Despawn chunk entities whose position is no longer in the parent map's loaded_chunks.
+/// Despawn chunk entities whose column is no longer in the parent map's `chunk_levels`.
 pub fn despawn_out_of_range_chunks(
     mut commands: Commands,
     chunk_query: Query<(Entity, &VoxelChunk, &ChildOf)>,
@@ -435,7 +451,10 @@ pub fn despawn_out_of_range_chunks(
             continue;
         };
 
-        if !instance.loaded_chunks.contains(&chunk.position) {
+        if !instance
+            .chunk_levels
+            .contains_key(&chunk_to_column(chunk.position))
+        {
             info!(
                 "despawn_out_of_range_chunks: despawning chunk {:?} at {:?} (parent map {:?})",
                 entity, chunk.position, child_of.0
@@ -488,7 +507,10 @@ pub fn poll_remesh_tasks(
             };
             let remesh = pending.tasks.swap_remove(i);
 
-            if !instance.loaded_chunks.contains(&remesh.chunk_pos) {
+            if !instance
+                .chunk_levels
+                .contains_key(&chunk_to_column(remesh.chunk_pos))
+            {
                 continue;
             }
 
@@ -552,18 +574,14 @@ mod tests {
     }
 
     #[test]
-    fn bounds_check() {
-        assert!(is_within_bounds(IVec3::ZERO, Some(IVec3::new(5, 5, 5))));
-        assert!(!is_within_bounds(
-            IVec3::new(5, 0, 0),
-            Some(IVec3::new(5, 5, 5))
-        ));
-        assert!(is_within_bounds(IVec3::new(100, 100, 100), None));
-    }
-
-    #[test]
     fn chunk_world_offset_calculation() {
         let offset = chunk_world_offset(IVec3::new(1, 2, 3));
         assert_eq!(offset, Vec3::new(15.0, 31.0, 47.0));
+    }
+
+    #[test]
+    fn world_to_column_pos_drops_y() {
+        let col = world_to_column_pos(Vec3::new(20.0, 99.0, 5.0));
+        assert_eq!(col, IVec2::new(1, 0));
     }
 }

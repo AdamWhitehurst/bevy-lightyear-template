@@ -13,9 +13,9 @@ use protocol::{
 };
 use ui::MapTransitionState;
 use voxel_map_engine::prelude::{
-    flat_terrain_voxels, mesh_chunk_greedy, ChunkData, ChunkTarget, DefaultVoxelMaterial,
-    VoxelChunk, VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld,
-    WorldVoxel,
+    chunk_to_column, flat_terrain_voxels, mesh_chunk_greedy, ChunkData, ChunkTicket,
+    DefaultVoxelMaterial, VoxelChunk, VoxelGenerator, VoxelMapConfig, VoxelMapInstance,
+    VoxelPlugin, VoxelWorld, WorldVoxel,
 };
 
 const RAYCAST_MAX_DISTANCE: f32 = 100.0;
@@ -66,7 +66,7 @@ impl Plugin for ClientMapPlugin {
             .add_systems(
                 Update,
                 (
-                    attach_chunk_target_to_player,
+                    attach_chunk_ticket_to_player,
                     handle_voxel_broadcasts,
                     handle_section_blocks_update,
                     handle_voxel_edit_ack,
@@ -114,49 +114,49 @@ fn spawn_overworld(mut commands: Commands, mut registry: ResMut<MapRegistry>) {
     registry.insert(MapInstanceId::Overworld, map);
 }
 
-fn attach_chunk_target_to_player(
+fn attach_chunk_ticket_to_player(
     mut commands: Commands,
     registry: Res<MapRegistry>,
     players: Query<
         (Entity, &MapInstanceId),
-        (With<Predicted>, With<CharacterMarker>, Without<ChunkTarget>),
+        (With<Predicted>, With<CharacterMarker>, Without<ChunkTicket>),
     >,
 ) {
     for (entity, map_id) in &players {
-        info!("Attaching ChunkTarget to player {entity:?} on map {map_id:?}");
+        info!("Attaching ChunkTicket to player {entity:?} on map {map_id:?}");
         let map_entity = registry.get(map_id);
         commands
             .entity(entity)
-            .insert(ChunkTarget::new(map_entity, 10));
+            .insert(ChunkTicket::player(map_entity));
     }
 }
 
 /// Requests chunks from server that the client needs but doesn't have.
 fn request_missing_chunks(
     mut chunk_state_query: Query<&mut ClientChunkState>,
-    chunk_targets: Query<
-        (&ChunkTarget, &Position),
+    chunk_tickets: Query<
+        (&ChunkTicket, &Position),
         (With<Predicted>, With<CharacterMarker>, With<Controlled>),
     >,
     map_query: Query<(&VoxelMapInstance, &VoxelMapConfig)>,
     mut senders: Query<&mut MessageSender<ChunkRequest>>,
     time: Res<Time>,
 ) {
-    let Ok((target, pos)) = chunk_targets.single() else {
-        trace!("request_missing_chunks: no predicted player with ChunkTarget + Position");
+    let Ok((ticket, pos)) = chunk_tickets.single() else {
+        trace!("request_missing_chunks: no predicted player with ChunkTicket + Position");
         return;
     };
-    let Ok((instance, config)) = map_query.get(target.map_entity) else {
+    let Ok((instance, config)) = map_query.get(ticket.map_entity) else {
         trace!(
             "request_missing_chunks: map entity {:?} missing VoxelMapInstance or VoxelMapConfig",
-            target.map_entity
+            ticket.map_entity
         );
         return;
     };
-    let Ok(mut state) = chunk_state_query.get_mut(target.map_entity) else {
+    let Ok(mut state) = chunk_state_query.get_mut(ticket.map_entity) else {
         trace!(
             "request_missing_chunks: map entity {:?} missing ClientChunkState",
-            target.map_entity
+            ticket.map_entity
         );
         return;
     };
@@ -168,13 +168,23 @@ fn request_missing_chunks(
         state.pending_requests.clear();
     }
 
-    let center = (pos.0 / 16.0).floor().as_ivec3();
-    let dist = target.distance as i32;
+    let chunk_pos = (pos.0 / 16.0).floor().as_ivec3();
+    let col = IVec2::new(chunk_pos.x, chunk_pos.z);
+    let radius = ticket.radius as i32;
     let mut desired = HashSet::new();
-    for x in -dist..=dist {
-        for y in -dist..=dist {
-            for z in -dist..=dist {
-                let p = center + IVec3::new(x, y, z);
+    for dx in -radius..=radius {
+        for dz in -radius..=radius {
+            let target_col = col + IVec2::new(dx, dz);
+            let distance = dx.abs().max(dz.abs()) as u32;
+            let level = ticket.ticket_type.base_level() + distance;
+            if level > voxel_map_engine::prelude::LOAD_LEVEL_THRESHOLD {
+                continue;
+            }
+            for p in voxel_map_engine::prelude::column_to_chunks(
+                target_col,
+                voxel_map_engine::prelude::DEFAULT_COLUMN_Y_MIN,
+                voxel_map_engine::prelude::DEFAULT_COLUMN_Y_MAX,
+            ) {
                 if config.bounds.map_or(true, |b| {
                     p.x.abs() < b.x && p.y.abs() < b.y && p.z.abs() < b.z
                 }) {
@@ -185,7 +195,10 @@ fn request_missing_chunks(
     }
 
     for &chunk_pos in &desired {
-        if instance.loaded_chunks.contains(&chunk_pos) {
+        if instance
+            .chunk_levels
+            .contains_key(&chunk_to_column(chunk_pos))
+        {
             continue;
         }
         if state.pending_requests.contains(&chunk_pos) {
@@ -207,26 +220,26 @@ fn handle_chunk_data_sync(
     mut receivers: Query<&mut MessageReceiver<ChunkDataSync>>,
     mut map_query: Query<(Entity, &mut VoxelMapInstance)>,
     mut chunk_state_query: Query<&mut ClientChunkState>,
-    player_query: Query<&ChunkTarget, (With<Predicted>, With<CharacterMarker>, With<Controlled>)>,
+    player_query: Query<&ChunkTicket, (With<Predicted>, With<CharacterMarker>, With<Controlled>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     default_material: Res<DefaultVoxelMaterial>,
 ) {
-    let Ok(chunk_target) = player_query.single() else {
-        trace!("handle_chunk_data_sync: no predicted player with ChunkTarget");
+    let Ok(chunk_ticket) = player_query.single() else {
+        trace!("handle_chunk_data_sync: no predicted player with ChunkTicket");
         return;
     };
-    let Ok((map_entity, mut instance)) = map_query.get_mut(chunk_target.map_entity) else {
+    let Ok((map_entity, mut instance)) = map_query.get_mut(chunk_ticket.map_entity) else {
         trace!(
             "handle_chunk_data_sync: map entity {:?} missing VoxelMapInstance",
-            chunk_target.map_entity
+            chunk_ticket.map_entity
         );
         return;
     };
-    let Ok(mut chunk_state) = chunk_state_query.get_mut(chunk_target.map_entity) else {
+    let Ok(mut chunk_state) = chunk_state_query.get_mut(chunk_ticket.map_entity) else {
         trace!(
             "handle_chunk_data_sync: map entity {:?} missing ClientChunkState",
-            chunk_target.map_entity
+            chunk_ticket.map_entity
         );
         return;
     };
@@ -237,7 +250,10 @@ fn handle_chunk_data_sync(
             let chunk_data = ChunkData::from_voxels(&voxels);
 
             instance.insert_chunk_data(sync.chunk_pos, chunk_data);
-            instance.loaded_chunks.insert(sync.chunk_pos);
+            instance
+                .chunk_levels
+                .entry(chunk_to_column(sync.chunk_pos))
+                .or_insert(0);
 
             chunk_state.pending_requests.remove(&sync.chunk_pos);
 
@@ -279,12 +295,12 @@ fn handle_chunk_data_sync(
 /// Applies voxel edit broadcasts from the server, skipping positions with pending predictions.
 fn handle_voxel_broadcasts(
     mut receiver: Query<&mut MessageReceiver<VoxelEditBroadcast>>,
-    player_query: Query<&ChunkTarget, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
     mut voxel_world: VoxelWorld,
     prediction_state: Res<VoxelPredictionState>,
 ) {
-    let Ok(chunk_target) = player_query.single() else {
-        trace!("handle_voxel_broadcasts: no predicted player with ChunkTarget");
+    let Ok(chunk_ticket) = player_query.single() else {
+        trace!("handle_voxel_broadcasts: no predicted player with ChunkTicket");
         return;
     };
     for mut message_receiver in receiver.iter_mut() {
@@ -306,7 +322,7 @@ fn handle_voxel_broadcasts(
                 broadcast.position, broadcast.voxel
             );
             voxel_world.set_voxel(
-                chunk_target.map_entity,
+                chunk_ticket.map_entity,
                 broadcast.position,
                 WorldVoxel::from(broadcast.voxel),
             );
@@ -317,12 +333,12 @@ fn handle_voxel_broadcasts(
 /// Handles batched block updates from server.
 fn handle_section_blocks_update(
     mut receivers: Query<&mut MessageReceiver<SectionBlocksUpdate>>,
-    player_query: Query<&ChunkTarget, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
     mut voxel_world: VoxelWorld,
     prediction_state: Res<VoxelPredictionState>,
 ) {
-    let Ok(chunk_target) = player_query.single() else {
-        trace!("handle_section_blocks_update: no predicted player with ChunkTarget");
+    let Ok(chunk_ticket) = player_query.single() else {
+        trace!("handle_section_blocks_update: no predicted player with ChunkTicket");
         return;
     };
     for mut receiver in receivers.iter_mut() {
@@ -337,14 +353,14 @@ fn handle_section_blocks_update(
                     );
                     continue;
                 }
-                voxel_world.set_voxel(chunk_target.map_entity, *pos, WorldVoxel::from(*voxel));
+                voxel_world.set_voxel(chunk_ticket.map_entity, *pos, WorldVoxel::from(*voxel));
             }
         }
     }
 }
 
 fn handle_voxel_input(
-    player_query: Query<&ChunkTarget, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
     mut voxel_world: VoxelWorld,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
@@ -352,8 +368,8 @@ fn handle_voxel_input(
     mut message_sender: Query<&mut MessageSender<VoxelEditRequest>>,
     mut prediction_state: ResMut<VoxelPredictionState>,
 ) {
-    let Ok(chunk_target) = player_query.single() else {
-        trace!("handle_voxel_input: no predicted player with ChunkTarget");
+    let Ok(chunk_ticket) = player_query.single() else {
+        trace!("handle_voxel_input: no predicted player with ChunkTicket");
         return;
     };
     let Ok(action_state) = action_query.single() else {
@@ -372,7 +388,7 @@ fn handle_voxel_input(
         return;
     };
 
-    let Some(hit) = voxel_world.raycast(chunk_target.map_entity, ray, RAYCAST_MAX_DISTANCE, |v| {
+    let Some(hit) = voxel_world.raycast(chunk_ticket.map_entity, ray, RAYCAST_MAX_DISTANCE, |v| {
         matches!(v, WorldVoxel::Solid(_))
     }) else {
         debug!("handle_voxel_input: raycast hit nothing");
@@ -390,10 +406,10 @@ fn handle_voxel_input(
 
     let sequence = prediction_state.next();
     let old_voxel = voxel_world
-        .get_voxel(chunk_target.map_entity, position)
+        .get_voxel(chunk_ticket.map_entity, position)
         .into();
 
-    voxel_world.set_voxel(chunk_target.map_entity, position, WorldVoxel::from(voxel));
+    voxel_world.set_voxel(chunk_ticket.map_entity, position, WorldVoxel::from(voxel));
 
     prediction_state.pending.push(VoxelPrediction {
         sequence,
@@ -454,9 +470,9 @@ fn handle_voxel_edit_reject(
     mut receivers: Query<&mut MessageReceiver<VoxelEditReject>>,
     mut prediction_state: ResMut<VoxelPredictionState>,
     mut voxel_world: VoxelWorld,
-    player_query: Query<&ChunkTarget, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
 ) {
-    let Ok(chunk_target) = player_query.single() else {
+    let Ok(chunk_ticket) = player_query.single() else {
         trace!("handle_voxel_edit_reject: no predicted player");
         return;
     };
@@ -468,7 +484,7 @@ fn handle_voxel_edit_reject(
                 reject.sequence, reject.position, reject.correct_voxel
             );
             voxel_world.set_voxel(
-                chunk_target.map_entity,
+                chunk_ticket.map_entity,
                 reject.position,
                 WorldVoxel::from(reject.correct_voxel),
             );
@@ -522,7 +538,7 @@ pub fn handle_map_transition_start(
             let map_entity = registry.get(&transition.target);
             commands
                 .entity(player)
-                .insert(ChunkTarget::new(map_entity, 4));
+                .insert(ChunkTicket::map_transition(map_entity));
         }
     }
 }
@@ -604,14 +620,14 @@ pub fn check_transition_chunks_loaded(
         return;
     };
 
-    if instance.loaded_chunks.is_empty() {
+    if instance.chunk_levels.is_empty() {
         return;
     }
 
     info!(
-        "Transition chunks loaded for {:?} ({} chunks), sending ready to server",
+        "Transition chunks loaded for {:?} ({} columns), sending ready to server",
         pending.0,
-        instance.loaded_chunks.len()
+        instance.chunk_levels.len()
     );
 
     commands.entity(player).insert(TransitionReadySent);

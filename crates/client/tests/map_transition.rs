@@ -10,7 +10,8 @@ use protocol::PendingTransition;
 use protocol::{CharacterMarker, MapInstanceId, MapRegistry};
 use ui::{ClientState, MapTransitionState};
 use voxel_map_engine::prelude::{
-    flat_terrain_voxels, ChunkTarget, VoxelGenerator, VoxelMapConfig, VoxelMapInstance,
+    chunk_to_column, flat_terrain_voxels, ChunkTicket, VoxelGenerator, VoxelMapConfig,
+    VoxelMapInstance,
 };
 
 fn transition_test_app() -> App {
@@ -55,7 +56,7 @@ fn spawn_frozen_player(app: &mut App, map: Entity) -> Entity {
             RigidBodyDisabled,
             ColliderDisabled,
             DisableRollback,
-            ChunkTarget::new(map, 0),
+            ChunkTicket::new(map, voxel_map_engine::prelude::TicketType::Player, 0),
             Transform::default(),
         ))
         .id()
@@ -78,7 +79,7 @@ fn stays_transitioning_while_chunks_loading() {
     let player = spawn_frozen_player(&mut app, map);
     set_transitioning(&mut app, player);
 
-    // loaded_chunks is empty — condition not met
+    // chunk_levels is empty — condition not met
     for _ in 0..5 {
         app.update();
     }
@@ -86,7 +87,7 @@ fn stays_transitioning_while_chunks_loading() {
     assert_eq!(
         *app.world().resource::<State<MapTransitionState>>().get(),
         MapTransitionState::Transitioning,
-        "Should remain Transitioning while loaded_chunks is empty"
+        "Should remain Transitioning while chunk_levels is empty"
     );
     assert!(
         app.world().get::<TransitionReadySent>(player).is_none(),
@@ -101,13 +102,13 @@ fn inserts_ready_sent_after_chunks_load() {
     let map = spawn_map(&mut app);
     let player = spawn_frozen_player(&mut app, map);
 
-    // Manually simulate received: insert a chunk coord into loaded_chunks
+    // Manually simulate received: insert a chunk coord into chunk_levels
     app.world_mut()
         .entity_mut(map)
         .get_mut::<VoxelMapInstance>()
         .unwrap()
-        .loaded_chunks
-        .insert(IVec3::ZERO);
+        .chunk_levels
+        .insert(chunk_to_column(IVec3::ZERO), 0);
 
     set_transitioning(&mut app, player);
 

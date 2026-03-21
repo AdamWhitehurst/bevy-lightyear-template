@@ -34,10 +34,7 @@ fn setup(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_translation(Vec3::new(30.0, 20.0, 30.0)).looking_at(Vec3::ZERO, Vec3::Y),
-        ChunkTarget {
-            map_entity: overworld,
-            distance: 5,
-        },
+        ChunkTicket::new(overworld, TicketType::Player, 5),
     ));
 
     commands.spawn((
@@ -126,30 +123,30 @@ fn bowl_terrain_voxels(chunk_pos: IVec3) -> Vec<WorldVoxel> {
 fn teleport_camera(
     keys: Res<ButtonInput<KeyCode>>,
     instances: Res<MapInstances>,
-    mut query: Query<(&mut Transform, &mut ChunkTarget), With<Camera3d>>,
+    mut query: Query<(&mut Transform, &mut ChunkTicket), With<Camera3d>>,
 ) {
-    let Ok((mut transform, mut target)) = query.single_mut() else {
+    let Ok((mut transform, mut ticket)) = query.single_mut() else {
         return;
     };
 
     if keys.just_pressed(KeyCode::Digit1) {
         teleport_to(
             &mut transform,
-            &mut target,
+            &mut ticket,
             instances.overworld,
             Vec3::new(30.0, 20.0, 30.0),
         );
     } else if keys.just_pressed(KeyCode::Digit2) {
         teleport_to(
             &mut transform,
-            &mut target,
+            &mut ticket,
             instances.homebase,
             Vec3::new(230.0, 20.0, 30.0),
         );
     } else if keys.just_pressed(KeyCode::Digit3) {
         teleport_to(
             &mut transform,
-            &mut target,
+            &mut ticket,
             instances.arena,
             Vec3::new(-170.0, 20.0, 30.0),
         );
@@ -158,13 +155,13 @@ fn teleport_camera(
 
 fn teleport_to(
     transform: &mut Transform,
-    target: &mut ChunkTarget,
+    ticket: &mut ChunkTicket,
     map_entity: Entity,
     position: Vec3,
 ) {
     let look_at = Vec3::new(position.x - 30.0, 0.0, position.z - 30.0);
     *transform = Transform::from_translation(position).looking_at(look_at, Vec3::Y);
-    target.map_entity = map_entity;
+    ticket.map_entity = map_entity;
 }
 
 fn move_camera(

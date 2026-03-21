@@ -14,7 +14,7 @@ fn dirty_chunks_saved_on_debounce() {
     let chunk_pos = IVec3::new(1, 0, 0);
     let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
     instance.insert_chunk_data(chunk_pos, ChunkData::from_voxels(&voxels));
-    instance.loaded_chunks.insert(chunk_pos);
+    instance.chunk_levels.insert(chunk_to_column(chunk_pos), 0);
     instance.dirty_chunks.insert(chunk_pos);
 
     save_dirty_chunks_for_instance(&mut instance, &map_dir);
@@ -32,7 +32,7 @@ fn clean_chunks_not_saved() {
     let chunk_pos = IVec3::ZERO;
     let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
     instance.insert_chunk_data(chunk_pos, ChunkData::from_voxels(&voxels));
-    instance.loaded_chunks.insert(chunk_pos);
+    instance.chunk_levels.insert(chunk_to_column(chunk_pos), 0);
     // NOT marking dirty
 
     save_dirty_chunks_for_instance(&mut instance, &map_dir);
@@ -87,14 +87,14 @@ fn evicted_dirty_chunk_saved_before_removal() {
     let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
     voxels[50] = WorldVoxel::Solid(7);
     instance.insert_chunk_data(chunk_pos, ChunkData::from_voxels(&voxels));
-    instance.loaded_chunks.insert(chunk_pos);
+    instance.chunk_levels.insert(chunk_to_column(chunk_pos), 0);
     instance.dirty_chunks.insert(chunk_pos);
 
     // Save all dirty chunks (simulates what eviction does before removing)
     save_dirty_chunks_for_instance(&mut instance, &map_dir);
 
     // Then remove from octree (simulates eviction completing)
-    instance.loaded_chunks.remove(&chunk_pos);
+    instance.chunk_levels.remove(&chunk_to_column(chunk_pos));
     instance.remove_chunk_data(chunk_pos);
 
     // Verify chunk was persisted before removal
@@ -105,7 +105,9 @@ fn evicted_dirty_chunk_saved_before_removal() {
     assert_eq!(loaded_voxels[50], WorldVoxel::Solid(7));
 
     // Verify chunk is no longer in memory
-    assert!(!instance.loaded_chunks.contains(&chunk_pos));
+    assert!(!instance
+        .chunk_levels
+        .contains_key(&chunk_to_column(chunk_pos)));
     assert!(instance.get_chunk_data(chunk_pos).is_none());
     assert!(instance.dirty_chunks.is_empty());
 }

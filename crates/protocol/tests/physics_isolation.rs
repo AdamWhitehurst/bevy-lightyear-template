@@ -5,7 +5,8 @@ use bevy::prelude::*;
 use protocol::map::{attach_chunk_colliders, MapInstanceId, MapRegistry, VoxelChunk};
 use protocol::physics::MapCollisionHooks;
 use voxel_map_engine::prelude::{
-    flat_terrain_voxels, ChunkTarget, VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin,
+    flat_terrain_voxels, ChunkTicket, TicketType, VoxelGenerator, VoxelMapConfig, VoxelMapInstance,
+    VoxelPlugin,
 };
 
 fn test_app() -> App {
@@ -167,10 +168,7 @@ fn chunk_target_derived_from_map_registry() {
     let target = app
         .world_mut()
         .spawn((
-            ChunkTarget {
-                map_entity: target_map,
-                distance: 0,
-            },
+            ChunkTicket::new(target_map, TicketType::Player, 0),
             Transform::from_translation(Vec3::ZERO),
         ))
         .id();
@@ -184,13 +182,13 @@ fn chunk_target_derived_from_map_registry() {
         .world()
         .get::<VoxelMapInstance>(map_a)
         .unwrap()
-        .loaded_chunks
+        .chunk_levels
         .len();
     let count_b = app
         .world()
         .get::<VoxelMapInstance>(map_b)
         .unwrap()
-        .loaded_chunks
+        .chunk_levels
         .len();
     assert_eq!(count_a, 1, "map_a (Overworld) should have 1 loaded chunk");
     assert_eq!(count_b, 0, "map_b (Homebase) should have 0 loaded chunks");
@@ -200,10 +198,9 @@ fn chunk_target_derived_from_map_registry() {
         .world()
         .resource::<MapRegistry>()
         .get(&MapInstanceId::Homebase { owner: 12345 });
-    app.world_mut().entity_mut(target).insert(ChunkTarget {
-        map_entity: new_map,
-        distance: 0,
-    });
+    app.world_mut()
+        .entity_mut(target)
+        .insert(ChunkTicket::new(new_map, TicketType::Player, 0));
 
     for _ in 0..50 {
         std::thread::sleep(std::time::Duration::from_millis(1));
@@ -214,13 +211,13 @@ fn chunk_target_derived_from_map_registry() {
         .world()
         .get::<VoxelMapInstance>(map_a)
         .unwrap()
-        .loaded_chunks
+        .chunk_levels
         .len();
     let count_b = app
         .world()
         .get::<VoxelMapInstance>(map_b)
         .unwrap()
-        .loaded_chunks
+        .chunk_levels
         .len();
     assert_eq!(count_a, 0, "old map should unload after switching");
     assert_eq!(count_b, 1, "new map should load after switching");
@@ -253,10 +250,7 @@ fn chunk_colliders_inherit_map_instance_id() {
         .id();
 
     app.world_mut().spawn((
-        ChunkTarget {
-            map_entity: map,
-            distance: 0,
-        },
+        ChunkTicket::new(map, TicketType::Player, 0),
         Transform::default(),
     ));
 

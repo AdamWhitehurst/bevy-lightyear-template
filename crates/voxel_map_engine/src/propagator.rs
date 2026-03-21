@@ -61,6 +61,12 @@ pub struct LevelDiff {
     pub unloaded: Vec<IVec2>,
 }
 
+impl Default for TicketLevelPropagator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TicketLevelPropagator {
     /// Creates an empty propagator with no sources or levels.
     pub fn new() -> Self {
@@ -342,7 +348,8 @@ mod tests {
         assert_eq!(prop.get_level(IVec2::new(6, 0)), None);
 
         let loaded_count = diff.loaded.len();
-        assert_eq!(loaded_count, 25);
+        // LOAD_LEVEL_THRESHOLD=4, base_level=0, radius=5 → loaded at distance ≤ 4 = (2*4+1)² = 81
+        assert_eq!(loaded_count, 81);
     }
 
     #[test]
@@ -445,11 +452,13 @@ mod tests {
         prop.set_source(entity(1), IVec2::ZERO, 0, 3);
         let diff = prop.propagate();
 
-        assert_eq!(diff.loaded.len(), 25);
+        // LOAD_LEVEL_THRESHOLD=4, base_level=0, radius=3 → all 7x7=49 at level ≤ 3 are loaded
+        assert_eq!(diff.loaded.len(), 49);
         assert!(diff.changed.is_empty());
         assert!(diff.unloaded.is_empty());
 
-        assert!(!diff.loaded.iter().any(|(col, _)| *col == IVec2::new(3, 0)));
+        // Distance 3, level 3 ≤ threshold 4 → IS in diff.loaded
+        assert!(diff.loaded.iter().any(|(col, _)| *col == IVec2::new(3, 0)));
         assert_eq!(prop.get_level(IVec2::new(3, 0)), Some(3));
     }
 
@@ -474,15 +483,22 @@ mod tests {
     #[test]
     fn column_crossing_threshold_is_loaded_or_unloaded() {
         let mut prop = TicketLevelPropagator::new();
+        // NPC base_level=1, radius=3 → distance 2 = level 3 (≤ threshold 4, loaded)
         prop.set_source(entity(1), IVec2::ZERO, 1, 3);
         prop.propagate();
 
         assert_eq!(prop.get_level(IVec2::new(2, 0)), Some(3));
 
+        // Adding player base_level=0 → distance 2 = level 2, strengthens from 3 to 2
+        // Both ≤ threshold → "changed", not "loaded"
         prop.set_source(entity(2), IVec2::ZERO, 0, 3);
         let diff = prop.propagate();
 
-        assert!(diff.loaded.iter().any(|(col, _)| *col == IVec2::new(2, 0)));
+        assert!(
+            diff.changed
+                .iter()
+                .any(|(col, lvl)| *col == IVec2::new(2, 0) && *lvl == 2)
+        );
     }
 
     #[test]
