@@ -239,7 +239,7 @@ Data Flow:
 │  │                                                                 │     │
 │  │  despawn_out_of_range_chunks                                    │     │
 │  │    → level-threshold eviction (not set-membership)              │     │
-│  │    → save dirty chunks to disk (ascynronous)                    │     │
+│  │    → save dirty chunks to disk (asynchronous)                   │     │
 │  └─────────────────────────────────────────────────────────────────┘     │
 │         │                                                                │
 │         │ chunks at Border level or better                               │
@@ -610,15 +610,6 @@ Both generation and remesh use `AsyncComputeTaskPool::get().spawn(async move { .
 
 ### What's Missing vs. Minecraft
 
-| Minecraft Feature | Current Engine |
-|---|---|
-| Multiple ticket types with different levels | Single `ChunkTarget` with flat distance |
-| Load levels (entity ticking, block ticking, border) | Binary loaded/unloaded |
-| Level propagation (+1 per chunk) | Flat radius, all chunks equal |
-| Ticket expiration/lifetime | No expiration |
-| Lowest-level-wins overlap resolution | Union of all desired positions |
-| Priority scheduling (closer chunks first) | Arbitrary HashSet iteration order |
-| Multi-stage generation pipeline | Single-step: generate → mesh |
 #### Core Ticket System
 
 | Minecraft Feature | Current Engine |
@@ -730,6 +721,29 @@ Use Minecraft's bucket-queue BFS with incremental updates:
 
 Use 2D Chebyshev distance (`max(|dx|, |dz|)`) for level propagation, loading chunks as vertical columns like Minecraft. The Y axis is not part of the level computation — all chunks in a column share the same effective level. This simplifies propagation from O(n³) to O(n²) and matches the game's predominantly horizontal gameplay.
 
+#### 2D/3D Boundary
+
+The 2D column model is an abstraction layer on top of the existing 3D infrastructure. The boundary is:
+
+| Component | Dimensionality | Key Type | Notes |
+|---|---|---|---|
+| `chunk_levels` | **2D** | `IVec2` (xz) | New. Ticket propagation, load state. One entry per column. |
+| `TicketLevelPropagator` | **2D** | `IVec2` (xz) | New. BFS operates on 2D grid. |
+| `OctreeI32<ChunkData>` | **3D** | `IVec3` | Unchanged. Stores per-chunk voxel data. |
+| `PendingChunks` / gen tasks | **3D** | `IVec3` | Unchanged. Each task generates one 16³ chunk. |
+| `VoxelChunk` mesh entities | **3D** | `IVec3` | Unchanged. Each mesh is one 16³ chunk. |
+| Persistence (save/load) | **3D** | `IVec3` | Unchanged. Files are per-chunk. |
+
+**Bridge**: When a column `IVec2(x, z)` transitions to a loaded state, it expands to `column_height` `IVec3` positions: `(x, y_min..y_max, z)` where the Y range is ±8 chunks (or the map's explicit bounds). Generation tasks are spawned for each `IVec3` position in the column. When a column transitions to unloaded, all `IVec3` chunks in that column are evicted.
+
+```rust
+fn column_to_chunks(col: IVec2, y_range: Range<i32>) -> impl Iterator<Item = IVec3> {
+    y_range.map(move |y| IVec3::new(col.x, y, col.y))
+}
+```
+
+The octree, persistence, mesh spawning, and async tasks remain 3D-keyed — only the ticket/level system is 2D.
+
 ### Multi-Stage Generation Pipeline
 
 The generation pipeline should become multi-stage, mirroring Minecraft's approach:
@@ -746,6 +760,44 @@ The generation pipeline should become multi-stage, mirroring Minecraft's approac
 Each stage has a `neighbor_requirement` defining how many surrounding chunks must be at the previous status. FEATURES needs a 1-chunk ring at TERRAIN because feature placement can affect neighboring chunks (trees crossing boundaries, etc.).
 
 The ticket level determines maximum achievable status: chunks deep in the inaccessible range only advance to early stages, providing neighbor data for closer chunks.
+
+#### Impact on `VoxelGenerator`
+
+The current `VoxelGenerator(Arc<dyn Fn(IVec3) -> Vec<WorldVoxel>>)` produces a complete chunk in one call. Multi-stage generation requires splitting this into per-stage work:
+
+**Option A: Trait with per-stage methods** (recommended)
+```rust
+trait VoxelGenerator: Send + Sync {
+    /// Stage 1: Base terrain shape. Receives only this chunk's position.
+    fn generate_terrain(&self, pos: IVec3) -> Vec<WorldVoxel>;
+
+    /// Stage 2: Feature placement. Receives this chunk + 1-ring neighbor terrain data.
+    fn generate_features(&self, pos: IVec3, neighbors: &NeighborAccess) -> Vec<WorldVoxel>;
+}
+```
+
+**Intermediate state storage**: The octree already stores `ChunkData` per chunk. A partially-generated chunk (terrain-only, no features) is stored in the octree with a `ChunkStatus` field on `ChunkData` indicating its current stage. When the chunk advances to the next stage, its data is read from the octree, passed to the next stage function, and the result overwrites it.
+
+```rust
+struct ChunkData {
+    voxels: PalettedChunk,
+    fill_type: FillType,
+    hash: u64,
+    status: ChunkStatus,  // NEW: Empty, Terrain, Features, Light, Mesh, Full
+}
+```
+
+**`ChunkGenResult` changes**: The result carries the stage that was completed, not just the final mesh:
+```rust
+struct ChunkGenResult {
+    position: IVec3,
+    chunk_data: ChunkData,    // includes updated status
+    mesh: Option<Mesh>,       // only Some if Mesh stage completed
+    completed_stage: ChunkStatus,
+}
+```
+
+The scheduler checks a chunk's current status and its neighbors' statuses to determine if the next stage can run. If neighbors haven't reached the prerequisite stage, the chunk is skipped (not blocked) and retried next frame.
 
 ### Client Interaction
 
@@ -1033,7 +1085,7 @@ Skip spawning a remesh task if the chunk is still generating, and vice versa.
 
 3. **Client interaction?** Follow Minecraft: server-push model. Server computes levels, sends chunk data to clients for chunks at sufficient level. Client is a passive receiver. Replaces current `ChunkRequest`/`ChunkDataSync` protocol.
 
-4. **Distance metric?** Chebyshev (`max(|dx|, |dy|, |dz|)`). Matches Minecraft and the current cubic volume approach.
+4. **Distance metric?** 2D Chebyshev (`max(|dx|, |dz|)`) with column-based loading. The Y axis is not part of level propagation — vertical extent is handled by the column height bound (±8 chunks). This matches Minecraft's 2D propagation model.
 
 5. **Multi-stage generation?** Yes. Stages: Empty → Terrain → Features → Light → Mesh → Full. Each stage has neighbor requirements enabling the inaccessible level range.
 
@@ -1043,7 +1095,13 @@ Each step is independently valuable and fully replaces the relevant code (no wra
 
 ### 1. Ticket System + Level Propagation (replaces ChunkTarget)
 
-Minimum viable ticket system. Replace `ChunkTarget` with `ChunkTicket`, replace `loaded_chunks: HashSet<IVec3>` with `chunk_levels: HashMap<IVec2, u32>` (2D column-based), implement bucket-queue BFS level propagation with Chebyshev distance. Initially only Player ticket type needed. All existing consumers of `ChunkTarget.map_entity` switch to `MapInstanceId` + `MapRegistry` (already available on player entities). Generation/meshing gated by level thresholds instead of binary membership.
+This step has two sub-steps with distinct blast radii:
+
+**1a. 3D → 2D column migration (prerequisite)**
+Convert the loading model from 3D `IVec3` to 2D `IVec2` columns. `loaded_chunks: HashSet<IVec3>` becomes `loaded_columns: HashSet<IVec2>`. `compute_target_desired` produces `HashSet<IVec2>` instead of `HashSet<IVec3>`. Each column expands to `IVec3` positions (±8 Y range) when spawning gen tasks. The octree, persistence, and mesh entities remain 3D-keyed. This sub-step is a mechanical refactor that can be tested independently — the system still uses `ChunkTarget` and flat distance, just with 2D column keys.
+
+**1b. Ticket system + level propagation (replaces ChunkTarget)**
+Replace `ChunkTarget` with `ChunkTicket`, replace `loaded_columns: HashSet<IVec2>` with `chunk_levels: HashMap<IVec2, u32>`, implement bucket-queue BFS level propagation with 2D Chebyshev distance. Initially only Player ticket type needed. All existing consumers of `ChunkTarget.map_entity` switch to `MapInstanceId` + `MapRegistry` (already available on player entities). Generation/meshing gated by level thresholds instead of binary membership.
 
 ### 2. Priority Scheduling + Work Caps
 
@@ -1051,7 +1109,13 @@ Add `BinaryHeap`-based priority queue for generation and remesh spawning. Add pe
 
 ### 3. Multi-Stage Generation
 
-Replace single-step generate-and-mesh with staged pipeline (Empty → Terrain → Features → Mesh → Full). Add neighbor requirements per stage. Ticket levels now gate maximum achievable stage per chunk. This requires the first step (levels determine which stage a chunk can reach).
+Replace single-step generate-and-mesh with staged pipeline (Empty → Terrain → Features → Mesh → Full). Add neighbor requirements per stage. Ticket levels now gate maximum achievable stage per chunk. This requires step 1b (levels determine which stage a chunk can reach).
+
+Key design decisions (see "Impact on `VoxelGenerator`" subsection for details):
+- `VoxelGenerator` becomes a trait with per-stage methods (`generate_terrain`, `generate_features`)
+- Intermediate state stored in the octree: `ChunkData` gains a `status: ChunkStatus` field tracking current stage
+- Neighbor requirements checked by the scheduler — chunks whose neighbors haven't reached the prerequisite stage are **skipped** (not blocked), retried next frame
+- The octree stores partially-generated chunks directly; no separate staging area
 
 ### 4. Server-Push Networking
 
@@ -1119,7 +1183,7 @@ Future types (not needed now): Forced (admin/debug), Spawn (world spawn area), P
 - `map.rs:117-132` (`attach_chunk_target_to_player`) — replaced by ticket attachment
 - `map.rs:135-201` (`request_missing_chunks`) — removed in step 4.
 - `map.rs:205-277` (`handle_chunk_data_sync`) — `loaded_chunks.insert()` → `chunk_levels.insert()`
-- `map.rs:280-413` (4 voxel operation systems) — read `chunk_target.map_entity`; switch to `MapInstanceId` + `MapRegistry` (already available on player entities)
+- `map.rs:280-413` (3 voxel operation systems: `handle_voxel_broadcasts`, `handle_section_blocks_update`, `handle_voxel_input`) — read `chunk_target.map_entity`; switch to `MapInstanceId` + `MapRegistry` (already available on player entities)
 - `map.rs:453-480` (`handle_voxel_edit_reject`) — same map_entity resolution change
 - `map.rs:525` — transition `ChunkTarget` → transition `ChunkTicket`
 - `map.rs:607` (`check_transition_chunks_loaded`) — `.is_empty()` works on HashMap too
@@ -1128,7 +1192,31 @@ Future types (not needed now): Forced (admin/debug), Spawn (world spawn area), P
 - `map/chunk.rs` — `ChunkRequest` removed in step 4.; `ChunkDataSync` survives
 - `lib.rs:119-122` — `ChunkRequest` registration removed in step 4.
 
-**Tests**: 6 test files across 3 crates use `loaded_chunks` directly; 3 test files insert `ChunkTarget`; 1 integration test exercises `ChunkRequest`/`ChunkDataSync` roundtrip. All need updating.
+**Tests that need updating**:
+
+Files using `loaded_chunks` (7 files):
+- `crates/voxel_map_engine/tests/lifecycle.rs`
+- `crates/voxel_map_engine/tests/api.rs`
+- `crates/server/tests/voxel_persistence.rs`
+- `crates/server/tests/world_persistence.rs`
+- `crates/server/tests/integration.rs`
+- `crates/protocol/tests/physics_isolation.rs`
+- `crates/client/tests/map_transition.rs`
+
+Files inserting `ChunkTarget` (5 files, overlapping with above):
+- `crates/voxel_map_engine/tests/lifecycle.rs`
+- `crates/voxel_map_engine/tests/api.rs`
+- `crates/server/tests/integration.rs`
+- `crates/protocol/tests/physics_isolation.rs`
+- `crates/client/tests/map_transition.rs`
+
+Files using `ChunkRequest` (1 file):
+- `crates/server/tests/integration.rs` — exercises `ChunkRequest`/`ChunkDataSync` roundtrip; removed in step 4
+
+Examples using `ChunkTarget`/`loaded_chunks` (3 files):
+- `crates/voxel_map_engine/examples/editing.rs`
+- `crates/voxel_map_engine/examples/multi_instance.rs`
+- `crates/voxel_map_engine/examples/terrain.rs`
 
 ### Testing and Verification Strategy
 
