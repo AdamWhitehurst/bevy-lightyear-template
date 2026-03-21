@@ -1105,7 +1105,7 @@ Replace `ChunkTarget` with `ChunkTicket`, replace `loaded_columns: HashSet<IVec2
 
 ### 2. Priority Scheduling + Work Caps
 
-Add `BinaryHeap`-based priority queue for generation and remesh spawning. Add per-frame caps on polling and remesh spawning. Add total in-flight task caps. This step is independent of the ticket system — it improves the existing spawning/polling pipeline.
+Add `BinaryHeap`-based priority queue for generation and remesh spawning. Add per-frame caps on polling and remesh spawning. Add total in-flight task caps. Add a persistent save queue (`PendingSaves`) with bounded drain rate (`MAX_SAVES_PER_FRAME`) and in-flight cap, replacing the current synchronous `save_chunk` call during eviction — prevents I/O spikes on teleport/mass unload (Minecraft uses `CHUNK_SAVED_PER_TICK` and `EAGER_CHUNK_SAVE_COOLDOWN_IN_MILLIS` for the same purpose). This step is independent of the ticket system — it improves the existing spawning/polling/saving pipeline.
 
 ### 3. Multi-Stage Generation
 

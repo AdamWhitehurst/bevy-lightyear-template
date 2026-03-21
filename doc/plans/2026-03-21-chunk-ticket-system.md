@@ -42,7 +42,6 @@ After this plan:
 - **Priority scheduling / work caps** — separate step (Step 2 in the research doc)
 - **Multi-stage generation pipeline** — separate step (Step 3)
 - **Time-based work budgets** — separate step (Step 2)
-- **Tracy instrumentation** — separate step
 - **Batched async tasks** — separate step (Step 2)
 - **Ticket expiration/lifetime** — deferred; all tickets are permanent for now
 - **Forced/Portal/Spawn ticket types** — only Player, NPC, MapTransition needed now
@@ -137,10 +136,9 @@ impl ChunkTicket {
 
 /// A chunk column's load state, derived from its effective level.
 ///
-/// Forward-declaration: this plan uses `LOAD_LEVEL_THRESHOLD` for binary loaded/unloaded
-/// decisions. The enum variants document the intended future differentiation — once
-/// simulation zones are implemented (e.g., entity AI only in EntityTicking chunks),
-/// systems will branch on `LoadState` directly.
+/// This plan uses `LOAD_LEVEL_THRESHOLD` for loaded/unloaded decisions.
+/// `LoadState` variants are used for debug display and will drive
+/// simulation zone differentiation in a future plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum LoadState {
     /// Level 0: Full simulation — entity AI, physics, spawning.
@@ -281,7 +279,9 @@ mod tests {
 
     #[test]
     fn convenience_constructors_use_default_radii() {
-        let e = Entity::from_raw(1);
+        // Using PLACEHOLDER for consistency with existing tests in chunk.rs.
+        // These tests don't need distinct entities — just testing field values.
+        let e = Entity::PLACEHOLDER;
         let p = ChunkTicket::player(e);
         assert_eq!(p.ticket_type, TicketType::Player);
         assert_eq!(p.radius, 10);
@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn new_allows_custom_radius() {
-        let e = Entity::from_raw(1);
+        let e = Entity::PLACEHOLDER;
         let t = ChunkTicket::new(e, TicketType::Player, 20);
         assert_eq!(t.radius, 20);
     }
@@ -454,6 +454,7 @@ mod tests {
     use super::*;
     use crate::ticket::LOAD_LEVEL_THRESHOLD;
 
+    /// Distinct entities needed for multi-source tests — can't use PLACEHOLDER for all.
     fn entity(id: u32) -> Entity {
         Entity::from_raw(id)
     }
@@ -711,8 +712,11 @@ fn collect_tickets(
     map_query: &Query<&GlobalTransform, With<VoxelMapInstance>>,
     ticket_query: &Query<(Entity, &ChunkTicket, &GlobalTransform)>,
     propagators: &mut Query<&mut TicketLevelPropagator>,
+    // Passed from update_chunks's Local<HashMap<Entity, CachedTicket>> —
+    // collect_tickets is a helper, not a standalone system.
     ticket_cache: &mut HashMap<Entity, CachedTicket>,
 ) {
+    let _span = info_span!("collect_tickets").entered();
     // 1. Detect removed tickets: any entity in cache not in ticket_query → remove_source
     let active: HashSet<Entity> = ticket_query.iter().map(|(e, _, _)| e).collect();
     let stale: Vec<Entity> = ticket_cache.keys().filter(|e| !active.contains(e)).copied().collect();
@@ -729,7 +733,14 @@ fn collect_tickets(
     //    b. Compute 2D column position (drop Y)
     //    c. Compare against cache — if column, type, or radius changed, call set_source
     for (ticket_entity, ticket, transform) in ticket_query.iter() {
-        let Ok(map_transform) = map_query.get(ticket.map_entity) else { continue };
+        let Ok(map_transform) = map_query.get(ticket.map_entity) else {
+            trace!(
+                "collect_tickets: ticket {ticket_entity:?} references non-existent map {:?}, \
+                 expected during deferred command application",
+                ticket.map_entity
+            );
+            continue;
+        };
         let map_inv = map_transform.affine().inverse();
         let local_pos = map_inv.transform_point3(transform.translation());
         let column = world_to_column_pos(local_pos);
@@ -787,8 +798,8 @@ fn world_to_column_pos(translation: Vec3) -> IVec2 {
 
 The main `update_chunks` system changes its query to use `ChunkTicket` instead of `ChunkTarget`. Flow becomes:
 
-1. Collect tickets → update propagator sources
-2. For each map: call `propagator.propagate()` to get `LevelDiff`
+1. Collect tickets → update propagator sources (`info_span!("collect_tickets")`)
+2. For each map: call `propagator.propagate()` to get `LevelDiff` (`info_span!("propagate_ticket_levels")`, `plot!("bfs_steps_this_frame")`, `plot!("propagator_dirty_columns")`)
 3. Sync `chunk_levels` on `VoxelMapInstance` from diff:
    - For `diff.loaded` columns: insert into `chunk_levels` with their level
    - For `diff.changed` columns: update level in `chunk_levels`
@@ -826,14 +837,22 @@ fn remove_out_of_range_chunks(
     y_min: i32,
     y_max: i32,
 ) {
+    let _span = info_span!("remove_out_of_range_chunks").entered();
     for &col in unloaded_columns {
         for chunk_pos in column_to_chunks(col, y_min, y_max) {
             if instance.dirty_chunks.remove(&chunk_pos) {
                 if let Some(dir) = save_dir {
                     if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
-                        if let Err(e) = crate::persistence::save_chunk(dir, chunk_pos, chunk_data) {
-                            error!("Failed to save evicted dirty chunk at {chunk_pos}: {e}");
-                        }
+                        // Spawn async save task to avoid blocking the main thread.
+                        // Clone data before removal below; fire-and-forget.
+                        let data = chunk_data.clone();
+                        let dir = dir.to_path_buf();
+                        // Step 2: Push to pending save queue instead of spawning task here
+                        AsyncComputeTaskPool::get().spawn(async move {
+                            if let Err(e) = crate::persistence::save_chunk(&dir, chunk_pos, &data) {
+                                error!("Failed to save evicted dirty chunk at {chunk_pos}: {e}");
+                            }
+                        }).detach();
                     }
                 }
             }
@@ -857,8 +876,13 @@ fn spawn_missing_chunks(
     y_min: i32,
     y_max: i32,
 ) {
+    let _span = info_span!("spawn_missing_chunks").entered();
     let mut spawned = 0;
-    for (&col, &_level) in &instance.chunk_levels {
+    // Sort by level (lowest first) so nearest columns generate before distant ones.
+    // This implements concentric-ring loading for free.
+    let mut cols: Vec<_> = instance.chunk_levels.iter().collect();
+    cols.sort_by_key(|(_, &lvl)| lvl);
+    for (&col, &_level) in cols {
         // chunk_levels only contains loaded columns (level ≤ LOAD_LEVEL_THRESHOLD),
         // so no threshold filter needed here.
         for chunk_pos in column_to_chunks(col, y_min, y_max) {
@@ -869,6 +893,8 @@ fn spawn_missing_chunks(
             spawned += 1;
         }
     }
+    plot!(plot_name!("gen_spawned_this_frame"), spawned as f64);
+    plot!(plot_name!("gen_tasks_in_flight"), pending.tasks.len() as f64);
 }
 ```
 
@@ -901,14 +927,14 @@ Remove `instance.loaded_chunks.insert(result.position)` — loaded state is now 
 #### 9. Modify `ensure_pending_chunks`
 **File**: `crates/voxel_map_engine/src/lifecycle.rs`
 
-Also auto-insert `TicketLevelPropagator::new()` on map entities that lack one. Keep the `With<VoxelGenerator>` gate.
+Also auto-insert `TicketLevelPropagator` on map entities that lack one. Keep the `With<VoxelGenerator>` gate. `TicketLevelPropagator` should derive `Default` (delegating to `new()`) for consistency with `PendingChunks` and `PendingRemeshes`.
 
 #### 10. Remove `loaded_chunks` from `VoxelMapInstance`
 **File**: `crates/voxel_map_engine/src/instance.rs`
 
 Remove the `loaded_chunks: HashSet<IVec3>` field entirely. All consumers now use `chunk_levels: HashMap<IVec2, u32>` (for column-level loaded checks) or `get_chunk_data(pos).is_some()` (for 3D chunk-level existence checks).
 
-The `set_voxel` method needs no change — it already guards on `get_chunk_data_mut(chunk_pos)` returning `None` (`instance.rs:135`).
+The `set_voxel` method (`instance.rs:130`) needs no change — it already guards on `get_chunk_data_mut(chunk_pos)` returning `None`.
 
 #### 11. Remove `ChunkTarget` from `chunk.rs`
 **File**: `crates/voxel_map_engine/src/chunk.rs`
@@ -946,7 +972,7 @@ fn spawn_ticket(world: &mut World, map_entity: Entity, ticket_type: TicketType, 
 }
 ```
 
-All 9 existing tests adapted to use `ChunkTicket` and `chunk_levels` instead of `ChunkTarget` and `loaded_chunks`.
+All 8 existing tests adapted to use `ChunkTicket` and `chunk_levels` instead of `ChunkTarget` and `loaded_chunks`.
 
 New tests:
 ```rust
@@ -1097,7 +1123,7 @@ ChunkTicket::map_transition(map_entity)
 ```
 
 #### 10. Client: check_transition_chunks_loaded
-**File**: `crates/client/src/map.rs:607`
+**File**: `crates/client/src/map.rs:583`
 
 Change `instance.loaded_chunks.is_empty()` to `instance.chunk_levels.is_empty()`.
 
@@ -1185,16 +1211,38 @@ pub struct ClientChunkVisibility {
 /// Server system: for each connected player, compare their ticket's loaded columns
 /// against what we've already sent. Push new chunks, send unload for removed.
 fn push_chunks_to_clients(
-    player_query: Query<(Entity, &ChunkTicket, &mut ClientChunkVisibility)>,
-    map_query: Query<(&VoxelMapInstance, &VoxelMapConfig)>,
-    // MessageSender for ChunkDataSync and UnloadChunk
+    player_query: Query<(Entity, &ChunkTicket, &GlobalTransform, &mut ClientChunkVisibility)>,
+    map_query: Query<(&VoxelMapInstance, &VoxelMapConfig, &GlobalTransform), Without<ClientChunkVisibility>>,
+    // MessageSender for ChunkDataSync and UnloadColumn
 ) {
-    for (player_entity, ticket, mut visibility) in &player_query {
-        let Ok((instance, config)) = map_query.get(ticket.map_entity) else { continue };
+    let _span = info_span!("push_chunks_to_clients").entered();
+    let mut pushed = 0u32;
+    let mut unloaded = 0u32;
 
-        // Columns that should be visible: all loaded columns from this map
-        // (chunk_levels only has level ≤ LOAD_LEVEL_THRESHOLD)
-        let current_columns: HashSet<IVec2> = instance.chunk_levels.keys().copied().collect();
+    for (player_entity, ticket, player_transform, mut visibility) in &player_query {
+        let (instance, config, map_transform) = map_query.get(ticket.map_entity).expect(
+            "push_chunks_to_clients: player ticket references non-existent map"
+        );
+
+        // Compute per-player visible columns from this player's ticket position and radius.
+        // Only send columns within this player's loaded range, not the entire map's chunk_levels.
+        let map_inv = map_transform.affine().inverse();
+        let local_pos = map_inv.transform_point3(player_transform.translation());
+        let player_col = world_to_column_pos(local_pos);
+        let radius = ticket.radius as i32;
+        let mut current_columns = HashSet::new();
+        for dx in -radius..=radius {
+            for dz in -radius..=radius {
+                let col = player_col + IVec2::new(dx, dz);
+                let distance = dx.abs().max(dz.abs()) as u32;
+                let level = ticket.ticket_type.base_level() + distance;
+                if level > LOAD_LEVEL_THRESHOLD { continue; }
+                // Only include if the map actually has data for this column
+                if instance.chunk_levels.contains_key(&col) {
+                    current_columns.insert(col);
+                }
+            }
+        }
 
         // New columns to send
         for &col in current_columns.difference(&visibility.sent_columns) {
@@ -1215,8 +1263,11 @@ fn push_chunks_to_clients(
 }
 ```
 
-**Note**: Per-player visibility should eventually be scoped to each player's own ticket influence, not the entire map's `chunk_levels`. For now, since all players share the same map and the server's `chunk_levels` reflects all tickets, this works correctly for single-player and small multiplayer. For proper multi-player support, the server should compute per-player visible columns based on that player's position relative to the map's chunk levels. This is a refinement for later.
-
+After the loop:
+```rust
+    plot!(plot_name!("chunks_pushed_this_frame"), pushed as f64);
+    plot!(plot_name!("columns_unloaded_this_frame"), unloaded as f64);
+```
 #### 2. New protocol message: `UnloadColumn`
 **File**: `crates/protocol/src/map/chunk.rs`
 
@@ -1259,20 +1310,35 @@ Delete the `ClientChunkState` component (it tracked `pending_requests` and `retr
 **File**: `crates/client/src/map.rs`
 
 ```rust
-/// Handle server's UnloadColumn message — remove chunk data and despawn mesh entities
-/// for all chunks in the column.
+/// Handle server's UnloadColumn message — remove chunk data for all chunks in the column.
+/// Mesh entity cleanup is handled by the existing `despawn_out_of_range_chunks` system
+/// which checks `chunk_levels.contains_key()`.
 fn handle_unload_column(
-    // MessageReceiver<UnloadColumn> on ChunkChannel
-    mut instance_query: Query<&mut VoxelMapInstance>,
-    // ticket_query to resolve map_entity
+    mut receiver: MessageReceiver<UnloadColumn, ChunkChannel>,
+    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    mut map_query: Query<&mut VoxelMapInstance>, 
 ) {
+    // Resolve map_entity from the player's ticket — the client has one predicted player
+    // whose ticket points to the current map. UnloadColumn doesn't carry map_entity
+    // because the client is only connected to one map at a time.
+    let ticket = player_query.single().expect(
+        "handle_unload_column: expected exactly one predicted controlled player"
+    );
+    let Ok(mut instance) = map_query.get_mut(ticket.map_entity) else {
+        trace!("handle_unload_column: map entity {:?} not found", ticket.map_entity);
+        receiver.drain();
+        return;
+    };
+
+    let y_min = DEFAULT_COLUMN_Y_MIN;
+    let y_max = DEFAULT_COLUMN_Y_MAX;
+
     for msg in receiver.drain() {
         let col = msg.column;
         for chunk_pos in column_to_chunks(col, y_min, y_max) {
             instance.remove_chunk_data(chunk_pos);
         }
         instance.chunk_levels.remove(&col);
-        // Mesh entity despawn handled by existing despawn_out_of_range_chunks system
     }
 }
 ```
@@ -1340,7 +1406,7 @@ The system stays largely the same (receives chunks, inserts into octree, spawns 
 - Switching ticket between maps unloads old, loads new
 - Removing ticket entity unloads all its chunks
 - Bounded maps respect bounds during column expansion
-- All 9 existing lifecycle.rs tests adapted
+- All 8 existing lifecycle.rs tests adapted
 - All 9 existing api.rs tests adapted
 
 ### Phase 5 Tests:
@@ -1350,7 +1416,7 @@ The system stays largely the same (receives chunks, inserts into octree, spawns 
 - Map transition works end-to-end with server-push
 
 ### Existing Tests (adapted in Phase 4):
-- `lifecycle.rs`: 9 tests updated to use `ChunkTicket`
+- `lifecycle.rs`: 8 tests updated to use `ChunkTicket`
 - `api.rs`: 9 tests updated
 - `integration.rs`: 3 tests updated (1 removed in Phase 5)
 - `voxel_persistence.rs`: 5 tests updated (lines 17, 35, 90, 97, 108)
@@ -1367,9 +1433,51 @@ The system stays largely the same (receives chunks, inserts into octree, spawns 
 6. Run examples: `cargo run --example terrain`, `cargo run --example editing`, `cargo run --example multi_instance`
 7. (Phase 5) Verify client receives chunks without sending requests — grep for `ChunkRequest` should return zero hits in source code
 
+## Tracy Instrumentation
+
+Added in Phase 3 alongside the lifecycle rewrite. Uses the existing `bevy/trace_tracy` infrastructure (already active via `--features bevy/trace_tracy`). Spans and plots are included inline in the pseudocode above — every new system has `info_span!` and numeric `plot!` calls.
+
+### Workspace Wiring
+
+```toml
+# crates/voxel_map_engine/Cargo.toml
+[features]
+tracy = ["tracy-client/enable"]
+
+[dependencies]
+tracy-client = { version = "0.18", default-features = false }
+```
+
+```toml
+# Root Cargo.toml
+[workspace.dependencies]
+tracy-client = { version = "0.18", default-features = false }
+
+# App crate features (e.g., server/Cargo.toml)
+[features]
+tracy = ["bevy/trace_tracy", "voxel_map_engine/tracy"]
+```
+
+Without the `enable` feature, all `tracy-client` macros compile to no-ops (zero cost).
+
+### Key Metrics to Monitor
+
+| Metric | What It Tells You | Tune |
+|---|---|---|
+| `bfs_steps_this_frame` | Level propagation cost per frame | Amortization budget |
+| `gen_tasks_in_flight` | Backpressure health | `MAX_TASKS_PER_FRAME` |
+| `gen_tasks_polled_this_frame` | Main-thread cost of chunk insertion | Poll cap (future Step 2) |
+| `gen_queue_depth` | How far behind generation is | `MAX_TASKS_PER_FRAME`, batch size |
+| `remesh_tasks_in_flight` | Remesh backpressure | Remesh cap (future Step 2) |
+| `chunks_pushed_this_frame` | Server→client bandwidth pressure | Send throttling |
+
+Run: `cargo run -p server --features tracy`
+
+---
+
 ## Performance Considerations
 
-- **3D→2D volume change**: The current system loads a cubic volume: with distance=10, that's (21)³ = 9,261 chunks. The new system loads 2D columns × height: with radius=10 and LOAD_LEVEL_THRESHOLD=2, only columns at distance ≤ 2 are loaded, giving (5)² × 16 = 400 chunks. At distance 3-10, columns exist in the propagator but don't generate chunk data. This is a substantial reduction in loaded volume and a significant behavior change — the loaded area becomes a shorter, wider disc rather than a cube. The net effect is positive: fewer chunks to generate/mesh, and the outer ring provides level data for future priority scheduling without consuming generation resources.
+- **3D→2D volume change**: The current system loads a 3D cubic volume: with distance=10, that's (21)³ = 9,261 chunks. The new system loads 2D columns × height. With `LOAD_LEVEL_THRESHOLD=2` and a player ticket (base_level=0, radius=10), only columns at Chebyshev distance ≤ 2 get chunk data: (5)² × 16 = 400 chunks. This is a 96% reduction in loaded volume. The loaded area is 80×80 blocks — small for an open-world game but sufficient for initial development and testing. `LOAD_LEVEL_THRESHOLD` can be raised (e.g., to 10 for 21×21 columns) to match current behavior if needed. The outer ring (distance 3-10) exists in the propagator but doesn't generate chunk data — it provides level metadata for future priority scheduling and multi-stage generation.
 - **Incremental BFS cost**: Moving one chunk boundary invalidates ~40 columns (the ring entering/exiting radius). Recomputing their levels scans all sources (typically 1-3 tickets per map). This is O(boundary_size × num_sources) ≈ O(40 × 3) = O(120) — negligible per frame.
 - **Full recompute fallback**: On first load or teleportation, the propagator processes all columns within radius. For radius 10: 441 columns × ~3 sources = ~1,300 iterations. Still fast (<1ms).
 - **Column expansion**: Each loaded column expands to 16 chunk positions (Y range −8 to 7). Generation tasks are still capped at `MAX_TASKS_PER_FRAME=32`.
