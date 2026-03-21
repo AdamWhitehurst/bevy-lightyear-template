@@ -1,5 +1,5 @@
 # TODO
-
+- dampen player stats by distance from spawn?
 - user will run `cargo server` and `cargo client` for validation
 - update world object system on hot reload by first remove WorldObjectId's components using old loaded Def, load new Def, insert_if_new(...) ?
 - /spec:update - test on adding tracing > output txt file
@@ -17,5 +17,3 @@
 - Levelling system
 - Singleplayer
 - Stats and Buffs
-
-
