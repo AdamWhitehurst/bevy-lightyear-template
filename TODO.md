@@ -17,3 +17,4 @@
 - Levelling system
 - Singleplayer
 - Stats and Buffs
+- Npc interaction authoring via asset file writing
