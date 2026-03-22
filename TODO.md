@@ -25,3 +25,4 @@
 - animation editor ui
 - world object editor ui
 - map editor ui
+- spinning polyhedral exploding VFZ for ground_pound
