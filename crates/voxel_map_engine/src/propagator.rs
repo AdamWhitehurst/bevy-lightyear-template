@@ -348,7 +348,7 @@ mod tests {
         assert_eq!(prop.get_level(IVec2::new(6, 0)), None);
 
         let loaded_count = diff.loaded.len();
-        // LOAD_LEVEL_THRESHOLD=4, base_level=0, radius=5 → loaded at distance ≤ 4 = (2*4+1)² = 81
+        // LOAD_LEVEL_THRESHOLD=4 (cfg(test)), base_level=0, radius=5 → loaded at distance ≤ 4 = (2*4+1)² = 81
         assert_eq!(loaded_count, 81);
     }
 
@@ -452,7 +452,7 @@ mod tests {
         prop.set_source(entity(1), IVec2::ZERO, 0, 3);
         let diff = prop.propagate();
 
-        // LOAD_LEVEL_THRESHOLD=4, base_level=0, radius=3 → all 7x7=49 at level ≤ 3 are loaded
+        // LOAD_LEVEL_THRESHOLD=4 (cfg(test)), base_level=0, radius=3 → all 7x7=49 at level ≤ 3 are loaded
         assert_eq!(diff.loaded.len(), 49);
         assert!(diff.changed.is_empty());
         assert!(diff.unloaded.is_empty());

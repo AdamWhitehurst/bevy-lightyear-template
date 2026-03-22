@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use ui::{ClientState, MapTransitionState};
 use voxel_map_engine::prelude::{
-    flat_terrain_voxels, VoxelGenerator, VoxelMapConfig, VoxelMapInstance,
+    flat_terrain_voxels, VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin,
 };
 
 /// Simplified test stepper for crossbeam transport testing
@@ -60,13 +60,8 @@ impl CrossbeamTestStepper {
         });
         client_app.add_plugins(ProtocolPlugin);
 
-        // Finish plugin setup
-        server_app.finish();
-        server_app.cleanup();
-        client_app.finish();
-        client_app.cleanup();
-
-        // Setup manual time control
+        // Setup manual time control (finish/cleanup deferred to init() so tests
+        // can add plugins between new() and init())
         let current_time = bevy::platform::time::Instant::now();
         server_app.insert_resource(TimeUpdateStrategy::ManualInstant(current_time));
         client_app.insert_resource(TimeUpdateStrategy::ManualInstant(current_time));
@@ -132,8 +127,13 @@ impl CrossbeamTestStepper {
         }
     }
 
-    /// Initialize connection by triggering Start on server and Connect on client
+    /// Finalize plugin setup and initialize connection.
     fn init(&mut self) {
+        self.server_app.finish();
+        self.server_app.cleanup();
+        self.client_app.finish();
+        self.client_app.cleanup();
+
         // Trigger Start on server
         self.server_app.world_mut().commands().trigger(Start {
             entity: self.server_entity,
@@ -1396,5 +1396,268 @@ fn test_voxel_edit_ack_received() {
     assert_eq!(
         buffer.messages[0].1.sequence, 0,
         "Ack sequence should match request"
+    );
+}
+
+/// Set up the server app with VoxelPlugin and ChunkGenerationEnabled so that
+/// chunk lifecycle systems (propagator, generation, despawn) run as they do in
+/// the real server. `push_chunks_to_clients` is registered separately since
+/// `ServerMapPlugin` includes too much unrelated setup for a focused test.
+fn add_voxel_server_systems(stepper: &mut CrossbeamTestStepper) {
+    use ::server::map::push_chunks_to_clients;
+    use voxel_map_engine::prelude::ChunkGenerationEnabled;
+
+    stepper
+        .server_app
+        .add_plugins(bevy::transform::TransformPlugin);
+    stepper.server_app.init_resource::<Assets<Mesh>>();
+    stepper
+        .server_app
+        .init_resource::<Assets<StandardMaterial>>();
+    stepper.server_app.add_plugins(VoxelPlugin);
+    stepper.server_app.insert_resource(ChunkGenerationEnabled);
+    stepper
+        .server_app
+        .add_systems(Update, push_chunks_to_clients);
+}
+
+/// Verify the server pushes `ChunkDataSync` to a client without any client request,
+/// purely based on `ClientChunkVisibility` and loaded chunk data.
+#[test]
+fn test_server_pushes_chunks_without_request() {
+    use ::server::map::ClientChunkVisibility;
+    use avian3d::prelude::Position;
+    use voxel_map_engine::prelude::{
+        chunk_to_column, ChunkData, ChunkTicket, FillType, PalettedChunk, TicketType, WorldVoxel,
+    };
+
+    let mut stepper = CrossbeamTestStepper::new();
+
+    add_voxel_server_systems(&mut stepper);
+    stepper
+        .client_app
+        .init_resource::<MessageBuffer<ChunkDataSync>>();
+    stepper
+        .client_app
+        .add_systems(Update, collect_messages::<ChunkDataSync>);
+
+    stepper.init();
+    assert!(
+        stepper.wait_for_connection(),
+        "Client must connect before test proceeds"
+    );
+
+    add_server_map_systems(&mut stepper);
+
+    // Spawn overworld map with a chunk at IVec3::ZERO
+    let chunk_pos = IVec3::ZERO;
+    let chunk_voxels = PalettedChunk::SingleValue(WorldVoxel::Solid(1));
+    let mut instance = VoxelMapInstance::new(3);
+    instance.insert_chunk_data(
+        chunk_pos,
+        ChunkData {
+            voxels: chunk_voxels.clone(),
+            fill_type: FillType::Uniform(WorldVoxel::Solid(1)),
+            hash: 0,
+        },
+    );
+    instance.chunk_levels.insert(chunk_to_column(chunk_pos), 0);
+
+    let map_entity = stepper
+        .server_app
+        .world_mut()
+        .spawn((
+            instance,
+            VoxelMapConfig::new(0, 0, 1, None, 3),
+            VoxelGenerator(Arc::new(flat_terrain_voxels)),
+            Transform::default(),
+            MapInstanceId::Overworld,
+        ))
+        .id();
+    stepper
+        .server_app
+        .world_mut()
+        .resource_mut::<MapRegistry>()
+        .insert(MapInstanceId::Overworld, map_entity);
+
+    // Spawn character with Position, ChunkTicket, and ClientChunkVisibility
+    let client_of = stepper.client_of_entity;
+    stepper.server_app.world_mut().spawn((
+        CharacterMarker,
+        MapInstanceId::Overworld,
+        ControlledBy {
+            owner: client_of,
+            lifetime: Default::default(),
+        },
+        Position(Vec3::new(0.0, 5.0, 0.0)),
+        ChunkTicket::new(map_entity, TicketType::Player, 10),
+        ClientChunkVisibility::default(),
+    ));
+
+    // Tick until client receives ChunkDataSync
+    let mut received = false;
+    for _ in 0..50 {
+        stepper.tick_step(1);
+        let buffer = stepper
+            .client_app
+            .world()
+            .resource::<MessageBuffer<ChunkDataSync>>();
+        if !buffer.messages.is_empty() {
+            received = true;
+            break;
+        }
+    }
+
+    assert!(
+        received,
+        "Client should receive ChunkDataSync without sending any request"
+    );
+
+    let buffer = stepper
+        .client_app
+        .world()
+        .resource::<MessageBuffer<ChunkDataSync>>();
+    let sync = &buffer.messages[0].1;
+    assert_eq!(
+        sync.chunk_pos, chunk_pos,
+        "ChunkDataSync chunk_pos must match the inserted chunk"
+    );
+    assert_eq!(
+        sync.data, chunk_voxels,
+        "ChunkDataSync data must match what was inserted"
+    );
+}
+
+/// Verify the server sends `UnloadColumn` when a player moves far away from
+/// previously-sent chunks.
+#[test]
+fn test_server_sends_unload_column_when_out_of_range() {
+    use ::server::map::ClientChunkVisibility;
+    use avian3d::prelude::Position;
+    use voxel_map_engine::prelude::{
+        chunk_to_column, ChunkData, ChunkTicket, FillType, PalettedChunk, TicketType, WorldVoxel,
+    };
+
+    let mut stepper = CrossbeamTestStepper::new();
+
+    add_voxel_server_systems(&mut stepper);
+    stepper
+        .client_app
+        .init_resource::<MessageBuffer<ChunkDataSync>>();
+    stepper
+        .client_app
+        .add_systems(Update, collect_messages::<ChunkDataSync>);
+    stepper
+        .client_app
+        .init_resource::<MessageBuffer<UnloadColumn>>();
+    stepper
+        .client_app
+        .add_systems(Update, collect_messages::<UnloadColumn>);
+
+    stepper.init();
+    assert!(
+        stepper.wait_for_connection(),
+        "Client must connect before test proceeds"
+    );
+
+    add_server_map_systems(&mut stepper);
+
+    // Spawn overworld with chunk at origin
+    let chunk_pos = IVec3::ZERO;
+    let mut instance = VoxelMapInstance::new(3);
+    instance.insert_chunk_data(
+        chunk_pos,
+        ChunkData {
+            voxels: PalettedChunk::SingleValue(WorldVoxel::Solid(1)),
+            fill_type: FillType::Uniform(WorldVoxel::Solid(1)),
+            hash: 0,
+        },
+    );
+    instance.chunk_levels.insert(chunk_to_column(chunk_pos), 0);
+
+    let map_entity = stepper
+        .server_app
+        .world_mut()
+        .spawn((
+            instance,
+            VoxelMapConfig::new(0, 0, 1, None, 3),
+            VoxelGenerator(Arc::new(flat_terrain_voxels)),
+            Transform::default(),
+            MapInstanceId::Overworld,
+        ))
+        .id();
+    stepper
+        .server_app
+        .world_mut()
+        .resource_mut::<MapRegistry>()
+        .insert(MapInstanceId::Overworld, map_entity);
+
+    // Spawn character near origin
+    let client_of = stepper.client_of_entity;
+    let character = stepper
+        .server_app
+        .world_mut()
+        .spawn((
+            CharacterMarker,
+            MapInstanceId::Overworld,
+            ControlledBy {
+                owner: client_of,
+                lifetime: Default::default(),
+            },
+            Position(Vec3::ZERO),
+            ChunkTicket::new(map_entity, TicketType::Player, 10),
+            ClientChunkVisibility::default(),
+        ))
+        .id();
+
+    // Tick until initial ChunkDataSync is received
+    let mut got_initial = false;
+    for _ in 0..50 {
+        stepper.tick_step(1);
+        let buffer = stepper
+            .client_app
+            .world()
+            .resource::<MessageBuffer<ChunkDataSync>>();
+        if !buffer.messages.is_empty() {
+            got_initial = true;
+            break;
+        }
+    }
+    assert!(got_initial, "Client must receive initial ChunkDataSync");
+
+    // Move player far away so origin column leaves range
+    stepper
+        .server_app
+        .world_mut()
+        .entity_mut(character)
+        .insert(Position(Vec3::new(10000.0, 0.0, 10000.0)));
+
+    // Tick until UnloadColumn is received
+    let mut got_unload = false;
+    for _ in 0..50 {
+        stepper.tick_step(1);
+        let buffer = stepper
+            .client_app
+            .world()
+            .resource::<MessageBuffer<UnloadColumn>>();
+        if !buffer.messages.is_empty() {
+            got_unload = true;
+            break;
+        }
+    }
+
+    assert!(
+        got_unload,
+        "Client should receive UnloadColumn after player moves out of range"
+    );
+
+    let buffer = stepper
+        .client_app
+        .world()
+        .resource::<MessageBuffer<UnloadColumn>>();
+    assert_eq!(
+        buffer.messages[0].1.column,
+        IVec2::ZERO,
+        "Unloaded column should be the origin column"
     );
 }

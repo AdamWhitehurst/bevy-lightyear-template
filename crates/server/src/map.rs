@@ -648,7 +648,7 @@ pub struct ClientChunkVisibility {
 
 /// Server system: for each connected player, compare their ticket's loaded columns
 /// against what we've already sent. Push new chunks, send unload for removed.
-fn push_chunks_to_clients(
+pub fn push_chunks_to_clients(
     mut player_query: Query<(
         &ChunkTicket,
         &ControlledBy,
