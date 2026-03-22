@@ -18,3 +18,10 @@
 - Singleplayer
 - Stats and Buffs
 - Npc interaction authoring via asset file writing
+- /spec:commit - submit commit
+- NPCs (world objects?)
+- Inventory/Item system
+- animation creation still
+- animation editor ui
+- world object editor ui
+- map editor ui
