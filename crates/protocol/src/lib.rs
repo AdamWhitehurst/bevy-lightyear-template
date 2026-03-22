@@ -37,11 +37,11 @@ pub use hit_detection::{
     projectile_collision_layers, terrain_collision_layers, GameLayer,
 };
 pub use map::{
-    attach_chunk_colliders, ChunkChannel, ChunkDataSync, ChunkRequest, MapChannel, MapInstanceId,
-    MapRegistry, MapSaveTarget, MapSwitchTarget, MapTransitionEnd, MapTransitionReady,
-    MapTransitionStart, PendingTransition, PlayerMapSwitchRequest, SavedEntity, SavedEntityKind,
-    SectionBlocksUpdate, TransitionReadySent, VoxelChannel, VoxelChunk, VoxelEditAck,
-    VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
+    attach_chunk_colliders, ChunkChannel, ChunkDataSync, MapChannel, MapInstanceId, MapRegistry,
+    MapSaveTarget, MapSwitchTarget, MapTransitionEnd, MapTransitionReady, MapTransitionStart,
+    PendingTransition, PlayerMapSwitchRequest, SavedEntity, SavedEntityKind, SectionBlocksUpdate,
+    TransitionReadySent, UnloadColumn, VoxelChannel, VoxelChunk, VoxelEditAck, VoxelEditBroadcast,
+    VoxelEditReject, VoxelEditRequest, VoxelType,
 };
 pub use terrain::{TerrainDefRegistry, TerrainPlugin};
 pub use vox_model::{VoxModelAsset, VoxModelPlugin, VoxModelRegistry};
@@ -113,13 +113,13 @@ impl Plugin for ProtocolPlugin {
             mode: ChannelMode::UnorderedReliable(ReliableSettings::default()),
             ..default()
         })
-        .add_direction(NetworkDirection::Bidirectional);
+        .add_direction(NetworkDirection::ServerToClient);
 
         // Chunk streaming messages
         app.register_message::<ChunkDataSync>()
             .add_direction(NetworkDirection::ServerToClient);
-        app.register_message::<ChunkRequest>()
-            .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<UnloadColumn>()
+            .add_direction(NetworkDirection::ServerToClient);
 
         // Map transition channel
         app.add_channel::<MapChannel>(ChannelSettings {

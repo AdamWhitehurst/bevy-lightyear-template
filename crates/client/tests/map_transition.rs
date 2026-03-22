@@ -3,7 +3,6 @@ use std::sync::Arc;
 use avian3d::prelude::{ColliderDisabled, RigidBodyDisabled};
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
-use client::map::ClientChunkState;
 use lightyear::prelude::{Controlled, DisableRollback, Predicted};
 use protocol::map::TransitionReadySent;
 use protocol::PendingTransition;
@@ -38,7 +37,6 @@ fn spawn_map(app: &mut App) -> Entity {
             VoxelGenerator(Arc::new(flat_terrain_voxels)),
             Transform::default(),
             MapInstanceId::Overworld,
-            ClientChunkState::default(),
         ))
         .id();
     app.world_mut()

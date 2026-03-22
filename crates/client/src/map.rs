@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use avian3d::prelude::{ColliderDisabled, LinearVelocity, Position, RigidBodyDisabled};
@@ -7,28 +6,25 @@ use leafwing_input_manager::prelude::*;
 use lightyear::prelude::{Controlled, DisableRollback, MessageReceiver, MessageSender, Predicted};
 use protocol::map::{MapChannel, MapTransitionEnd, MapTransitionReady, MapTransitionStart};
 use protocol::{
-    CharacterMarker, ChunkChannel, ChunkDataSync, ChunkRequest, MapInstanceId, MapRegistry,
-    PendingTransition, PlayerActions, SectionBlocksUpdate, TransitionReadySent, VoxelChannel,
-    VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
+    CharacterMarker, ChunkDataSync, MapInstanceId, MapRegistry, PendingTransition, PlayerActions,
+    SectionBlocksUpdate, TransitionReadySent, UnloadColumn, VoxelChannel, VoxelEditAck,
+    VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
 };
 use ui::MapTransitionState;
 use voxel_map_engine::prelude::{
-    chunk_to_column, flat_terrain_voxels, mesh_chunk_greedy, ChunkData, ChunkTicket,
-    DefaultVoxelMaterial, VoxelChunk, VoxelGenerator, VoxelMapConfig, VoxelMapInstance,
-    VoxelPlugin, VoxelWorld, WorldVoxel,
+    chunk_to_column, column_to_chunks, flat_terrain_voxels, mesh_chunk_greedy, ChunkData,
+    ChunkTicket, DefaultVoxelMaterial, VoxelChunk, VoxelGenerator, VoxelMapConfig,
+    VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel, DEFAULT_COLUMN_Y_MAX,
+    DEFAULT_COLUMN_Y_MIN,
 };
 
 const RAYCAST_MAX_DISTANCE: f32 = 100.0;
 
-/// How often (in seconds) to retry requesting chunks that haven't arrived.
-const CHUNK_REQUEST_RETRY_INTERVAL: f32 = 0.1;
-
-/// Tracks in-flight chunk requests to avoid duplicate sends.
-#[derive(Component, Default)]
-pub struct ClientChunkState {
-    pending_requests: HashSet<IVec3>,
-    retry_timer: f32,
-}
+/// Buffers ChunkDataSync messages that arrive before the client player is ready.
+/// Lightyear clears MessageReceiver each frame in Last, so we must drain and
+/// hold messages ourselves until the predicted player entity has a ChunkTicket.
+#[derive(Resource, Default)]
+struct ChunkDataSyncBuffer(Vec<ChunkDataSync>);
 
 /// Tracks pending predictions for block edits awaiting server acknowledgment.
 #[derive(Resource, Default)]
@@ -62,6 +58,7 @@ impl Plugin for ClientMapPlugin {
         app.add_plugins(VoxelPlugin)
             .init_resource::<MapRegistry>()
             .init_resource::<VoxelPredictionState>()
+            .init_resource::<ChunkDataSyncBuffer>()
             .add_systems(Startup, spawn_overworld)
             .add_systems(
                 Update,
@@ -71,8 +68,8 @@ impl Plugin for ClientMapPlugin {
                     handle_section_blocks_update,
                     handle_voxel_edit_ack,
                     handle_voxel_edit_reject,
-                    request_missing_chunks,
                     handle_chunk_data_sync,
+                    handle_unload_column,
                     protocol::attach_chunk_colliders,
                 )
                     .run_if(in_state(ui::ClientState::InGame)),
@@ -105,7 +102,6 @@ fn spawn_overworld(mut commands: Commands, mut registry: ResMut<MapRegistry>) {
             VoxelMapInstance::new(5),
             config,
             VoxelGenerator(Arc::new(flat_terrain_voxels)),
-            ClientChunkState::default(),
             Transform::default(),
             MapInstanceId::Overworld,
         ))
@@ -131,163 +127,127 @@ fn attach_chunk_ticket_to_player(
     }
 }
 
-/// Requests chunks from server that the client needs but doesn't have.
-fn request_missing_chunks(
-    mut chunk_state_query: Query<&mut ClientChunkState>,
-    chunk_tickets: Query<
-        (&ChunkTicket, &Position),
-        (With<Predicted>, With<CharacterMarker>, With<Controlled>),
-    >,
-    map_query: Query<(&VoxelMapInstance, &VoxelMapConfig)>,
-    mut senders: Query<&mut MessageSender<ChunkRequest>>,
-    time: Res<Time>,
-) {
-    let Ok((ticket, pos)) = chunk_tickets.single() else {
-        trace!("request_missing_chunks: no predicted player with ChunkTicket + Position");
-        return;
-    };
-    let Ok((instance, config)) = map_query.get(ticket.map_entity) else {
-        trace!(
-            "request_missing_chunks: map entity {:?} missing VoxelMapInstance or VoxelMapConfig",
-            ticket.map_entity
-        );
-        return;
-    };
-    let Ok(mut state) = chunk_state_query.get_mut(ticket.map_entity) else {
-        trace!(
-            "request_missing_chunks: map entity {:?} missing ClientChunkState",
-            ticket.map_entity
-        );
-        return;
-    };
-
-    // Periodically clear pending requests so unfulfilled ones get retried.
-    state.retry_timer += time.delta_secs();
-    if state.retry_timer >= CHUNK_REQUEST_RETRY_INTERVAL {
-        state.retry_timer = 0.0;
-        state.pending_requests.clear();
-    }
-
-    let chunk_pos = (pos.0 / 16.0).floor().as_ivec3();
-    let col = IVec2::new(chunk_pos.x, chunk_pos.z);
-    let radius = ticket.radius as i32;
-    let mut desired = HashSet::new();
-    for dx in -radius..=radius {
-        for dz in -radius..=radius {
-            let target_col = col + IVec2::new(dx, dz);
-            let distance = dx.abs().max(dz.abs()) as u32;
-            let level = ticket.ticket_type.base_level() + distance;
-            if level > voxel_map_engine::prelude::LOAD_LEVEL_THRESHOLD {
-                continue;
-            }
-            for p in voxel_map_engine::prelude::column_to_chunks(
-                target_col,
-                voxel_map_engine::prelude::DEFAULT_COLUMN_Y_MIN,
-                voxel_map_engine::prelude::DEFAULT_COLUMN_Y_MAX,
-            ) {
-                if config.bounds.map_or(true, |b| {
-                    p.x.abs() < b.x && p.y.abs() < b.y && p.z.abs() < b.z
-                }) {
-                    desired.insert(p);
-                }
-            }
-        }
-    }
-
-    for &chunk_pos in &desired {
-        if instance
-            .chunk_levels
-            .contains_key(&chunk_to_column(chunk_pos))
-        {
-            continue;
-        }
-        if state.pending_requests.contains(&chunk_pos) {
-            continue;
-        }
-
-        for mut sender in senders.iter_mut() {
-            sender.send::<ChunkChannel>(ChunkRequest { chunk_pos });
-        }
-        state.pending_requests.insert(chunk_pos);
-    }
-
-    state.pending_requests.retain(|pos| desired.contains(pos));
-}
-
 /// Receives chunk data from server and inserts into the local VoxelMapInstance.
+/// If the predicted player isn't ready yet, buffers messages in `PendingChunkSyncs`
+/// since Lightyear clears MessageReceiver each frame.
 fn handle_chunk_data_sync(
     mut commands: Commands,
     mut receivers: Query<&mut MessageReceiver<ChunkDataSync>>,
     mut map_query: Query<(Entity, &mut VoxelMapInstance)>,
-    mut chunk_state_query: Query<&mut ClientChunkState>,
     player_query: Query<&ChunkTicket, (With<Predicted>, With<CharacterMarker>, With<Controlled>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     default_material: Res<DefaultVoxelMaterial>,
+    mut buffer: Local<ChunkDataSyncBuffer>,
 ) {
+    // Always drain network messages — they'll be lost at end of frame regardless.
+    let mut incoming: Vec<ChunkDataSync> = Vec::new();
+    for mut receiver in &mut receivers {
+        incoming.extend(receiver.receive());
+    }
+
     let Ok(chunk_ticket) = player_query.single() else {
-        trace!("handle_chunk_data_sync: no predicted player with ChunkTicket");
+        if !incoming.is_empty() {
+            trace!(
+                "handle_chunk_data_sync: buffering {} messages (no predicted player with ChunkTicket yet)",
+                incoming.len()
+            );
+            buffer.0.extend(incoming);
+        }
         return;
     };
     let Ok((map_entity, mut instance)) = map_query.get_mut(chunk_ticket.map_entity) else {
-        trace!(
-            "handle_chunk_data_sync: map entity {:?} missing VoxelMapInstance",
-            chunk_ticket.map_entity
-        );
+        if !incoming.is_empty() {
+            trace!(
+                "handle_chunk_data_sync: buffering {} messages (map entity {:?} not ready)",
+                incoming.len(),
+                chunk_ticket.map_entity
+            );
+            buffer.0.extend(incoming);
+        }
         return;
     };
-    let Ok(mut chunk_state) = chunk_state_query.get_mut(chunk_ticket.map_entity) else {
+
+    let all_syncs = buffer.0.drain(..).chain(incoming);
+
+    for sync in all_syncs {
+        let voxels = sync.data.to_voxels();
+        let chunk_data = ChunkData::from_voxels(&voxels);
+
+        instance.insert_chunk_data(sync.chunk_pos, chunk_data);
+        instance
+            .chunk_levels
+            .entry(chunk_to_column(sync.chunk_pos))
+            .or_insert(0);
+
+        let Some(mesh) = mesh_chunk_greedy(&voxels) else {
+            continue;
+        };
+        let mesh_handle = meshes.add(mesh);
+        let offset = sync.chunk_pos.as_vec3() * 16.0 - Vec3::ONE;
+        let material = if instance.debug_colors {
+            let hash = (sync.chunk_pos.x.wrapping_mul(73856093))
+                ^ (sync.chunk_pos.y.wrapping_mul(19349663))
+                ^ (sync.chunk_pos.z.wrapping_mul(83492791));
+            let hue = ((hash as u32) % 360) as f32;
+            materials.add(StandardMaterial {
+                base_color: Color::hsl(hue, 0.5, 0.5),
+                perceptual_roughness: 0.9,
+                ..default()
+            })
+        } else {
+            default_material.0.clone()
+        };
+
+        let chunk_entity = commands
+            .spawn((
+                VoxelChunk {
+                    position: sync.chunk_pos,
+                    lod_level: 0,
+                },
+                Mesh3d(mesh_handle),
+                MeshMaterial3d(material),
+                Transform::from_translation(offset),
+            ))
+            .id();
+        commands.entity(map_entity).add_child(chunk_entity);
+    }
+}
+
+/// Handle server's UnloadColumn message — remove chunk data for all chunks in the column.
+/// Mesh entity cleanup is handled by the existing `despawn_out_of_range_chunks` system
+/// which checks `chunk_levels.contains_key()`.
+fn handle_unload_column(
+    mut receivers: Query<&mut MessageReceiver<UnloadColumn>>,
+    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    mut map_query: Query<&mut VoxelMapInstance>,
+) {
+    let Ok(ticket) = player_query.single() else {
+        // No predicted player during startup or map transition teardown — drain messages.
+        for mut receiver in &mut receivers {
+            for _ in receiver.receive() {}
+        }
+        trace!("handle_unload_column: no predicted controlled player");
+        return;
+    };
+    let Ok(mut instance) = map_query.get_mut(ticket.map_entity) else {
+        for mut receiver in &mut receivers {
+            for _ in receiver.receive() {}
+        }
         trace!(
-            "handle_chunk_data_sync: map entity {:?} missing ClientChunkState",
-            chunk_ticket.map_entity
+            "handle_unload_column: map entity {:?} not found",
+            ticket.map_entity
         );
         return;
     };
 
     for mut receiver in &mut receivers {
-        for sync in receiver.receive() {
-            let voxels = sync.data.to_voxels();
-            let chunk_data = ChunkData::from_voxels(&voxels);
-
-            instance.insert_chunk_data(sync.chunk_pos, chunk_data);
-            instance
-                .chunk_levels
-                .entry(chunk_to_column(sync.chunk_pos))
-                .or_insert(0);
-
-            chunk_state.pending_requests.remove(&sync.chunk_pos);
-
-            let Some(mesh) = mesh_chunk_greedy(&voxels) else {
-                continue;
-            };
-            let mesh_handle = meshes.add(mesh);
-            let offset = sync.chunk_pos.as_vec3() * 16.0 - Vec3::ONE;
-            let material = if instance.debug_colors {
-                let hash = (sync.chunk_pos.x.wrapping_mul(73856093))
-                    ^ (sync.chunk_pos.y.wrapping_mul(19349663))
-                    ^ (sync.chunk_pos.z.wrapping_mul(83492791));
-                let hue = ((hash as u32) % 360) as f32;
-                materials.add(StandardMaterial {
-                    base_color: Color::hsl(hue, 0.5, 0.5),
-                    perceptual_roughness: 0.9,
-                    ..default()
-                })
-            } else {
-                default_material.0.clone()
-            };
-
-            let chunk_entity = commands
-                .spawn((
-                    VoxelChunk {
-                        position: sync.chunk_pos,
-                        lod_level: 0,
-                    },
-                    Mesh3d(mesh_handle),
-                    MeshMaterial3d(material),
-                    Transform::from_translation(offset),
-                ))
-                .id();
-            commands.entity(map_entity).add_child(chunk_entity);
+        for unload in receiver.receive() {
+            let col = unload.column;
+            for chunk_pos in column_to_chunks(col, DEFAULT_COLUMN_Y_MIN, DEFAULT_COLUMN_Y_MAX) {
+                instance.remove_chunk_data(chunk_pos);
+            }
+            instance.chunk_levels.remove(&col);
         }
     }
 }
@@ -584,7 +544,6 @@ fn spawn_map_instance(
             VoxelMapInstance::new(tree_height),
             config,
             generator,
-            ClientChunkState::default(),
             Transform::default(),
             map_id.clone(),
         ))

@@ -16,6 +16,12 @@ pub mod types;
 
 use bevy::prelude::*;
 
+/// Insert this resource to enable chunk generation systems (propagator,
+/// task spawning/polling). Servers insert this; clients omit it since
+/// they receive chunks via network push.
+#[derive(Resource)]
+pub struct ChunkGenerationEnabled;
+
 pub struct VoxelPlugin;
 
 impl Plugin for VoxelPlugin {
@@ -28,13 +34,14 @@ impl Plugin for VoxelPlugin {
         app.register_type::<terrain::NoiseType>();
         app.register_type::<terrain::FractalType>();
 
+        let generation_enabled = resource_exists::<ChunkGenerationEnabled>;
+
         app.add_systems(Startup, lifecycle::init_default_material);
         app.add_systems(
             Update,
             (
                 lifecycle::ensure_pending_chunks,
-                lifecycle::update_chunks,
-                lifecycle::poll_chunk_tasks,
+                (lifecycle::update_chunks, lifecycle::poll_chunk_tasks).run_if(generation_enabled),
                 lifecycle::despawn_out_of_range_chunks,
                 lifecycle::spawn_remesh_tasks,
                 lifecycle::poll_remesh_tasks,
@@ -45,7 +52,6 @@ impl Plugin for VoxelPlugin {
 }
 
 pub mod prelude {
-    pub use crate::VoxelPlugin;
     pub use crate::api::*;
     pub use crate::chunk::*;
     pub use crate::config::*;
@@ -60,4 +66,5 @@ pub mod prelude {
     pub use crate::terrain::*;
     pub use crate::ticket::*;
     pub use crate::types::*;
+    pub use crate::{ChunkGenerationEnabled, VoxelPlugin};
 }

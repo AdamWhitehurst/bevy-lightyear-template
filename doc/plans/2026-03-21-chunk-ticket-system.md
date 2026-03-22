@@ -1203,190 +1203,88 @@ Replace the client-request chunk protocol (`ChunkRequest`/`request_missing_chunk
 
 This resolves the architectural mismatch where the client independently computed desired chunks. Now only the server runs the propagator and makes all loading decisions.
 
-### Changes Required:
+### Changes Implemented:
 
-#### 1. New server system: `push_chunks_to_clients`
+#### 1. `ChunkGenerationEnabled` resource gate
+**File**: `crates/voxel_map_engine/src/lib.rs`
+
+Added `ChunkGenerationEnabled` marker resource. `VoxelPlugin` gates `update_chunks` and `poll_chunk_tasks` behind `run_if(resource_exists::<ChunkGenerationEnabled>)`. The server inserts this resource; the client does not. This prevents the client-side propagator from running and fighting with server-pushed data.
+
+Systems that still run on client (needed for mesh cleanup and voxel edit remeshing):
+- `ensure_pending_chunks`
+- `despawn_out_of_range_chunks`
+- `spawn_remesh_tasks` / `poll_remesh_tasks`
+
+#### 2. New server system: `push_chunks_to_clients`
 **File**: `crates/server/src/map.rs`
 
-Per player, track which columns have been sent. When new columns enter the loaded range (from the server's `TicketLevelPropagator`), send their chunk data. When columns leave, send unload.
+Tracks sent state at the **individual chunk level** (IVec3), not column level. This is critical because chunk generation is async — chunks within a column generate at different times. Each frame, the system iterates all columns in the player's loaded range and sends any chunks that have data but haven't been sent yet. This allows newly generated chunks to be sent as they become available.
 
-```rust
-/// Per-player tracking of which chunk columns have been sent to the client.
-#[derive(Component, Default)]
-pub struct ClientChunkVisibility {
-    /// Columns whose chunk data has been sent to this client.
-    sent_columns: HashSet<IVec2>,
-}
+`ClientChunkVisibility` component tracks:
+- `sent_chunks: HashSet<IVec3>` — individual chunks whose data has been sent
+- `sent_columns: HashSet<IVec2>` — columns the client believes are loaded (for UnloadColumn)
 
-/// Server system: for each connected player, compare their ticket's loaded columns
-/// against what we've already sent. Push new chunks, send unload for removed.
-fn push_chunks_to_clients(
-    player_query: Query<(Entity, &ChunkTicket, &GlobalTransform, &mut ClientChunkVisibility)>,
-    map_query: Query<(&VoxelMapInstance, &VoxelMapConfig, &GlobalTransform), Without<ClientChunkVisibility>>,
-    // MessageSender for ChunkDataSync and UnloadColumn
-) {
-    let _span = info_span!("push_chunks_to_clients").entered();
-    let mut pushed = 0u32;
-    let mut unloaded = 0u32;
+When columns leave the loaded range, sends `UnloadColumn` and clears per-chunk tracking.
 
-    for (player_entity, ticket, player_transform, mut visibility) in &player_query {
-        let (instance, config, map_transform) = map_query.get(ticket.map_entity).expect(
-            "push_chunks_to_clients: player ticket references non-existent map"
-        );
-
-        // %% [SUGGESTION] Elegance — this recomputes the same Chebyshev column iteration that the propagator already did. Consider exposing per-source loaded columns from `TicketLevelPropagator` (e.g., via LevelDiff per entity) instead of re-deriving visibility from scratch. This would also avoid the `world_to_column_pos` dependency issue.
-        // Compute per-player visible columns from this player's ticket position and radius.
-        // Only send columns within this player's loaded range, not the entire map's chunk_levels.
-        let map_inv = map_transform.affine().inverse();
-        let local_pos = map_inv.transform_point3(player_transform.translation());
-        let player_col = world_to_column_pos(local_pos);
-        // %% [VIOLATION] Coherence — `world_to_column_pos` is defined in Phase 3 as a private fn in `lifecycle.rs`. This system lives in `crates/server/src/map.rs` and cannot access it. Either make it `pub` and re-export from the crate, or define it in `ticket.rs` alongside `chunk_to_column`/`column_to_chunks`.
-        let radius = ticket.radius as i32;
-        let mut current_columns = HashSet::new();
-        for dx in -radius..=radius {
-            for dz in -radius..=radius {
-                let col = player_col + IVec2::new(dx, dz);
-                let distance = dx.abs().max(dz.abs()) as u32;
-                let level = ticket.ticket_type.base_level() + distance;
-                if level > LOAD_LEVEL_THRESHOLD { continue; }
-                // Only include if the map actually has data for this column
-                if instance.chunk_levels.contains_key(&col) {
-                    current_columns.insert(col);
-                }
-            }
-        }
-
-        // New columns to send
-        for &col in current_columns.difference(&visibility.sent_columns) {
-            // %% [VIOLATION] Coherence — `y_min` and `y_max` are used below but never defined in this function. Should use `DEFAULT_COLUMN_Y_MIN` / `DEFAULT_COLUMN_Y_MAX` from `ticket.rs`, or derive from config.
-            for chunk_pos in column_to_chunks(col, y_min, y_max) {
-                if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
-                    // Send ChunkDataSync to this player
-                }
-            }
-            visibility.sent_columns.insert(col);
-        }
-
-        // Columns to unload on client
-        for &col in visibility.sent_columns.difference(&current_columns) {
-            // Send UnloadColumn to this player
-        }
-        visibility.sent_columns.retain(|col| current_columns.contains(col));
-    }
-}
-```
-
-After the loop:
-```rust
-    plot!(plot_name!("chunks_pushed_this_frame"), pushed as f64);
-    plot!(plot_name!("columns_unloaded_this_frame"), unloaded as f64);
-```
-#### 2. New protocol message: `UnloadColumn`
+#### 3. New protocol message: `UnloadColumn`
 **File**: `crates/protocol/src/map/chunk.rs`
 
-```rust
-/// Server → client: tells client to drop all chunks in a column.
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct UnloadColumn {
-    pub column: IVec2,
-}
-```
+Server → client message telling client to drop all chunks in a column. Registered on `ChunkChannel` as `ServerToClient`.
 
-Register on `ChunkChannel` alongside `ChunkDataSync`.
+#### 4. `ChunkChannel` direction changed to `ServerToClient`
+**File**: `crates/protocol/src/lib.rs`
 
-#### 3. Insert `ClientChunkVisibility` on player spawn
+Was `Bidirectional` (needed for `ChunkRequest`). Now `ServerToClient` only.
+
+#### 5. `ClientChunkVisibility` inserted on player spawn
 **File**: `crates/server/src/gameplay.rs`
 
-When spawning a player character, also insert `ClientChunkVisibility::default()`.
+#### 6. Removed `ChunkRequest`, `handle_chunk_requests`, `request_missing_chunks`, `ClientChunkState`
+- `ChunkRequest` struct deleted from protocol
+- `handle_chunk_requests` system deleted from server
+- `request_missing_chunks` system deleted from client
+- `ClientChunkState` component deleted from client
+- All registrations and imports cleaned up
 
-#### 4. Remove `ChunkRequest` message type
-**File**: `crates/protocol/src/map/chunk.rs`
-
-Delete the `ChunkRequest` struct. Remove its registration from `crates/protocol/src/lib.rs:121`.
-
-#### 5. Remove `handle_chunk_requests` on server
-**File**: `crates/server/src/map.rs:640-685`
-
-Delete the system entirely. It's replaced by `push_chunks_to_clients`.
-
-#### 6. Remove `request_missing_chunks` on client
-**File**: `crates/client/src/map.rs:135-202`
-
-Delete the system entirely. The client no longer requests chunks.
-
-#### 7. Remove `ClientChunkState` on client
-**File**: `crates/client/src/map.rs:27-31`
-
-Delete the `ClientChunkState` component (it tracked `pending_requests` and `retry_timer` for the request model). Remove its insertion from `spawn_overworld` and `spawn_map_instance`.
-
-#### 8. Add `handle_unload_column` on client
+#### 7. `handle_unload_column` on client
 **File**: `crates/client/src/map.rs`
 
-```rust
-/// Handle server's UnloadColumn message — remove chunk data for all chunks in the column.
-/// Mesh entity cleanup is handled by the existing `despawn_out_of_range_chunks` system
-/// which checks `chunk_levels.contains_key()`.
-%% [VIOLATION] Coherence — `MessageReceiver` in Lightyear takes a single type param and is queried via `Query`, not used as a direct system param. All existing handlers in this project use `Query<&mut MessageReceiver<M>>` or `Query<(Entity, &mut MessageReceiver<M>)>`. There is no `ChunkChannel` type param. See `crates/client/src/map.rs:207` for the existing pattern.
-fn handle_unload_column(
-    mut receiver: MessageReceiver<UnloadColumn, ChunkChannel>,
-    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
-    mut map_query: Query<&mut VoxelMapInstance>,
-) {
-    // Resolve map_entity from the player's ticket — the client has one predicted player
-    // whose ticket points to the current map. UnloadColumn doesn't carry map_entity
-    // because the client is only connected to one map at a time.
-    // %% [SUGGESTION] Rules — CLAUDE.md System Design: if no predicted player exists (e.g., during map transition teardown), this panics. Consider a trace + early return for the expected-missing case, since the client player entity may not exist during transitions.
-    let ticket = player_query.single().expect(
-        "handle_unload_column: expected exactly one predicted controlled player"
-    );
-    let Ok(mut instance) = map_query.get_mut(ticket.map_entity) else {
-        trace!("handle_unload_column: map entity {:?} not found", ticket.map_entity);
-        receiver.drain();
-        return;
-    };
+Handles `UnloadColumn` messages by removing chunk data from octree and `chunk_levels` entry. Mesh entity cleanup handled by existing `despawn_out_of_range_chunks`. Gracefully handles missing player (during transitions) with trace + early return, draining messages to prevent queue buildup.
 
-    let y_min = DEFAULT_COLUMN_Y_MIN;
-    let y_max = DEFAULT_COLUMN_Y_MAX;
-
-    for msg in receiver.drain() {
-        let col = msg.column;
-        for chunk_pos in column_to_chunks(col, y_min, y_max) {
-            instance.remove_chunk_data(chunk_pos);
-        }
-        instance.chunk_levels.remove(&col);
-    }
-}
-```
-
-#### 9. Simplify client `handle_chunk_data_sync`
-**File**: `crates/client/src/map.rs:205-277`
-
-The system stays largely the same (receives chunks, inserts into octree, spawns meshes). Only remove the `pending_requests` tracking since there are no pending requests anymore.
-
-#### 10. Update map transition flow
+#### 8. `ChunkDataSyncBuffer` on client
 **File**: `crates/client/src/map.rs`
 
-`check_transition_chunks_loaded` still works: it checks `instance.chunk_levels.is_empty()`. The server pushes chunks for the new map as soon as the player's ticket points to it, so the client will receive chunks and populate `chunk_levels` without requesting.
+Lightyear clears `MessageReceiver` buffers every frame in `Last`, regardless of whether `receive()` was called. Chunks arriving before the predicted player entity has a `ChunkTicket` would be lost. `handle_chunk_data_sync` drains messages into a `Local<ChunkDataSyncBuffer>` and replays them once the player is ready.
 
-#### 11. Update tests
+#### 9. Simplified client `handle_chunk_data_sync`
+Removed `ClientChunkState`/`pending_requests` tracking. Added `ChunkDataSyncBuffer` parameter for early-arrival buffering.
 
-**`crates/server/tests/integration.rs`**:
-- Remove `test_client_requests_chunk_and_receives_data` (tests `ChunkRequest` roundtrip — no longer applicable)
-- Add new test: `test_server_pushes_chunks_to_connected_client` — verify that after player spawns and chunks generate, the client receives `ChunkDataSync` without sending any requests
+#### 10. Updated tests
+- Removed `test_client_requests_chunk_and_receives_data` from integration tests
+- Removed `ClientChunkState` from `map_transition.rs` test helpers
+- Added `ChunkGenerationEnabled` to all test apps and examples that use `VoxelPlugin`
+
+### Bugs Found During Implementation:
+
+1. **Client propagator fighting server push** — `VoxelPlugin` registered `update_chunks` on both server and client. On the client, the propagator called `remove_column_chunks` which deleted octree data and `chunk_levels` entries that the server had just pushed. Fixed by gating with `ChunkGenerationEnabled`.
+
+2. **Lightyear message loss** — `MessageReceiver` is cleared every frame in `Last`. Chunks arriving before the predicted player had a `ChunkTicket` were silently dropped. Fixed with `ChunkDataSyncBuffer`.
+
+3. **Column-level vs chunk-level tracking** — Original design tracked sent *columns* (IVec2), but chunk generation is async per-chunk (IVec3). A column marked "sent" when partially generated would never get remaining chunks re-sent. Fixed by tracking individual chunks.
 
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all` passes
-- [ ] `cargo test-all` passes
-- [ ] `cargo server` builds and runs
-- [ ] `cargo client -c 1` builds and runs
+- [x] `cargo check-all` passes
+- [x] `cargo test-all` passes
+- [x] `cargo server` builds and runs
+- [x] `cargo client -c 1` builds and runs
 
 #### Manual Verification:
-- [ ] Client receives chunks automatically upon connecting — no manual request
-- [ ] Walking to edge of loaded area: new chunks arrive from server automatically
+- [x] Client receives chunks automatically upon connecting — no manual request
+- [x] Walking to edge of loaded area: new chunks arrive from server automatically
 - [ ] Map transition: chunks for new map arrive without client requesting
-- [ ] Verify no `ChunkRequest` references remain in codebase (grep)
+- [x] Verify no `ChunkRequest` references remain in codebase (grep)
 
 ---
 

@@ -7,7 +7,7 @@ use lightyear::prelude::server::ClientOf;
 use lightyear::prelude::*;
 use protocol::*;
 
-use crate::map::load_startup_entities;
+use crate::map::{load_startup_entities, ClientChunkVisibility};
 use crate::world_object::spawn_world_object;
 use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
 use voxel_map_engine::prelude::ChunkTicket;
@@ -315,6 +315,7 @@ fn handle_connected(
             RespawnTimerConfig::default(),
             AbilityCooldowns::default(),
             ChunkTicket::player(registry.get(&MapInstanceId::Overworld)),
+            ClientChunkVisibility::default(),
         ));
 
     let room = room_registry.get_or_create(&MapInstanceId::Overworld, &mut commands);

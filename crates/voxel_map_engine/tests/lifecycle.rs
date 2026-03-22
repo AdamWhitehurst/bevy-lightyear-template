@@ -10,6 +10,7 @@ fn test_app() -> App {
     app.init_resource::<Assets<Mesh>>();
     app.init_resource::<Assets<StandardMaterial>>();
     app.add_plugins(VoxelPlugin);
+    app.insert_resource(ChunkGenerationEnabled);
     app
 }
 

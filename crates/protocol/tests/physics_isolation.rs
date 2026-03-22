@@ -133,6 +133,7 @@ fn chunk_target_derived_from_map_registry() {
     app.init_resource::<Assets<Mesh>>();
     app.init_resource::<Assets<StandardMaterial>>();
     app.add_plugins(VoxelPlugin);
+    app.insert_resource(voxel_map_engine::ChunkGenerationEnabled);
     app.init_resource::<MapRegistry>();
 
     let generator = VoxelGenerator(Arc::new(flat_terrain_voxels));
@@ -233,6 +234,7 @@ fn chunk_colliders_inherit_map_instance_id() {
     app.add_plugins(bevy::mesh::MeshPlugin);
     app.init_resource::<Assets<StandardMaterial>>();
     app.add_plugins(VoxelPlugin);
+    app.insert_resource(voxel_map_engine::ChunkGenerationEnabled);
     app.add_plugins(PhysicsPlugins::default().with_collision_hooks::<MapCollisionHooks>());
     app.add_systems(Update, attach_chunk_colliders);
     app.init_resource::<MapRegistry>();

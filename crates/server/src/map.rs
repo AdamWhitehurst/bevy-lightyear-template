@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use avian3d::prelude::{ColliderDisabled, Position, RigidBodyDisabled};
@@ -13,14 +13,14 @@ use protocol::map::{
     PlayerMapSwitchRequest,
 };
 use protocol::{
-    CharacterMarker, ChunkChannel, ChunkDataSync, ChunkRequest, MapInstanceId, MapRegistry,
-    PendingTransition, SectionBlocksUpdate, VoxelChannel, VoxelEditAck, VoxelEditBroadcast,
+    CharacterMarker, ChunkChannel, ChunkDataSync, MapInstanceId, MapRegistry, PendingTransition,
+    SectionBlocksUpdate, UnloadColumn, VoxelChannel, VoxelEditAck, VoxelEditBroadcast,
     VoxelEditReject, VoxelEditRequest, VoxelType,
 };
 use voxel_map_engine::lifecycle;
 use voxel_map_engine::prelude::{
-    build_generator, chunk_to_column, seed_from_id, ChunkTicket, VoxelGenerator, VoxelMapConfig,
-    VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
+    build_generator, seed_from_id, ChunkTicket, VoxelGenerator, VoxelMapConfig, VoxelMapInstance,
+    VoxelPlugin, VoxelWorld, WorldVoxel,
 };
 
 use crate::persistence::{
@@ -410,6 +410,7 @@ impl Plugin for ServerMapPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(lightyear::prelude::RoomPlugin)
             .add_plugins(VoxelPlugin)
+            .insert_resource(voxel_map_engine::ChunkGenerationEnabled)
             .init_resource::<MapRegistry>()
             .init_resource::<RoomRegistry>()
             .init_resource::<WorldDirtyState>()
@@ -430,7 +431,7 @@ impl Plugin for ServerMapPlugin {
                 Update,
                 (
                     (handle_voxel_edit_requests, flush_voxel_broadcasts).chain(),
-                    handle_chunk_requests,
+                    push_chunks_to_clients,
                     save_dirty_chunks_debounced,
                     handle_map_switch_requests,
                     handle_map_transition_ready,
@@ -636,54 +637,104 @@ pub fn flush_voxel_broadcasts(
     }
 }
 
-/// Handles client chunk requests — sends chunk data if available.
-pub fn handle_chunk_requests(
-    mut receivers: Query<(Entity, &mut MessageReceiver<ChunkRequest>)>,
-    mut senders: Query<&mut MessageSender<ChunkDataSync>>,
-    controlled_query: Query<(&ControlledBy, &MapInstanceId), With<CharacterMarker>>,
-    map_registry: Res<MapRegistry>,
+/// Per-player tracking of which chunks have been sent to the client.
+#[derive(Component, Default)]
+pub struct ClientChunkVisibility {
+    /// Individual chunks (IVec3) whose data has been sent.
+    sent_chunks: HashSet<IVec3>,
+    /// Columns the client believes are loaded (for sending UnloadColumn).
+    sent_columns: HashSet<IVec2>,
+}
+
+/// Server system: for each connected player, compare their ticket's loaded columns
+/// against what we've already sent. Push new chunks, send unload for removed.
+fn push_chunks_to_clients(
+    mut player_query: Query<(
+        &ChunkTicket,
+        &ControlledBy,
+        &Position,
+        &mut ClientChunkVisibility,
+    )>,
     map_query: Query<&VoxelMapInstance>,
+    mut senders: Query<&mut MessageSender<ChunkDataSync>>,
+    mut multi_sender: ServerMultiMessageSender,
 ) {
-    for (client_entity, mut receiver) in &mut receivers {
-        for request in receiver.receive() {
-            let Some((_, player_map_id)) = controlled_query
-                .iter()
-                .find(|(ctrl, _)| ctrl.owner == client_entity)
-            else {
-                trace!("handle_chunk_requests: no character for client {client_entity:?}");
-                continue;
-            };
+    for (ticket, controlled_by, pos, mut visibility) in &mut player_query {
+        let Ok(instance) = map_query.get(ticket.map_entity) else {
+            trace!(
+                "push_chunks_to_clients: map entity {:?} not found",
+                ticket.map_entity
+            );
+            continue;
+        };
 
-            let map_entity = map_registry.get(player_map_id);
-            let Ok(instance) = map_query.get(map_entity) else {
-                trace!("handle_chunk_requests: map entity not ready for {player_map_id:?}");
-                continue;
-            };
-
-            let data = if let Some(chunk_data) = instance.get_chunk_data(request.chunk_pos) {
-                Some(chunk_data.voxels.clone())
-            } else if instance
-                .chunk_levels
-                .contains_key(&chunk_to_column(request.chunk_pos))
-            {
-                // Chunk was generated but is empty (all air) — tell client so it stops requesting.
-                Some(voxel_map_engine::prelude::PalettedChunk::SingleValue(
-                    WorldVoxel::Air,
-                ))
-            } else {
-                trace!("Chunk {} not yet generated", request.chunk_pos);
-                None
-            };
-
-            if let Some(data) = data {
-                if let Ok(mut sender) = senders.get_mut(client_entity) {
-                    sender.send::<ChunkChannel>(ChunkDataSync {
-                        chunk_pos: request.chunk_pos,
-                        data,
-                    });
+        let player_col = voxel_map_engine::lifecycle::world_to_column_pos(pos.0);
+        let radius = ticket.radius as i32;
+        let mut current_columns = HashSet::new();
+        for dx in -radius..=radius {
+            for dz in -radius..=radius {
+                let col = player_col + IVec2::new(dx, dz);
+                let distance = dx.abs().max(dz.abs()) as u32;
+                let level = ticket.ticket_type.base_level() + distance;
+                if level > voxel_map_engine::prelude::LOAD_LEVEL_THRESHOLD {
+                    continue;
+                }
+                if instance.chunk_levels.contains_key(&col) {
+                    current_columns.insert(col);
                 }
             }
         }
+
+        let client_entity = controlled_by.owner;
+
+        // Send individual chunks that have data and haven't been sent yet.
+        // Chunks generate asynchronously, so we re-check each frame for
+        // newly available data within the player's loaded columns.
+        for &col in &current_columns {
+            for chunk_pos in voxel_map_engine::prelude::column_to_chunks(
+                col,
+                voxel_map_engine::prelude::DEFAULT_COLUMN_Y_MIN,
+                voxel_map_engine::prelude::DEFAULT_COLUMN_Y_MAX,
+            ) {
+                if visibility.sent_chunks.contains(&chunk_pos) {
+                    continue;
+                }
+                let Some(chunk_data) = instance.get_chunk_data(chunk_pos) else {
+                    continue;
+                };
+                if let Ok(mut sender) = senders.get_mut(client_entity) {
+                    sender.send::<ChunkChannel>(ChunkDataSync {
+                        chunk_pos,
+                        data: chunk_data.voxels.clone(),
+                    });
+                }
+                visibility.sent_chunks.insert(chunk_pos);
+            }
+        }
+
+        // Unload columns that left the loaded range
+        let unloaded_cols: Vec<IVec2> = visibility
+            .sent_columns
+            .difference(&current_columns)
+            .copied()
+            .collect();
+        if !unloaded_cols.is_empty() {
+            let targets: bevy::ecs::entity::EntityHashSet = [client_entity].into_iter().collect();
+            for &col in &unloaded_cols {
+                multi_sender
+                    .send_to_entities::<_, ChunkChannel>(&UnloadColumn { column: col }, &targets)
+                    .ok();
+                for chunk_pos in voxel_map_engine::prelude::column_to_chunks(
+                    col,
+                    voxel_map_engine::prelude::DEFAULT_COLUMN_Y_MIN,
+                    voxel_map_engine::prelude::DEFAULT_COLUMN_Y_MAX,
+                ) {
+                    visibility.sent_chunks.remove(&chunk_pos);
+                }
+            }
+        }
+
+        visibility.sent_columns = current_columns;
     }
 }
 

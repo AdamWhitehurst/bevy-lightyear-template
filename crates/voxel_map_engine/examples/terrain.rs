@@ -7,6 +7,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(VoxelPlugin)
+        .insert_resource(ChunkGenerationEnabled)
         .add_systems(Startup, setup)
         .add_systems(Update, move_camera)
         .run();

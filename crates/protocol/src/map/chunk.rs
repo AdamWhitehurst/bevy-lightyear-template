@@ -12,8 +12,8 @@ pub struct ChunkDataSync {
     pub data: PalettedChunk,
 }
 
-/// Client requests a chunk from the server.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
-pub struct ChunkRequest {
-    pub chunk_pos: IVec3,
+/// Server tells client to drop all chunks in a column.
+#[derive(Serialize, Deserialize, Clone, Debug, Reflect, Message)]
+pub struct UnloadColumn {
+    pub column: IVec2,
 }

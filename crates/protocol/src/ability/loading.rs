@@ -1,3 +1,5 @@
+#[cfg(target_arch = "wasm32")]
+use super::types::AbilityManifest;
 use super::types::{AbilityAsset, AbilityDefs, AbilityId, AbilitySlots};
 use crate::app_state::TrackedAssets;
 use bevy::prelude::*;

@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use super::ignore_loader::{IgnoredModelAsset, IgnoredModelAssetLoader};
 use super::loader::{VoxModelAsset, VoxModelLoader};
 use super::loading::{insert_vox_model_registry, load_vox_models, VoxModelRegistry};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::app_state::AppState;
 
 #[cfg(target_arch = "wasm32")]
