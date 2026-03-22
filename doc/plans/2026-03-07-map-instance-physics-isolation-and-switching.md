@@ -591,7 +591,13 @@ fn player_entity_drives_chunk_loading() {
     assert!(!instance.loaded_chunks.contains(&IVec3::ZERO), "origin chunks should unload after player moves");
 }
 ```
-%% Wont this test just load chunks around the player at the teleported position? Why not test unloading of chunks by removing ChunkTarget on player?
+<!-- Note: This test does load chunks at the teleported position, but
+the assertion checks that the ORIGIN chunks unload (the old position).
+The bounded map (bounds 4^3) combined with the 10000-unit teleport ensures
+the origin is well outside the loading radius. Removing ChunkTarget entirely
+would also work but tests a different scenario (player disconnect vs teleport).
+Both are valid; this test specifically validates that moving far away causes
+old chunks to unload while new ones load at the destination. -->
 
 ### Success Criteria:
 

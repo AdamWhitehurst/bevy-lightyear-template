@@ -941,8 +941,7 @@ Also auto-insert `TicketLevelPropagator` on map entities that lack one. Keep the
 
 Remove the `loaded_chunks: HashSet<IVec3>` field entirely. All consumers now use `chunk_levels: HashMap<IVec2, u32>` (for column-level loaded checks) or `get_chunk_data(pos).is_some()` (for 3D chunk-level existence checks).
 
-%% [VIOLATION] Coherence — `set_voxel` starts at line 134, not 130. Line 130 is the end of `get_chunk_data_mut`.
-The `set_voxel` method (`instance.rs:130`) needs no change — it already guards on `get_chunk_data_mut(chunk_pos)` returning `None`.
+The `set_voxel` method (`instance.rs:134`) needs no change — it already guards on `get_chunk_data_mut(chunk_pos)` returning `None`.
 
 #### 11. Remove `ChunkTarget` from `chunk.rs`
 **File**: `crates/voxel_map_engine/src/chunk.rs`
@@ -980,8 +979,7 @@ fn spawn_ticket(world: &mut World, map_entity: Entity, ticket_type: TicketType, 
 }
 ```
 
-%% [VIOLATION] Coherence — lifecycle.rs has 9 tests, not 8.
-All 8 existing tests adapted to use `ChunkTicket` and `chunk_levels` instead of `ChunkTarget` and `loaded_chunks`.
+All 9 existing tests adapted to use `ChunkTicket` and `chunk_levels` instead of `ChunkTarget` and `loaded_chunks`.
 
 New tests:
 ```rust
@@ -1043,11 +1041,11 @@ ChunkTicket::player(registry.get(&MapInstanceId::Overworld))
 
 #### 2. Server: NPC spawn
 **File**: `crates/server/src/gameplay.rs:82`
-%% [VIOLATION] Coherence — actual code is `ChunkTarget::new(registry.get(&MapInstanceId::Overworld), 1)`, not `ChunkTarget::new(overworld, 1)`. The "After" should use `registry.get(...)` too, or extract to a local variable first.
 ```rust
 // Before:
-ChunkTarget::new(overworld, 1)
+ChunkTarget::new(registry.get(&MapInstanceId::Overworld), 1)
 // After:
+let overworld = registry.get(&MapInstanceId::Overworld);
 ChunkTicket::npc(overworld)
 ```
 

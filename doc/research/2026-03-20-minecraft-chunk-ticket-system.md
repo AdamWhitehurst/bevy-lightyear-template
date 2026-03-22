@@ -884,7 +884,7 @@ for chunk_pos in positions {
 }
 ```
 
-Use a shared `Local<ChunkWorkBudget>` or pass it through the system chain. The budget is created at the start of `update_chunks` and consumed across all downstream systems.
+Use a `ChunkWorkBudget` Component on the map entity. Since all systems in the `.chain()` already query map entities, each system adds `&mut ChunkWorkBudget` to its query. `update_chunks` resets it at frame start; downstream systems check `has_time()`. Async tasks on `AsyncComputeTaskPool` don't need budget access — they run independently to completion. The budget only gates main-thread spawning and polling.
 
 **Hard caps as safety fallback** — even with time budgets, add absolute maximums to prevent pathological cases (e.g., if `Instant::now()` is cheap but a single operation is unexpectedly expensive):
 
