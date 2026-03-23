@@ -139,8 +139,8 @@ plot!(plot_name!("bfs_steps_this_frame"), steps as f64);
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all`
-- [ ] `cargo test -p voxel_map_engine`
+- [x] `cargo check-all`
+- [x] `cargo test -p voxel_map_engine`
 - [ ] `cargo server` builds and runs
 - [ ] `cargo client -c 1` builds and runs
 
@@ -313,8 +313,8 @@ for chunk_pos in positions {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all`
-- [ ] `cargo test -p voxel_map_engine`
+- [x] `cargo check-all`
+- [x] `cargo test -p voxel_map_engine`
 - [ ] `cargo server` — chunks still load around player
 - [ ] `cargo client -c 1` — chunks still render
 

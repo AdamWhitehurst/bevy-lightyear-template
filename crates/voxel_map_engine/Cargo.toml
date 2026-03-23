@@ -3,8 +3,12 @@ name = "voxel_map_engine"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+tracy = ["tracy-client/enable"]
+
 [dependencies]
 bevy = { workspace = true, features = ["bevy_mesh", "bevy_pbr", "bevy_log", "bevy_asset", "bevy_render", "bevy_image", "bevy_color", "serialize"] }
+tracy-client = { workspace = true }
 ndshape = { path = "../../git/ndshape-rs" }
 ndcopy = { path = "../../git/ndcopy-rs" }
 grid-tree = { path = "../../git/grid-tree-rs" }

@@ -41,6 +41,7 @@ protocol = { path = "crates/protocol" }
 ron = "0.12"
 bevy_common_assets = { version = "0.15", features = ["ron"] }
 dot_vox = "5"
+tracy-client = { version = "0.18", default-features = false }
 serde = "1.0"
 
 # WASM-specific dependencies

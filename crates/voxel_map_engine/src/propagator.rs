@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 use std::collections::{HashMap, HashSet};
+#[allow(unused_imports)]
+use tracy_client::plot;
 
 use crate::ticket::{LOAD_LEVEL_THRESHOLD, MAX_LEVEL};
 
@@ -179,6 +181,7 @@ impl TicketLevelPropagator {
     /// Drains all pending buckets, recomputing effective levels.
     fn process_pending_updates(&mut self) {
         let mut level_idx = self.min_pending_level;
+        let mut steps: usize = 0;
         while level_idx < self.pending_by_level.len() {
             if self.pending_by_level[level_idx].is_empty() {
                 level_idx += 1;
@@ -186,6 +189,7 @@ impl TicketLevelPropagator {
             }
 
             let columns: Vec<IVec2> = self.pending_by_level[level_idx].drain().collect();
+            steps += columns.len();
             for col in columns {
                 self.recompute_column(col);
             }
@@ -193,6 +197,8 @@ impl TicketLevelPropagator {
             level_idx = self.find_min_pending_from(0);
         }
         self.min_pending_level = MAX_LEVEL as usize + 1;
+
+        plot!("bfs_steps_this_frame", steps as f64);
     }
 
     /// Recomputes the effective level for a single column. If it changed,

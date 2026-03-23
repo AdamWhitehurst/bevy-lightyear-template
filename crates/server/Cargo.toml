@@ -10,6 +10,9 @@ path = "src/lib.rs"
 name = "server"
 path = "src/main.rs"
 
+[features]
+tracy = ["bevy/trace_tracy", "voxel_map_engine/tracy"]
+
 [dependencies]
 bevy = { workspace = true, default-features = true, features = ["file_watcher"] }
 voxel_map_engine = { workspace = true }
