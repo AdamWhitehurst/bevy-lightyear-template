@@ -472,11 +472,30 @@ if pending.tasks.len() >= MAX_PENDING_GEN_TASKS { break; }
 plot!(plot_name!("gen_queue_depth"), heap.len() as f64);
 ```
 
+### Implementation Deviations
+
+#### Persistent GenQueue instead of per-frame heap rebuild
+
+The plan called for rebuilding a `BinaryHeap` from all `chunk_levels` entries every frame in `spawn_missing_chunks`. Under stress testing with large view distances (~104k columns), this O(n) heap construction consumed ~8ms per frame — double the 4ms budget — starving all downstream systems.
+
+**Fix**: Replaced per-frame rebuild with a persistent `GenQueue` component:
+- `enqueue_new_chunks()`: pushes entries incrementally only when `diff.loaded` or `diff.changed` fires
+- `drain_gen_queue()`: pops from the persistent heap with lazy deletion — stale entries (already generated, pending, unloaded) are validated and skipped on pop
+- New Tracy plots: `gen_enqueued_this_frame`, `gen_stale_skipped`
+
+The old `spawn_missing_chunks` function was replaced by these two functions.
+
+#### Poll loops do not check budget
+
+The plan had `poll_chunk_tasks` and `poll_remesh_tasks` gated on `budget.has_time()`. Under stress testing, `drain_gen_queue` consumed the entire budget iterating stale entries, leaving zero budget for polling. Since the in-flight cap blocks new spawns until existing tasks are polled, this created a deadlock: tasks completed on the pool but were never reaped.
+
+**Fix**: Poll loops only check the hard cap (`MAX_GEN_POLLS_PER_FRAME` / `MAX_REMESH_POLLS_PER_FRAME`), not the time budget. Polling extracts already-completed results — it's cheap main-thread work and must not be starved. `ChunkWorkBudget` was removed from both poll system queries.
+
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all`
-- [ ] `cargo test -p voxel_map_engine`
+- [x] `cargo check-all`
+- [x] `cargo test -p voxel_map_engine` (3 pre-existing failures unrelated to Phase 3)
 - [ ] `cargo server` && `cargo client -c 1`
 
 #### Manual Verification:

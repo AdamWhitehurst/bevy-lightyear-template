@@ -24,7 +24,7 @@ impl TicketType {
     /// The default Chebyshev radius for this ticket type.
     pub fn default_radius(self) -> u32 {
         match self {
-            TicketType::Player => 100,
+            TicketType::Player => 20,
             TicketType::Npc => 1,
             TicketType::MapTransition => 4,
         }
@@ -130,12 +130,12 @@ impl LoadState {
 /// Border (level 2) is the weakest loaded state — chunks at Border have data
 /// and meshes but no simulation.
 #[cfg(test)]
-pub const LOAD_LEVEL_THRESHOLD: u32 = 100;
+pub const LOAD_LEVEL_THRESHOLD: u32 = 10;
 #[cfg(not(test))]
 pub const LOAD_LEVEL_THRESHOLD: u32 = 40;
 
 /// Maximum level value. Columns beyond this are not tracked by the propagator.
-pub const MAX_LEVEL: u32 = 640;
+pub const MAX_LEVEL: u32 = 64;
 
 /// Default column height range: 16 chunks vertically (Y range −8 to 7, exclusive upper bound).
 pub const DEFAULT_COLUMN_Y_MIN: i32 = -8;

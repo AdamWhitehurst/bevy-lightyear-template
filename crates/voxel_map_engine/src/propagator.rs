@@ -139,6 +139,15 @@ impl TicketLevelPropagator {
         self.dirty
     }
 
+    /// Returns the minimum Chebyshev distance from this column to any ticket source.
+    pub fn min_distance_to_source(&self, col: IVec2) -> u32 {
+        self.sources
+            .values()
+            .map(|s| chebyshev_distance(s.column, col))
+            .min()
+            .unwrap_or(u32::MAX)
+    }
+
     /// Queues columns in a source's region as potential improvements.
     fn queue_improvements(&mut self, source: &TicketSource) {
         for col in chebyshev_disk(source.column, source.radius) {

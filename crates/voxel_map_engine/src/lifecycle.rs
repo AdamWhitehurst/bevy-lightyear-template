@@ -2,7 +2,8 @@ use bevy::log::info_span;
 use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
-use std::collections::{HashMap, HashSet};
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 #[allow(unused_imports)]
 use tracy_client::plot;
 
@@ -36,6 +37,11 @@ const MAX_GEN_POLLS_PER_FRAME: usize = 32;
 const MAX_REMESH_SPAWNS_PER_FRAME: usize = 32;
 const MAX_REMESH_POLLS_PER_FRAME: usize = 32;
 
+/// Maximum number of generation tasks allowed in-flight at once.
+const MAX_PENDING_GEN_TASKS: usize = 128;
+/// Maximum number of remesh tasks allowed in-flight at once.
+const MAX_PENDING_REMESH_TASKS: usize = 64;
+
 impl ChunkWorkBudget {
     fn reset(&mut self) {
         self.start = std::time::Instant::now();
@@ -66,8 +72,38 @@ enum StopReason {
     /// Per-frame hard cap reached.
     HardCap = 2,
     /// Total in-flight task cap reached.
-    #[allow(dead_code)]
     InFlightCap = 3,
+}
+
+/// A chunk position with priority metadata for the work queue.
+struct ChunkWork {
+    position: IVec3,
+    effective_level: u32,
+    distance_to_source: u32,
+}
+
+impl Eq for ChunkWork {}
+impl PartialEq for ChunkWork {
+    fn eq(&self, other: &Self) -> bool {
+        self.effective_level == other.effective_level
+            && self.distance_to_source == other.distance_to_source
+    }
+}
+
+/// Min-heap: lower level first, then closer distance first.
+/// `BinaryHeap` is a max-heap, so we reverse the ordering.
+impl Ord for ChunkWork {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other
+            .effective_level
+            .cmp(&self.effective_level)
+            .then(other.distance_to_source.cmp(&self.distance_to_source))
+    }
+}
+impl PartialOrd for ChunkWork {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 /// Default PBR material applied to voxel chunk meshes.
@@ -97,6 +133,16 @@ struct RemeshTask {
 #[derive(Component, Default)]
 pub struct PendingRemeshes {
     tasks: Vec<RemeshTask>,
+}
+
+/// Persistent priority queue for chunk generation work.
+///
+/// Entries are added incrementally when columns load or change level.
+/// Stale entries (already generated, pending, or unloaded) are validated
+/// and skipped on pop (lazy deletion).
+#[derive(Component, Default)]
+pub struct GenQueue {
+    heap: BinaryHeap<ChunkWork>,
 }
 
 /// Cached state for a single ticket, used to detect changes.
@@ -151,6 +197,14 @@ pub fn ensure_pending_chunks(
             Without<ChunkWorkBudget>,
         ),
     >,
+    gen_queue_query: Query<
+        Entity,
+        (
+            With<VoxelMapInstance>,
+            With<VoxelGenerator>,
+            Without<GenQueue>,
+        ),
+    >,
 ) {
     for entity in &chunks_query {
         info!("ensure_pending_chunks: adding PendingChunks to {entity:?}");
@@ -170,6 +224,10 @@ pub fn ensure_pending_chunks(
         info!("ensure_pending_chunks: adding ChunkWorkBudget to {entity:?}");
         commands.entity(entity).insert(ChunkWorkBudget::default());
     }
+    for entity in &gen_queue_query {
+        info!("ensure_pending_chunks: adding GenQueue to {entity:?}");
+        commands.entity(entity).insert(GenQueue::default());
+    }
 }
 
 /// Collect tickets, propagate levels, and spawn/remove chunks based on the diff.
@@ -183,6 +241,7 @@ pub(crate) fn update_chunks(
         &mut TicketLevelPropagator,
         &GlobalTransform,
         &mut ChunkWorkBudget,
+        &mut GenQueue,
     )>,
     ticket_query: Query<(Entity, &ChunkTicket, &GlobalTransform)>,
     mut tick: Local<u32>,
@@ -204,6 +263,7 @@ pub(crate) fn update_chunks(
         mut propagator,
         _,
         mut budget,
+        mut gen_queue,
     ) in &mut map_query
     {
         let diff = {
@@ -231,13 +291,21 @@ pub(crate) fn update_chunks(
         }
 
         if config.generates_chunks {
-            spawn_missing_chunks(
+            enqueue_new_chunks(
                 &instance,
-                &mut pending,
-                config,
-                generator,
+                &propagator,
+                &mut gen_queue,
+                &diff,
+                config.bounds,
                 y_min,
                 y_max,
+            );
+            drain_gen_queue(
+                &instance,
+                &mut pending,
+                &mut gen_queue,
+                config,
+                generator,
                 &budget,
             );
         }
@@ -263,6 +331,7 @@ fn collect_tickets(
         &mut TicketLevelPropagator,
         &GlobalTransform,
         &mut ChunkWorkBudget,
+        &mut GenQueue,
     )>,
     ticket_query: &Query<(Entity, &ChunkTicket, &GlobalTransform)>,
     ticket_cache: &mut HashMap<Entity, CachedTicket>,
@@ -277,7 +346,7 @@ fn collect_tickets(
         .collect();
     for entity in stale {
         if let Some(cached) = ticket_cache.remove(&entity) {
-            if let Ok((_, _, _, _, _, mut prop, _, _)) = map_query.get_mut(cached.map_entity) {
+            if let Ok((_, _, _, _, _, mut prop, _, _, _)) = map_query.get_mut(cached.map_entity) {
                 prop.remove_source(entity);
             }
         }
@@ -286,7 +355,8 @@ fn collect_tickets(
     for (ticket_entity, ticket, transform) in ticket_query.iter() {
         // Compute column from immutable access; borrow drops at end of block.
         let column = {
-            let Ok((_, _, _, _, _, _, map_transform, _)) = map_query.get(ticket.map_entity) else {
+            let Ok((_, _, _, _, _, _, map_transform, _, _)) = map_query.get(ticket.map_entity)
+            else {
                 trace!(
                     "collect_tickets: ticket {ticket_entity:?} references non-existent map {:?}, expected during deferred command application",
                     ticket.map_entity
@@ -312,14 +382,14 @@ fn collect_tickets(
             // If map changed, remove source from old map's propagator first
             if let Some(cached) = ticket_cache.get(&ticket_entity) {
                 if cached.map_entity != ticket.map_entity {
-                    if let Ok((_, _, _, _, _, mut old_prop, _, _)) =
+                    if let Ok((_, _, _, _, _, mut old_prop, _, _, _)) =
                         map_query.get_mut(cached.map_entity)
                     {
                         old_prop.remove_source(ticket_entity);
                     }
                 }
             }
-            if let Ok((_, _, _, _, _, mut prop, _, _)) = map_query.get_mut(ticket.map_entity) {
+            if let Ok((_, _, _, _, _, mut prop, _, _, _)) = map_query.get_mut(ticket.map_entity) {
                 prop.set_source(
                     ticket_entity,
                     column,
@@ -370,42 +440,97 @@ fn remove_column_chunks(
     instance.chunk_levels.remove(&col);
 }
 
-/// Spawn generation tasks for chunks in loaded columns that lack data.
-fn spawn_missing_chunks(
+/// Push newly loaded/changed columns into the persistent generation queue.
+fn enqueue_new_chunks(
     instance: &VoxelMapInstance,
-    pending: &mut PendingChunks,
-    config: &VoxelMapConfig,
-    generator: &VoxelGenerator,
+    propagator: &TicketLevelPropagator,
+    gen_queue: &mut GenQueue,
+    diff: &crate::propagator::LevelDiff,
+    bounds: Option<IVec3>,
     y_min: i32,
     y_max: i32,
-    budget: &ChunkWorkBudget,
 ) {
-    let _span = info_span!("spawn_missing_chunks").entered();
-    let mut spawned = 0;
-
-    let mut cols: Vec<_> = instance.chunk_levels.iter().collect();
-    cols.sort_by_key(|(_, lvl)| **lvl);
-
-    'outer: for (&col, &_level) in cols {
+    let _span = info_span!("enqueue_new_chunks").entered();
+    let mut enqueued = 0;
+    for &(col, level) in diff.loaded.iter().chain(diff.changed.iter()) {
+        let distance = propagator.min_distance_to_source(col);
         for chunk_pos in column_to_chunks(col, y_min, y_max) {
-            if !budget.has_time() || spawned >= MAX_GEN_SPAWNS_PER_FRAME {
-                break 'outer;
-            }
-            if !is_within_bounds(chunk_pos, config.bounds) {
+            if !is_within_bounds(chunk_pos, bounds) {
                 continue;
             }
             if instance.get_chunk_data(chunk_pos).is_some() {
                 continue;
             }
-            if is_already_pending(pending, chunk_pos) {
-                continue;
-            }
-            spawn_chunk_gen_task(pending, chunk_pos, generator, config.save_dir.clone());
-            spawned += 1;
+            gen_queue.heap.push(ChunkWork {
+                position: chunk_pos,
+                effective_level: level,
+                distance_to_source: distance,
+            });
+            enqueued += 1;
         }
     }
+    plot!("gen_enqueued_this_frame", enqueued as f64);
+}
 
-    let stop_reason = if spawned >= MAX_GEN_SPAWNS_PER_FRAME {
+/// Drain the persistent generation queue, spawning tasks for valid entries.
+///
+/// Stale entries (chunk already generated, already pending, column unloaded,
+/// or out of bounds) are skipped via lazy deletion.
+fn drain_gen_queue(
+    instance: &VoxelMapInstance,
+    pending: &mut PendingChunks,
+    gen_queue: &mut GenQueue,
+    config: &VoxelMapConfig,
+    generator: &VoxelGenerator,
+    budget: &ChunkWorkBudget,
+) {
+    let _span = info_span!("drain_gen_queue").entered();
+
+    plot!("gen_queue_depth", gen_queue.heap.len() as f64);
+
+    if pending.tasks.len() >= MAX_PENDING_GEN_TASKS {
+        plot!(
+            "gen_spawn_stop_reason",
+            StopReason::InFlightCap as u8 as f64
+        );
+        plot!("gen_spawned_this_frame", 0.0);
+        return;
+    }
+
+    let mut spawned = 0;
+    let mut stale = 0;
+    while let Some(work) = gen_queue.heap.pop() {
+        if pending.tasks.len() >= MAX_PENDING_GEN_TASKS {
+            break;
+        }
+        if !budget.has_time() || spawned >= MAX_GEN_SPAWNS_PER_FRAME {
+            break;
+        }
+        // Lazy deletion: validate entry is still relevant
+        let col = chunk_to_column(work.position);
+        if !instance.chunk_levels.contains_key(&col) {
+            stale += 1;
+            continue;
+        }
+        if instance.get_chunk_data(work.position).is_some() {
+            stale += 1;
+            continue;
+        }
+        if is_already_pending(pending, work.position) {
+            stale += 1;
+            continue;
+        }
+        if !is_within_bounds(work.position, config.bounds) {
+            stale += 1;
+            continue;
+        }
+        spawn_chunk_gen_task(pending, work.position, generator, config.save_dir.clone());
+        spawned += 1;
+    }
+
+    let stop_reason = if pending.tasks.len() >= MAX_PENDING_GEN_TASKS {
+        StopReason::InFlightCap
+    } else if spawned >= MAX_GEN_SPAWNS_PER_FRAME {
         StopReason::HardCap
     } else if !budget.has_time() {
         StopReason::TimeBudget
@@ -414,7 +539,7 @@ fn spawn_missing_chunks(
     };
     plot!("gen_spawn_stop_reason", stop_reason as u8 as f64);
     plot!("gen_spawned_this_frame", spawned as f64);
-    plot!("gen_queue_depth", instance.chunk_levels.len() as f64);
+    plot!("gen_stale_skipped", stale as f64);
 }
 
 fn is_already_pending(pending: &PendingChunks, pos: IVec3) -> bool {
@@ -424,12 +549,7 @@ fn is_already_pending(pending: &PendingChunks, pos: IVec3) -> bool {
 /// Poll pending chunk generation tasks and spawn mesh entities for completed ones.
 pub fn poll_chunk_tasks(
     mut commands: Commands,
-    mut map_query: Query<(
-        Entity,
-        &mut VoxelMapInstance,
-        &mut PendingChunks,
-        &ChunkWorkBudget,
-    )>,
+    mut map_query: Query<(Entity, &mut VoxelMapInstance, &mut PendingChunks)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     default_material: Option<Res<DefaultVoxelMaterial>>,
@@ -439,10 +559,16 @@ pub fn poll_chunk_tasks(
         return;
     };
 
-    for (map_entity, mut instance, mut pending, budget) in &mut map_query {
+    for (map_entity, mut instance, mut pending) in &mut map_query {
+        let finished_count = pending.tasks.iter().filter(|t| t.is_finished()).count();
+        plot!("gen_tasks_finished", finished_count as f64);
+
         let mut i = 0;
         let mut polled = 0;
-        while i < pending.tasks.len() && budget.has_time() && polled < MAX_GEN_POLLS_PER_FRAME {
+        // NOTE: Polling does NOT check budget. Collecting completed results is
+        // essential progress — starving it causes a deadlock where in-flight tasks
+        // block new spawns but are never reaped.
+        while i < pending.tasks.len() && polled < MAX_GEN_POLLS_PER_FRAME {
             if let Some(result) = check_ready(&mut pending.tasks[i]) {
                 let _ = pending.tasks.swap_remove(i);
                 debug_assert!(
@@ -468,8 +594,6 @@ pub fn poll_chunk_tasks(
 
         let stop_reason = if polled >= MAX_GEN_POLLS_PER_FRAME {
             StopReason::HardCap
-        } else if !budget.has_time() {
-            StopReason::TimeBudget
         } else {
             StopReason::Completed
         };
@@ -589,31 +713,60 @@ pub fn despawn_out_of_range_chunks(
     }
 }
 
-/// Drains `chunks_needing_remesh` and spawns async mesh tasks from existing octree data.
+/// Drains `chunks_needing_remesh` and spawns async mesh tasks from existing octree data,
+/// prioritized by distance to nearest ticket source.
 pub fn spawn_remesh_tasks(
     mut map_query: Query<(
         &mut VoxelMapInstance,
         &mut PendingRemeshes,
         &ChunkWorkBudget,
+        &TicketLevelPropagator,
     )>,
 ) {
     let pool = AsyncComputeTaskPool::get();
-    for (mut instance, mut pending, budget) in &mut map_query {
-        let positions: Vec<IVec3> = instance.chunks_needing_remesh.iter().copied().collect();
+    for (mut instance, mut pending, budget, propagator) in &mut map_query {
+        if pending.tasks.len() >= MAX_PENDING_REMESH_TASKS {
+            plot!(
+                "remesh_spawn_stop_reason",
+                StopReason::InFlightCap as u8 as f64
+            );
+            plot!("remesh_spawned_this_frame", 0.0);
+            plot!("remesh_tasks_in_flight", pending.tasks.len() as f64);
+            return;
+        }
+
+        let mut heap = BinaryHeap::new();
+        for &pos in instance.chunks_needing_remesh.iter() {
+            let col = chunk_to_column(pos);
+            heap.push(ChunkWork {
+                position: pos,
+                effective_level: 0,
+                distance_to_source: propagator.min_distance_to_source(col),
+            });
+        }
 
         let mut spawned = 0;
-        for chunk_pos in positions {
+        while let Some(work) = heap.pop() {
+            if pending.tasks.len() >= MAX_PENDING_REMESH_TASKS {
+                break;
+            }
             if !budget.has_time() || spawned >= MAX_REMESH_SPAWNS_PER_FRAME {
                 break;
             }
-            let Some(chunk_data) = instance.get_chunk_data(chunk_pos) else {
-                trace!("spawn_remesh_tasks: chunk {chunk_pos} no longer in octree, skipping");
-                instance.chunks_needing_remesh.remove(&chunk_pos);
+            let Some(chunk_data) = instance.get_chunk_data(work.position) else {
+                trace!(
+                    "spawn_remesh_tasks: chunk {} no longer in octree, skipping",
+                    work.position
+                );
+                instance.chunks_needing_remesh.remove(&work.position);
                 continue;
             };
             if chunk_data.fill_type == crate::types::FillType::Empty {
-                trace!("spawn_remesh_tasks: chunk {chunk_pos} is empty, skipping remesh");
-                instance.chunks_needing_remesh.remove(&chunk_pos);
+                trace!(
+                    "spawn_remesh_tasks: chunk {} is empty, skipping remesh",
+                    work.position
+                );
+                instance.chunks_needing_remesh.remove(&work.position);
                 continue;
             }
             let voxels = {
@@ -621,12 +774,17 @@ pub fn spawn_remesh_tasks(
                 chunk_data.voxels.to_voxels()
             };
             let task = pool.spawn(async move { mesh_chunk_greedy(&voxels) });
-            pending.tasks.push(RemeshTask { chunk_pos, task });
-            instance.chunks_needing_remesh.remove(&chunk_pos);
+            pending.tasks.push(RemeshTask {
+                chunk_pos: work.position,
+                task,
+            });
+            instance.chunks_needing_remesh.remove(&work.position);
             spawned += 1;
         }
 
-        let stop_reason = if spawned >= MAX_REMESH_SPAWNS_PER_FRAME {
+        let stop_reason = if pending.tasks.len() >= MAX_PENDING_REMESH_TASKS {
+            StopReason::InFlightCap
+        } else if spawned >= MAX_REMESH_SPAWNS_PER_FRAME {
             StopReason::HardCap
         } else if !budget.has_time() {
             StopReason::TimeBudget
@@ -645,18 +803,14 @@ pub fn poll_remesh_tasks(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     default_material: Res<DefaultVoxelMaterial>,
-    mut map_query: Query<(
-        Entity,
-        &VoxelMapInstance,
-        &mut PendingRemeshes,
-        &ChunkWorkBudget,
-    )>,
+    mut map_query: Query<(Entity, &VoxelMapInstance, &mut PendingRemeshes)>,
     chunk_query: Query<(Entity, &VoxelChunk, &ChildOf)>,
 ) {
-    for (map_entity, instance, mut pending, budget) in &mut map_query {
+    for (map_entity, instance, mut pending) in &mut map_query {
         let mut i = 0;
         let mut polled = 0;
-        while i < pending.tasks.len() && budget.has_time() && polled < MAX_REMESH_POLLS_PER_FRAME {
+        // NOTE: Polling does NOT check budget — same reasoning as poll_chunk_tasks.
+        while i < pending.tasks.len() && polled < MAX_REMESH_POLLS_PER_FRAME {
             let Some(mesh_opt) = check_ready(&mut pending.tasks[i].task) else {
                 i += 1;
                 continue;
@@ -714,8 +868,6 @@ pub fn poll_remesh_tasks(
 
         let stop_reason = if polled >= MAX_REMESH_POLLS_PER_FRAME {
             StopReason::HardCap
-        } else if !budget.has_time() {
-            StopReason::TimeBudget
         } else {
             StopReason::Completed
         };
