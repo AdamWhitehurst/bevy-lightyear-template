@@ -130,9 +130,9 @@ impl LoadState {
 /// Border (level 2) is the weakest loaded state — chunks at Border have data
 /// and meshes but no simulation.
 #[cfg(test)]
-pub const LOAD_LEVEL_THRESHOLD: u32 = 10;
+pub const LOAD_LEVEL_THRESHOLD: u32 = 4;
 #[cfg(not(test))]
-pub const LOAD_LEVEL_THRESHOLD: u32 = 40;
+pub const LOAD_LEVEL_THRESHOLD: u32 = 10;
 
 /// Maximum level value. Columns beyond this are not tracked by the propagator.
 pub const MAX_LEVEL: u32 = 64;

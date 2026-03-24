@@ -3,7 +3,8 @@ use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
+use std::path::PathBuf;
 #[allow(unused_imports)]
 use tracy_client::plot;
 
@@ -135,6 +136,39 @@ pub struct PendingRemeshes {
     tasks: Vec<RemeshTask>,
 }
 
+/// Queued chunk saves awaiting async I/O.
+#[derive(Component, Default)]
+pub struct PendingSaves {
+    /// Chunks waiting to be saved (not yet spawned as tasks). FIFO order.
+    queue: VecDeque<PendingSave>,
+    /// In-flight async save tasks.
+    tasks: Vec<Task<()>>,
+}
+
+/// A single chunk save request waiting in the queue.
+struct PendingSave {
+    position: IVec3,
+    data: crate::types::ChunkData,
+    save_dir: PathBuf,
+}
+
+impl PendingSaves {
+    /// Enqueue a chunk for async saving.
+    pub fn enqueue(&mut self, position: IVec3, data: crate::types::ChunkData, save_dir: PathBuf) {
+        self.queue.push_back(PendingSave {
+            position,
+            data,
+            save_dir,
+        });
+    }
+}
+
+/// Maximum save tasks drained from queue per frame.
+const MAX_SAVE_SPAWNS_PER_FRAME: usize = 16;
+
+/// Maximum concurrent in-flight save tasks.
+const MAX_PENDING_SAVE_TASKS: usize = 32;
+
 /// Persistent priority queue for chunk generation work.
 ///
 /// Entries are added incrementally when columns load or change level.
@@ -205,6 +239,14 @@ pub fn ensure_pending_chunks(
             Without<GenQueue>,
         ),
     >,
+    pending_saves_query: Query<
+        Entity,
+        (
+            With<VoxelMapInstance>,
+            With<VoxelGenerator>,
+            Without<PendingSaves>,
+        ),
+    >,
 ) {
     for entity in &chunks_query {
         info!("ensure_pending_chunks: adding PendingChunks to {entity:?}");
@@ -228,6 +270,10 @@ pub fn ensure_pending_chunks(
         info!("ensure_pending_chunks: adding GenQueue to {entity:?}");
         commands.entity(entity).insert(GenQueue::default());
     }
+    for entity in &pending_saves_query {
+        info!("ensure_pending_chunks: adding PendingSaves to {entity:?}");
+        commands.entity(entity).insert(PendingSaves::default());
+    }
 }
 
 /// Collect tickets, propagate levels, and spawn/remove chunks based on the diff.
@@ -242,6 +288,7 @@ pub(crate) fn update_chunks(
         &GlobalTransform,
         &mut ChunkWorkBudget,
         &mut GenQueue,
+        &mut PendingSaves,
     )>,
     ticket_query: Query<(Entity, &ChunkTicket, &GlobalTransform)>,
     mut tick: Local<u32>,
@@ -264,6 +311,7 @@ pub(crate) fn update_chunks(
         _,
         mut budget,
         mut gen_queue,
+        mut pending_saves,
     ) in &mut map_query
     {
         let diff = {
@@ -277,7 +325,14 @@ pub(crate) fn update_chunks(
         budget.reset();
 
         for &col in &diff.unloaded {
-            remove_column_chunks(&mut instance, col, config.save_dir.as_deref(), y_min, y_max);
+            remove_column_chunks(
+                &mut instance,
+                &mut pending_saves,
+                col,
+                config.save_dir.as_deref(),
+                y_min,
+                y_max,
+            );
         }
         for &(col, level) in &diff.loaded {
             if is_column_within_bounds(col, config.bounds) {
@@ -332,6 +387,7 @@ fn collect_tickets(
         &GlobalTransform,
         &mut ChunkWorkBudget,
         &mut GenQueue,
+        &mut PendingSaves,
     )>,
     ticket_query: &Query<(Entity, &ChunkTicket, &GlobalTransform)>,
     ticket_cache: &mut HashMap<Entity, CachedTicket>,
@@ -346,7 +402,8 @@ fn collect_tickets(
         .collect();
     for entity in stale {
         if let Some(cached) = ticket_cache.remove(&entity) {
-            if let Ok((_, _, _, _, _, mut prop, _, _, _)) = map_query.get_mut(cached.map_entity) {
+            if let Ok((_, _, _, _, _, mut prop, _, _, _, _)) = map_query.get_mut(cached.map_entity)
+            {
                 prop.remove_source(entity);
             }
         }
@@ -355,7 +412,7 @@ fn collect_tickets(
     for (ticket_entity, ticket, transform) in ticket_query.iter() {
         // Compute column from immutable access; borrow drops at end of block.
         let column = {
-            let Ok((_, _, _, _, _, _, map_transform, _, _)) = map_query.get(ticket.map_entity)
+            let Ok((_, _, _, _, _, _, map_transform, _, _, _)) = map_query.get(ticket.map_entity)
             else {
                 trace!(
                     "collect_tickets: ticket {ticket_entity:?} references non-existent map {:?}, expected during deferred command application",
@@ -382,14 +439,15 @@ fn collect_tickets(
             // If map changed, remove source from old map's propagator first
             if let Some(cached) = ticket_cache.get(&ticket_entity) {
                 if cached.map_entity != ticket.map_entity {
-                    if let Ok((_, _, _, _, _, mut old_prop, _, _, _)) =
+                    if let Ok((_, _, _, _, _, mut old_prop, _, _, _, _)) =
                         map_query.get_mut(cached.map_entity)
                     {
                         old_prop.remove_source(ticket_entity);
                     }
                 }
             }
-            if let Ok((_, _, _, _, _, mut prop, _, _, _)) = map_query.get_mut(ticket.map_entity) {
+            if let Ok((_, _, _, _, _, mut prop, _, _, _, _)) = map_query.get_mut(ticket.map_entity)
+            {
                 prop.set_source(
                     ticket_entity,
                     column,
@@ -411,8 +469,10 @@ fn collect_tickets(
 }
 
 /// Remove all chunk data for a column being unloaded.
+/// Dirty chunks are enqueued into `pending_saves` rather than fire-and-forget.
 fn remove_column_chunks(
     instance: &mut VoxelMapInstance,
+    pending_saves: &mut PendingSaves,
     col: IVec2,
     save_dir: Option<&std::path::Path>,
     y_min: i32,
@@ -423,21 +483,62 @@ fn remove_column_chunks(
         if instance.dirty_chunks.remove(&chunk_pos) {
             if let Some(dir) = save_dir {
                 if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
-                    let data = chunk_data.clone();
-                    let dir = dir.to_path_buf();
-                    AsyncComputeTaskPool::get()
-                        .spawn(async move {
-                            if let Err(e) = crate::persistence::save_chunk(&dir, chunk_pos, &data) {
-                                error!("Failed to save evicted dirty chunk at {chunk_pos}: {e}");
-                            }
-                        })
-                        .detach();
+                    pending_saves.queue.push_back(PendingSave {
+                        position: chunk_pos,
+                        data: chunk_data.clone(),
+                        save_dir: dir.to_path_buf(),
+                    });
                 }
             }
         }
         instance.remove_chunk_data(chunk_pos);
     }
     instance.chunk_levels.remove(&col);
+}
+
+/// Drain pending save queue: poll completed tasks, spawn new ones within budget.
+pub fn drain_pending_saves(mut map_query: Query<&mut PendingSaves>) {
+    let pool = AsyncComputeTaskPool::get();
+    for mut pending in &mut map_query {
+        let mut i = 0;
+        while i < pending.tasks.len() {
+            if check_ready(&mut pending.tasks[i]).is_some() {
+                let _ = pending.tasks.swap_remove(i);
+            } else {
+                i += 1;
+            }
+        }
+
+        let mut spawned = 0;
+        while !pending.queue.is_empty()
+            && pending.tasks.len() < MAX_PENDING_SAVE_TASKS
+            && spawned < MAX_SAVE_SPAWNS_PER_FRAME
+        {
+            let save = pending.queue.pop_front().unwrap();
+            let task = pool.spawn(async move {
+                if let Err(e) =
+                    crate::persistence::save_chunk(&save.save_dir, save.position, &save.data)
+                {
+                    error!("Failed to save chunk at {:?}: {e}", save.position);
+                }
+            });
+            pending.tasks.push(task);
+            spawned += 1;
+        }
+
+        plot!("save_queue_depth", pending.queue.len() as f64);
+        plot!("save_tasks_in_flight", pending.tasks.len() as f64);
+        plot!("saves_spawned_this_frame", spawned as f64);
+
+        let stop_reason = if pending.tasks.len() >= MAX_PENDING_SAVE_TASKS {
+            StopReason::InFlightCap
+        } else if spawned >= MAX_SAVE_SPAWNS_PER_FRAME {
+            StopReason::HardCap
+        } else {
+            StopReason::Completed
+        };
+        plot!("save_spawn_stop_reason", stop_reason as u8 as f64);
+    }
 }
 
 /// Push newly loaded/changed columns into the persistent generation queue.
@@ -620,6 +721,9 @@ fn handle_completed_chunk(
     map_entity: Entity,
     result: crate::generation::ChunkGenResult,
 ) {
+    if !result.from_disk {
+        instance.dirty_chunks.insert(result.position);
+    }
     instance.insert_chunk_data(result.position, result.chunk_data);
 
     let Some(mesh) = result.mesh else {

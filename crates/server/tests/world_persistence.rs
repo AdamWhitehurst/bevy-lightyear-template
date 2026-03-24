@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use ndshape::ConstShape;
-use server::map::save_dirty_chunks_for_instance;
+use server::map::save_dirty_chunks_sync;
 use server::persistence::{
     load_entities, load_map_meta, map_save_dir, save_entities, save_map_meta, MapMeta,
 };
@@ -118,7 +118,7 @@ fn dirty_instance_save_then_reload() {
     assert!(instance.dirty_chunks.contains(&chunk_pos));
 
     // Save dirty chunks
-    save_dirty_chunks_for_instance(&mut instance, &map_dir);
+    save_dirty_chunks_sync(&mut instance, &map_dir);
     assert!(instance.dirty_chunks.is_empty());
 
     // Reload from disk and verify the edit persisted

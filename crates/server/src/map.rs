@@ -17,7 +17,7 @@ use protocol::{
     SectionBlocksUpdate, UnloadColumn, VoxelChannel, VoxelEditAck, VoxelEditBroadcast,
     VoxelEditReject, VoxelEditRequest, VoxelType,
 };
-use voxel_map_engine::lifecycle;
+use voxel_map_engine::lifecycle::{self, PendingSaves};
 use voxel_map_engine::prelude::{
     build_generator, seed_from_id, ChunkTicket, VoxelGenerator, VoxelMapConfig, VoxelMapInstance,
     VoxelPlugin, VoxelWorld, WorldVoxel,
@@ -196,7 +196,12 @@ fn save_dirty_chunks_debounced(
     time: Res<Time>,
     mut dirty_state: ResMut<WorldDirtyState>,
     save_path: Res<WorldSavePath>,
-    mut map_query: Query<(&mut VoxelMapInstance, &VoxelMapConfig, &MapInstanceId)>,
+    mut map_query: Query<(
+        &mut VoxelMapInstance,
+        &VoxelMapConfig,
+        &MapInstanceId,
+        &mut PendingSaves,
+    )>,
     entity_query: Query<(
         &MapSaveTarget,
         &MapInstanceId,
@@ -220,13 +225,13 @@ fn save_dirty_chunks_debounced(
         return;
     }
 
-    for (mut instance, config, map_id) in &mut map_query {
+    for (mut instance, config, map_id, mut pending_saves) in &mut map_query {
         let Some(map_dir) = config.save_dir.as_deref() else {
             trace!("save_dirty_chunks_debounced: no save_dir for {map_id:?}, skipping");
             continue;
         };
 
-        save_dirty_chunks_for_instance(&mut instance, map_dir);
+        enqueue_dirty_chunks(&mut instance, &mut pending_saves, map_dir);
 
         let spawn_points: Vec<Vec3> = respawn_query
             .iter()
@@ -250,8 +255,23 @@ fn save_dirty_chunks_debounced(
     dirty_state.first_dirty_time = None;
 }
 
-/// Drain dirty chunks from an instance and persist them to disk.
-pub fn save_dirty_chunks_for_instance(instance: &mut VoxelMapInstance, map_dir: &Path) {
+/// Drain dirty chunks from an instance into the async `PendingSaves` queue.
+pub fn enqueue_dirty_chunks(
+    instance: &mut VoxelMapInstance,
+    pending_saves: &mut PendingSaves,
+    map_dir: &Path,
+) {
+    let dirty: Vec<IVec3> = instance.dirty_chunks.drain().collect();
+    for chunk_pos in dirty {
+        if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
+            pending_saves.enqueue(chunk_pos, chunk_data.clone(), map_dir.to_path_buf());
+        }
+    }
+}
+
+/// Synchronously flush all dirty chunks to disk. Used only during shutdown
+/// where we must guarantee persistence before the process exits.
+pub fn save_dirty_chunks_sync(instance: &mut VoxelMapInstance, map_dir: &Path) {
     let dirty: Vec<IVec3> = instance.dirty_chunks.drain().collect();
     for chunk_pos in dirty {
         if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
@@ -289,7 +309,7 @@ pub fn save_world_on_shutdown(
         let Some(map_dir) = config.save_dir.as_deref() else {
             continue;
         };
-        save_dirty_chunks_for_instance(&mut instance, map_dir);
+        save_dirty_chunks_sync(&mut instance, map_dir);
 
         let spawn_points: Vec<Vec3> = respawn_query
             .iter()

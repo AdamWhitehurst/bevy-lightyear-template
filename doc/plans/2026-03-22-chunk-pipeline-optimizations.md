@@ -666,18 +666,36 @@ for &col in &diff.unloaded {
 }
 ```
 
+### Implementation Deviations
+
+#### Generated chunks marked dirty for persistence
+
+The plan only addressed the eviction save path (`remove_column_chunks`). During testing, freshly generated terrain was never saved to disk because `generate_chunk` never marked chunks as dirty and never wrote to disk. The debounced save system and shutdown save both depend on `dirty_chunks`.
+
+**Fix**: `handle_completed_chunk` now inserts into `dirty_chunks` when `!result.from_disk`, so freshly generated chunks flow through the existing debounced save pipeline.
+
+#### All save paths unified through PendingSaves
+
+The plan only routed `remove_column_chunks` through `PendingSaves`. The debounced save system (`save_dirty_chunks_debounced` in `server/src/map.rs`) was still doing synchronous I/O on the main thread, risking frame stalls during mass saves.
+
+**Fix**:
+- `save_dirty_chunks_for_instance` replaced with `enqueue_dirty_chunks` (routes through `PendingSaves`) and `save_dirty_chunks_sync` (shutdown-only, must flush before exit).
+- `save_dirty_chunks_debounced` query now includes `&mut PendingSaves` and calls `enqueue_dirty_chunks`.
+- `save_world_on_shutdown` uses `save_dirty_chunks_sync` since async tasks won't complete after process exit.
+- `PendingSaves::enqueue()` added as a public method for external callers.
+
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all`
-- [ ] `cargo test -p voxel_map_engine`
+- [x] `cargo check-all`
+- [x] `cargo test -p voxel_map_engine` (2 pre-existing failures unrelated to Phase 4)
 - [ ] `cargo server` && `cargo client -c 1`
 
 #### Manual Verification:
 - [ ] Teleport far away: no I/O spike (saves drain gradually over subsequent frames)
 - [ ] Tracy: `save_tasks_in_flight` stays under 32, `save_queue_depth` drains to 0 over time
 - [ ] Tracy: `save_spawn_stop_reason` shows `InFlightCap` during mass unload, then `Completed` as queue empties
-- [ ] Dirty chunks are actually saved (edit voxel, walk away, reload — edit persists)
+- [ ] Dirty chunks are actually saved (generate terrain, walk away, reload — terrain persists)
 
 ---
 

@@ -43,6 +43,7 @@ impl Plugin for VoxelPlugin {
                 lifecycle::ensure_pending_chunks,
                 (lifecycle::update_chunks, lifecycle::poll_chunk_tasks).run_if(generation_enabled),
                 lifecycle::despawn_out_of_range_chunks,
+                lifecycle::drain_pending_saves,
                 lifecycle::spawn_remesh_tasks,
                 lifecycle::poll_remesh_tasks,
             )

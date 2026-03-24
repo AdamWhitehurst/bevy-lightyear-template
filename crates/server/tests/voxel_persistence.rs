@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use ndshape::ConstShape;
-use server::map::save_dirty_chunks_for_instance;
+use server::map::save_dirty_chunks_sync;
 use server::persistence::{load_map_meta, save_map_meta, MapMeta};
 use voxel_map_engine::persistence as chunk_persist;
 use voxel_map_engine::prelude::*;
@@ -17,7 +17,7 @@ fn dirty_chunks_saved_on_debounce() {
     instance.chunk_levels.insert(chunk_to_column(chunk_pos), 0);
     instance.dirty_chunks.insert(chunk_pos);
 
-    save_dirty_chunks_for_instance(&mut instance, &map_dir);
+    save_dirty_chunks_sync(&mut instance, &map_dir);
 
     assert!(chunk_persist::chunk_file_path(&map_dir, chunk_pos).exists());
     assert!(instance.dirty_chunks.is_empty());
@@ -35,7 +35,7 @@ fn clean_chunks_not_saved() {
     instance.chunk_levels.insert(chunk_to_column(chunk_pos), 0);
     // NOT marking dirty
 
-    save_dirty_chunks_for_instance(&mut instance, &map_dir);
+    save_dirty_chunks_sync(&mut instance, &map_dir);
 
     assert!(!chunk_persist::chunk_file_path(&map_dir, chunk_pos).exists());
 }
@@ -91,7 +91,7 @@ fn evicted_dirty_chunk_saved_before_removal() {
     instance.dirty_chunks.insert(chunk_pos);
 
     // Save all dirty chunks (simulates what eviction does before removing)
-    save_dirty_chunks_for_instance(&mut instance, &map_dir);
+    save_dirty_chunks_sync(&mut instance, &map_dir);
 
     // Then remove from octree (simulates eviction completing)
     instance.chunk_levels.remove(&chunk_to_column(chunk_pos));
