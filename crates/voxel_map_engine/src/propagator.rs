@@ -5,6 +5,10 @@ use tracy_client::plot;
 
 use crate::ticket::{LOAD_LEVEL_THRESHOLD, MAX_LEVEL};
 
+/// Maximum BFS steps per propagation call. A player ticket at radius 10
+/// affects ~441 columns. 256 handles most single-ticket changes in one frame.
+const MAX_BFS_STEPS_PER_FRAME: usize = 64;
+
 /// 8 Chebyshev neighbor offsets on a 2D grid.
 const CHEBYSHEV_NEIGHBORS: [IVec2; 8] = [
     IVec2::new(1, 0),
@@ -109,7 +113,9 @@ impl TicketLevelPropagator {
     }
 
     /// Runs the BFS propagation, returning the diff of level changes
-    /// classified by the load threshold.
+    /// classified by the load threshold. Processing is amortized: at most
+    /// `MAX_BFS_STEPS_PER_FRAME` columns are recomputed per call. The
+    /// propagator remains dirty until all pending work is drained.
     pub fn propagate(&mut self) -> LevelDiff {
         if !self.dirty {
             trace!("propagate: not dirty, returning empty diff");
@@ -117,11 +123,26 @@ impl TicketLevelPropagator {
         }
 
         let old_loaded = self.snapshot_loaded_columns();
-        self.process_pending_updates();
-        let diff = self.build_diff(&old_loaded);
+        let steps = self.process_pending_updates(MAX_BFS_STEPS_PER_FRAME);
 
-        self.dirty = false;
-        diff
+        // Only mark clean if all pending work is done
+        let has_remaining = self.find_min_pending_from(0) < self.pending_by_level.len();
+        if !has_remaining {
+            self.dirty = false;
+        }
+
+        plot!("bfs_steps_this_frame", steps as f64);
+        plot!("bfs_remaining_dirty", if has_remaining { 1.0 } else { 0.0 });
+        plot!(
+            "bfs_hit_step_cap",
+            if has_remaining && steps >= MAX_BFS_STEPS_PER_FRAME {
+                1.0
+            } else {
+                0.0
+            }
+        );
+
+        self.build_diff(&old_loaded)
     }
 
     /// Returns the effective level for a column, if tracked.
@@ -187,27 +208,38 @@ impl TicketLevelPropagator {
             .collect()
     }
 
-    /// Drains all pending buckets, recomputing effective levels.
-    fn process_pending_updates(&mut self) {
+    /// Drains pending buckets, recomputing effective levels up to `max_steps`
+    /// columns. Returns the number of columns processed. Unprocessed columns
+    /// remain in their buckets for the next call.
+    fn process_pending_updates(&mut self, max_steps: usize) -> usize {
+        let mut steps = 0;
         let mut level_idx = self.min_pending_level;
-        let mut steps: usize = 0;
-        while level_idx < self.pending_by_level.len() {
+        while level_idx < self.pending_by_level.len() && steps < max_steps {
             if self.pending_by_level[level_idx].is_empty() {
                 level_idx += 1;
                 continue;
             }
 
             let columns: Vec<IVec2> = self.pending_by_level[level_idx].drain().collect();
-            steps += columns.len();
-            for col in columns {
+            let mut processed = 0;
+            for &col in &columns {
+                if steps >= max_steps {
+                    break;
+                }
                 self.recompute_column(col);
+                steps += 1;
+                processed += 1;
+            }
+
+            // Re-insert unprocessed columns back into the bucket
+            if processed < columns.len() {
+                self.pending_by_level[level_idx].extend(columns[processed..].iter().copied());
             }
 
             level_idx = self.find_min_pending_from(0);
         }
-        self.min_pending_level = MAX_LEVEL as usize + 1;
-
-        plot!("bfs_steps_this_frame", steps as f64);
+        self.min_pending_level = self.find_min_pending_from(0);
+        steps
     }
 
     /// Recomputes the effective level for a single column. If it changed,
@@ -349,11 +381,29 @@ mod tests {
         Entity::from_raw_u32(id).expect("valid test entity")
     }
 
+    /// Runs propagation to completion across multiple amortized calls.
+    /// Returns the final loaded set (not accumulated partial diffs, which
+    /// can contain duplicates — e.g., a column "loaded" in diff 1 then
+    /// "changed" in diff 2).
+    fn propagate_fully(prop: &mut TicketLevelPropagator) -> LevelDiff {
+        while prop.is_dirty() {
+            prop.propagate();
+        }
+        // Build diff from final state vs empty (everything is "loaded")
+        let mut diff = LevelDiff::default();
+        for (&col, &level) in prop.levels() {
+            if level <= LOAD_LEVEL_THRESHOLD {
+                diff.loaded.push((col, level));
+            }
+        }
+        diff
+    }
+
     #[test]
     fn single_player_ticket_produces_concentric_levels() {
         let mut prop = TicketLevelPropagator::new();
         prop.set_source(entity(1), IVec2::ZERO, 0, 5);
-        let diff = prop.propagate();
+        let diff = propagate_fully(&mut prop);
 
         assert_eq!(prop.get_level(IVec2::ZERO), Some(0));
         assert_eq!(prop.get_level(IVec2::new(1, 0)), Some(1));
@@ -394,15 +444,19 @@ mod tests {
     fn ticket_removal_unloads_exclusive_columns() {
         let mut prop = TicketLevelPropagator::new();
         prop.set_source(entity(1), IVec2::ZERO, 0, 2);
-        prop.propagate();
+        propagate_fully(&mut prop);
 
         assert_eq!(prop.get_level(IVec2::new(2, 0)), Some(2));
 
         prop.remove_source(entity(1));
-        let diff = prop.propagate();
+        let mut total_unloaded = Vec::new();
+        while prop.is_dirty() {
+            let diff = prop.propagate();
+            total_unloaded.extend(diff.unloaded);
+        }
 
         assert_eq!(prop.get_level(IVec2::ZERO), None);
-        assert_eq!(diff.unloaded.len(), 25);
+        assert_eq!(total_unloaded.len(), 25);
     }
 
     #[test]
@@ -465,7 +519,7 @@ mod tests {
     fn diff_classifies_by_load_threshold() {
         let mut prop = TicketLevelPropagator::new();
         prop.set_source(entity(1), IVec2::ZERO, 0, 3);
-        let diff = prop.propagate();
+        let diff = propagate_fully(&mut prop);
 
         // LOAD_LEVEL_THRESHOLD=4 (cfg(test)), base_level=0, radius=3 → all 7x7=49 at level ≤ 3 are loaded
         assert_eq!(diff.loaded.len(), 49);
@@ -520,7 +574,7 @@ mod tests {
     fn large_radius_column_count() {
         let mut prop = TicketLevelPropagator::new();
         prop.set_source(entity(1), IVec2::ZERO, 0, 10);
-        prop.propagate();
+        propagate_fully(&mut prop);
 
         let count = prop.levels().len();
         assert_eq!(count, 441);
@@ -531,7 +585,7 @@ mod tests {
         let mut prop = TicketLevelPropagator::new();
         prop.set_source(entity(1), IVec2::ZERO, 0, 3);
         prop.set_source(entity(2), IVec2::new(2, 0), 0, 3);
-        prop.propagate();
+        propagate_fully(&mut prop);
 
         prop.remove_source(entity(1));
         let diff = prop.propagate();

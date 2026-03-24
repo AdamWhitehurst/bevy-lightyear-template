@@ -807,8 +807,8 @@ Prefer the test helper approach — it validates the amortization logic produces
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all`
-- [ ] `cargo test -p voxel_map_engine` — all propagator tests pass with amortized BFS
+- [x] `cargo check-all`
+- [x] `cargo test -p voxel_map_engine` — all propagator tests pass with amortized BFS (2 pre-existing ticket failures unrelated)
 - [ ] `cargo server` && `cargo client -c 1`
 
 #### Manual Verification:

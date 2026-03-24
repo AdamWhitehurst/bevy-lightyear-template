@@ -24,7 +24,7 @@ impl TicketType {
     /// The default Chebyshev radius for this ticket type.
     pub fn default_radius(self) -> u32 {
         match self {
-            TicketType::Player => 20,
+            TicketType::Player => 200,
             TicketType::Npc => 1,
             TicketType::MapTransition => 4,
         }
@@ -132,7 +132,7 @@ impl LoadState {
 #[cfg(test)]
 pub const LOAD_LEVEL_THRESHOLD: u32 = 4;
 #[cfg(not(test))]
-pub const LOAD_LEVEL_THRESHOLD: u32 = 10;
+pub const LOAD_LEVEL_THRESHOLD: u32 = 20;
 
 /// Maximum level value. Columns beyond this are not tracked by the propagator.
 pub const MAX_LEVEL: u32 = 64;
