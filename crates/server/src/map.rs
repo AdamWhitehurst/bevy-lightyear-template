@@ -678,7 +678,7 @@ pub fn push_chunks_to_clients(
         &Position,
         &mut ClientChunkVisibility,
     )>,
-    map_query: Query<&VoxelMapInstance>,
+    map_query: Query<(&VoxelMapInstance, &MapInstanceId)>,
     mut senders: Query<&mut MessageSender<ChunkDataSync>>,
     mut multi_sender: ServerMultiMessageSender,
 ) {
@@ -691,7 +691,7 @@ pub fn push_chunks_to_clients(
             visibility.tracked_map = Some(ticket.map_entity);
         }
 
-        let Ok(instance) = map_query.get(ticket.map_entity) else {
+        let Ok((instance, map_id)) = map_query.get(ticket.map_entity) else {
             trace!(
                 "push_chunks_to_clients: map entity {:?} not found",
                 ticket.map_entity
@@ -735,6 +735,7 @@ pub fn push_chunks_to_clients(
                 };
                 if let Ok(mut sender) = senders.get_mut(client_entity) {
                     sender.send::<ChunkChannel>(ChunkDataSync {
+                        map_id: map_id.clone(),
                         chunk_pos,
                         data: chunk_data.voxels.clone(),
                     });
@@ -753,7 +754,13 @@ pub fn push_chunks_to_clients(
             let targets: bevy::ecs::entity::EntityHashSet = [client_entity].into_iter().collect();
             for &col in &unloaded_cols {
                 multi_sender
-                    .send_to_entities::<_, ChunkChannel>(&UnloadColumn { column: col }, &targets)
+                    .send_to_entities::<_, ChunkChannel>(
+                        &UnloadColumn {
+                            map_id: map_id.clone(),
+                            column: col,
+                        },
+                        &targets,
+                    )
                     .ok();
                 for chunk_pos in voxel_map_engine::prelude::column_to_chunks(
                     col,

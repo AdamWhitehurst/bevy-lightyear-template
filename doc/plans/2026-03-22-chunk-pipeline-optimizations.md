@@ -1008,13 +1008,32 @@ tracker.remeshing.remove(&remesh.chunk_pos);
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all`
-- [ ] `cargo test -p voxel_map_engine`
-- [ ] `cargo server` && `cargo client -c 1`
+- [x] `cargo check-all`
+- [x] `cargo test -p voxel_map_engine` (3 pre-existing failures unrelated to Phase 7)
+- [x] `cargo server` && `cargo client -c 1`
 
 #### Manual Verification:
 - [ ] Edit a chunk that's still generating — remesh deferred, no panic/corruption
 - [ ] Tracy: no overlapping gen+remesh on same position
+
+### Implementation Deviations
+
+#### Map transition fixes (pre-existing bugs exposed during testing)
+
+Testing Phase 7 exposed several pre-existing map transition bugs unrelated to ChunkWorkTracker:
+
+- **`despawn_old_map` silently failed**: Player's replicated `MapInstanceId` was updated by lightyear before `MapTransitionStart` arrived, so the registry lookup by old map ID failed. Fix: `despawn_all_maps_except` despawns all maps not matching the transition target.
+- **Cross-map chunk contamination**: `ChunkDataSync` had no map identifier, so in-flight overworld chunks were applied to the homebase map after transition. Fix: added `map_id: MapInstanceId` to `ChunkDataSync` and `UnloadColumn`; client filters by registry lookup.
+- **Deferred command ordering**: `handle_map_transition_start` and `handle_chunk_data_sync` had no ordering guarantee. Fix: `ApplyDeferred` chain ensures transition commands flush before chunk sync.
+- **Lightyear entity recreation**: Predicted player entity could be recreated during transition, losing `PendingTransition`. Fix: `handle_map_transition_end` no longer requires `With<PendingTransition>`.
+
+#### Tuning adjustments
+
+Increased pipeline caps to reduce initial-load gaps: gen spawns 32→64, gen polls 16→64, gen in-flight 64→256, remesh spawns 16→32, remesh polls 16→32, remesh in-flight 16→64.
+
+#### Known issue: initial-load chunk gaps
+
+On initial load, the player is placed in the world before all nearby chunks have colliders. This is a pre-existing throughput issue — async gen tasks complete in non-deterministic order, and the player isn't frozen until chunks are ready. Not related to Phase 7.
 
 ---
 

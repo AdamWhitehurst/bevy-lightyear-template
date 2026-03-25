@@ -22,14 +22,6 @@ const RAYCAST_MAX_DISTANCE: f32 = 100.0;
 
 /// Buffers ChunkDataSync messages that arrive before the client player is ready.
 /// Lightyear clears MessageReceiver each frame in Last, so we must drain and
-/// hold messages ourselves until the predicted player entity has a ChunkTicket.
-/// Tracks which map the buffered data is for; cleared on map transition.
-#[derive(Default)]
-struct ChunkDataSyncBuffer {
-    chunks: Vec<ChunkDataSync>,
-    map_entity: Option<Entity>,
-}
-
 /// Tracks pending predictions for block edits awaiting server acknowledgment.
 #[derive(Resource, Default)]
 pub struct VoxelPredictionState {
@@ -63,19 +55,27 @@ impl Plugin for ClientMapPlugin {
             .init_resource::<MapRegistry>()
             .init_resource::<VoxelPredictionState>()
             .add_systems(Startup, spawn_overworld)
+            // Transition handler must flush before chunk sync runs, otherwise
+            // chunk sync sees the old ChunkTicket/map entity and applies
+            // messages to the wrong (about-to-be-despawned) map.
             .add_systems(
                 Update,
                 (
-                    attach_chunk_ticket_to_player,
-                    handle_voxel_broadcasts,
-                    handle_section_blocks_update,
-                    handle_voxel_edit_ack,
-                    handle_voxel_edit_reject,
-                    handle_chunk_data_sync,
-                    handle_unload_column,
-                    protocol::attach_chunk_colliders,
+                    handle_map_transition_start,
+                    ApplyDeferred,
+                    (
+                        attach_chunk_ticket_to_player,
+                        handle_voxel_broadcasts,
+                        handle_section_blocks_update,
+                        handle_voxel_edit_ack,
+                        handle_voxel_edit_reject,
+                        handle_chunk_data_sync,
+                        handle_unload_column,
+                        protocol::attach_chunk_colliders,
+                    )
+                        .run_if(in_state(ui::ClientState::InGame)),
                 )
-                    .run_if(in_state(ui::ClientState::InGame)),
+                    .chain(),
             )
             .add_systems(
                 PostUpdate,
@@ -83,7 +83,6 @@ impl Plugin for ClientMapPlugin {
                     .run_if(in_state(ui::ClientState::InGame))
                     .after(TransformSystems::Propagate),
             )
-            .add_systems(Update, handle_map_transition_start)
             .add_systems(
                 Update,
                 (check_transition_chunks_loaded, handle_map_transition_end)
@@ -137,62 +136,28 @@ fn handle_chunk_data_sync(
     mut commands: Commands,
     mut receivers: Query<&mut MessageReceiver<ChunkDataSync>>,
     mut map_query: Query<(Entity, &mut VoxelMapInstance)>,
-    player_query: Query<&ChunkTicket, (With<Predicted>, With<CharacterMarker>, With<Controlled>)>,
+    registry: Res<MapRegistry>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     default_material: Res<DefaultVoxelMaterial>,
-    mut buffer: Local<ChunkDataSyncBuffer>,
 ) {
-    // Always drain network messages — they'll be lost at end of frame regardless.
     let mut incoming: Vec<ChunkDataSync> = Vec::new();
     for mut receiver in &mut receivers {
         incoming.extend(receiver.receive());
     }
 
-    let Ok(chunk_ticket) = player_query.single() else {
-        if !incoming.is_empty() {
-            trace!(
-                "handle_chunk_data_sync: buffering {} messages (no predicted player with ChunkTicket yet)",
-                incoming.len()
-            );
-            buffer.chunks.extend(incoming);
-        }
+    if incoming.is_empty() {
         return;
-    };
-
-    // Clear stale buffer data when transitioning between maps.
-    // Only clear when we had a previous map — on first init (None → Some),
-    // the buffered chunks ARE for the correct map and must not be discarded.
-    if let Some(current_map) = buffer.map_entity {
-        if current_map != chunk_ticket.map_entity {
-            if !buffer.chunks.is_empty() {
-                trace!(
-                    "handle_chunk_data_sync: discarding {} buffered messages (map changed from {:?} to {:?})",
-                    buffer.chunks.len(),
-                    buffer.map_entity,
-                    chunk_ticket.map_entity
-                );
-                buffer.chunks.clear();
-            }
-        }
     }
-    buffer.map_entity = Some(chunk_ticket.map_entity);
 
-    let Ok((map_entity, mut instance)) = map_query.get_mut(chunk_ticket.map_entity) else {
-        if !incoming.is_empty() {
-            trace!(
-                "handle_chunk_data_sync: buffering {} messages (map entity {:?} not ready)",
-                incoming.len(),
-                chunk_ticket.map_entity
-            );
-            buffer.chunks.extend(incoming);
-        }
-        return;
-    };
+    for sync in incoming {
+        let Some(&map_entity) = registry.0.get(&sync.map_id) else {
+            continue;
+        };
+        let Ok((_, mut instance)) = map_query.get_mut(map_entity) else {
+            continue;
+        };
 
-    let all_syncs = buffer.chunks.drain(..).chain(incoming);
-
-    for sync in all_syncs {
         let voxels = sync.data.to_voxels();
         let chunk_data = ChunkData::from_voxels(&voxels);
 
@@ -241,30 +206,17 @@ fn handle_chunk_data_sync(
 /// which checks `chunk_levels.contains_key()`.
 fn handle_unload_column(
     mut receivers: Query<&mut MessageReceiver<UnloadColumn>>,
-    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    registry: Res<MapRegistry>,
     mut map_query: Query<&mut VoxelMapInstance>,
 ) {
-    let Ok(ticket) = player_query.single() else {
-        // No predicted player during startup or map transition teardown — drain messages.
-        for mut receiver in &mut receivers {
-            for _ in receiver.receive() {}
-        }
-        trace!("handle_unload_column: no predicted controlled player");
-        return;
-    };
-    let Ok(mut instance) = map_query.get_mut(ticket.map_entity) else {
-        for mut receiver in &mut receivers {
-            for _ in receiver.receive() {}
-        }
-        trace!(
-            "handle_unload_column: map entity {:?} not found",
-            ticket.map_entity
-        );
-        return;
-    };
-
     for mut receiver in &mut receivers {
         for unload in receiver.receive() {
+            let Some(&map_entity) = registry.0.get(&unload.map_id) else {
+                continue;
+            };
+            let Ok(mut instance) = map_query.get_mut(map_entity) else {
+                continue;
+            };
             let col = unload.column;
             for chunk_pos in column_to_chunks(col, DEFAULT_COLUMN_Y_MIN, DEFAULT_COLUMN_Y_MAX) {
                 instance.remove_chunk_data(chunk_pos);
@@ -481,20 +433,20 @@ pub fn handle_map_transition_start(
     mut commands: Commands,
     mut receivers: Query<&mut MessageReceiver<MapTransitionStart>>,
     mut registry: ResMut<MapRegistry>,
-    player_query: Query<
-        (Entity, &MapInstanceId),
-        (With<Predicted>, With<CharacterMarker>, With<Controlled>),
-    >,
+    player_query: Query<Entity, (With<Predicted>, With<CharacterMarker>, With<Controlled>)>,
 ) {
     for mut receiver in &mut receivers {
         for transition in receiver.receive() {
             info!("Received MapTransitionStart for {:?}", transition.target);
 
-            let (player, current_map_id) = player_query
+            let player = player_query
                 .single()
                 .expect("Predicted player must exist when receiving MapTransitionStart");
 
-            despawn_old_map(&mut commands, &mut *registry, current_map_id);
+            // Despawn all maps except the transition target. We cannot rely on
+            // the player's MapInstanceId because lightyear may replicate the new
+            // value before this message arrives.
+            despawn_all_maps_except(&mut commands, &mut *registry, &transition.target);
 
             commands.entity(player).insert((
                 RigidBodyDisabled,
@@ -525,16 +477,27 @@ pub fn handle_map_transition_start(
     }
 }
 
-/// Despawn the old map entity and all its children (chunk meshes), removing it from the registry.
-/// When the player transitions back, the map will be re-created and chunks re-requested.
-fn despawn_old_map(
+/// Despawn all map entities except the transition target.
+///
+/// The player's replicated `MapInstanceId` may already reflect the new map
+/// (lightyear replication can arrive before the transition message), so we
+/// cannot use it to identify the old map. Instead, despawn everything that
+/// isn't the target.
+fn despawn_all_maps_except(
     commands: &mut Commands,
     registry: &mut MapRegistry,
-    old_map_id: &MapInstanceId,
+    keep: &MapInstanceId,
 ) {
-    if let Some(old_map_entity) = registry.0.remove(old_map_id) {
-        info!("Despawning old map {old_map_id:?} entity {old_map_entity:?}");
-        commands.entity(old_map_entity).despawn();
+    let to_remove: Vec<(MapInstanceId, Entity)> = registry
+        .0
+        .iter()
+        .filter(|(id, _)| *id != keep)
+        .map(|(id, &entity)| (id.clone(), entity))
+        .collect();
+    for (map_id, map_entity) in to_remove {
+        info!("Despawning map {map_id:?} entity {map_entity:?}");
+        registry.0.remove(&map_id);
+        commands.entity(map_entity).despawn();
     }
 }
 
@@ -621,32 +584,26 @@ pub fn check_transition_chunks_loaded(
 pub fn handle_map_transition_end(
     mut commands: Commands,
     mut receivers: Query<&mut MessageReceiver<MapTransitionEnd>>,
-    player_query: Query<
-        Entity,
-        (
-            With<Predicted>,
-            With<CharacterMarker>,
-            With<PendingTransition>,
-        ),
-    >,
+    // Don't require PendingTransition — lightyear may recreate the predicted
+    // entity during transition, losing client-only components.
+    player_query: Query<Entity, (With<Predicted>, With<CharacterMarker>)>,
     mut next_transition: ResMut<NextState<MapTransitionState>>,
 ) {
     for mut receiver in &mut receivers {
         for _end in receiver.receive() {
             info!("Received MapTransitionEnd, resuming play");
 
-            let Ok(player) = player_query.single() else {
-                warn!("Received MapTransitionEnd but no transitioning player");
-                continue;
-            };
-
-            commands.entity(player).remove::<(
-                RigidBodyDisabled,
-                ColliderDisabled,
-                DisableRollback,
-                PendingTransition,
-                TransitionReadySent,
-            )>();
+            // Unfreeze all predicted characters — lightyear may recreate the
+            // predicted entity during transition, so there can be 0-2 matches.
+            for player in &player_query {
+                commands.entity(player).remove::<(
+                    RigidBodyDisabled,
+                    ColliderDisabled,
+                    DisableRollback,
+                    PendingTransition,
+                    TransitionReadySent,
+                )>();
+            }
 
             next_transition.set(MapTransitionState::Playing);
         }

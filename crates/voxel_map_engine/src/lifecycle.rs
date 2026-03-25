@@ -33,15 +33,15 @@ pub struct ChunkWorkBudget {
 const CHUNK_WORK_BUDGET_MS: u64 = 4;
 
 /// Safety caps -- even within budget, don't exceed these per frame.
-const MAX_GEN_SPAWNS_PER_FRAME: usize = 32;
-const MAX_GEN_POLLS_PER_FRAME: usize = 16;
-const MAX_REMESH_SPAWNS_PER_FRAME: usize = 16;
-const MAX_REMESH_POLLS_PER_FRAME: usize = 16;
+const MAX_GEN_SPAWNS_PER_FRAME: usize = 64;
+const MAX_GEN_POLLS_PER_FRAME: usize = 64;
+const MAX_REMESH_SPAWNS_PER_FRAME: usize = 32;
+const MAX_REMESH_POLLS_PER_FRAME: usize = 32;
 
 /// Maximum number of generation tasks allowed in-flight at once.
-const MAX_PENDING_GEN_TASKS: usize = 64;
+const MAX_PENDING_GEN_TASKS: usize = 256;
 /// Maximum number of remesh tasks allowed in-flight at once.
-const MAX_PENDING_REMESH_TASKS: usize = 16;
+const MAX_PENDING_REMESH_TASKS: usize = 64;
 
 impl ChunkWorkBudget {
     fn reset(&mut self) {
@@ -169,6 +169,13 @@ const MAX_SAVE_SPAWNS_PER_FRAME: usize = 16;
 /// Maximum concurrent in-flight save tasks.
 const MAX_PENDING_SAVE_TASKS: usize = 32;
 
+/// Tracks which chunks have in-flight work to prevent overlapping gen/remesh.
+#[derive(Component, Default)]
+pub struct ChunkWorkTracker {
+    pub generating: HashSet<IVec3>,
+    pub remeshing: HashSet<IVec3>,
+}
+
 /// Persistent priority queue for chunk generation work.
 ///
 /// Entries are added incrementally when columns load or change level.
@@ -247,6 +254,14 @@ pub fn ensure_pending_chunks(
             Without<PendingSaves>,
         ),
     >,
+    tracker_query: Query<
+        Entity,
+        (
+            With<VoxelMapInstance>,
+            With<VoxelGenerator>,
+            Without<ChunkWorkTracker>,
+        ),
+    >,
 ) {
     for entity in &chunks_query {
         info!("ensure_pending_chunks: adding PendingChunks to {entity:?}");
@@ -274,6 +289,10 @@ pub fn ensure_pending_chunks(
         info!("ensure_pending_chunks: adding PendingSaves to {entity:?}");
         commands.entity(entity).insert(PendingSaves::default());
     }
+    for entity in &tracker_query {
+        info!("ensure_pending_chunks: adding ChunkWorkTracker to {entity:?}");
+        commands.entity(entity).insert(ChunkWorkTracker::default());
+    }
 }
 
 /// Collect tickets, propagate levels, and spawn/remove chunks based on the diff.
@@ -289,6 +308,7 @@ pub(crate) fn update_chunks(
         &mut ChunkWorkBudget,
         &mut GenQueue,
         &mut PendingSaves,
+        &mut ChunkWorkTracker,
     )>,
     ticket_query: Query<(Entity, &ChunkTicket, &GlobalTransform)>,
     mut tick: Local<u32>,
@@ -312,6 +332,7 @@ pub(crate) fn update_chunks(
         mut budget,
         mut gen_queue,
         mut pending_saves,
+        mut tracker,
     ) in &mut map_query
     {
         let diff = {
@@ -359,6 +380,7 @@ pub(crate) fn update_chunks(
                 &instance,
                 &mut pending,
                 &mut gen_queue,
+                &mut tracker,
                 config,
                 generator,
                 &budget,
@@ -388,6 +410,7 @@ fn collect_tickets(
         &mut ChunkWorkBudget,
         &mut GenQueue,
         &mut PendingSaves,
+        &mut ChunkWorkTracker,
     )>,
     ticket_query: &Query<(Entity, &ChunkTicket, &GlobalTransform)>,
     ticket_cache: &mut HashMap<Entity, CachedTicket>,
@@ -402,7 +425,8 @@ fn collect_tickets(
         .collect();
     for entity in stale {
         if let Some(cached) = ticket_cache.remove(&entity) {
-            if let Ok((_, _, _, _, _, mut prop, _, _, _, _)) = map_query.get_mut(cached.map_entity)
+            if let Ok((_, _, _, _, _, mut prop, _, _, _, _, _)) =
+                map_query.get_mut(cached.map_entity)
             {
                 prop.remove_source(entity);
             }
@@ -412,7 +436,8 @@ fn collect_tickets(
     for (ticket_entity, ticket, transform) in ticket_query.iter() {
         // Compute column from immutable access; borrow drops at end of block.
         let column = {
-            let Ok((_, _, _, _, _, _, map_transform, _, _, _)) = map_query.get(ticket.map_entity)
+            let Ok((_, _, _, _, _, _, map_transform, _, _, _, _)) =
+                map_query.get(ticket.map_entity)
             else {
                 trace!(
                     "collect_tickets: ticket {ticket_entity:?} references non-existent map {:?}, expected during deferred command application",
@@ -439,14 +464,15 @@ fn collect_tickets(
             // If map changed, remove source from old map's propagator first
             if let Some(cached) = ticket_cache.get(&ticket_entity) {
                 if cached.map_entity != ticket.map_entity {
-                    if let Ok((_, _, _, _, _, mut old_prop, _, _, _, _)) =
+                    if let Ok((_, _, _, _, _, mut old_prop, _, _, _, _, _)) =
                         map_query.get_mut(cached.map_entity)
                     {
                         old_prop.remove_source(ticket_entity);
                     }
                 }
             }
-            if let Ok((_, _, _, _, _, mut prop, _, _, _, _)) = map_query.get_mut(ticket.map_entity)
+            if let Ok((_, _, _, _, _, mut prop, _, _, _, _, _)) =
+                map_query.get_mut(ticket.map_entity)
             {
                 prop.set_source(
                     ticket_entity,
@@ -581,6 +607,7 @@ fn drain_gen_queue(
     instance: &VoxelMapInstance,
     pending: &mut PendingChunks,
     gen_queue: &mut GenQueue,
+    tracker: &mut ChunkWorkTracker,
     config: &VoxelMapConfig,
     generator: &VoxelGenerator,
     budget: &ChunkWorkBudget,
@@ -617,7 +644,8 @@ fn drain_gen_queue(
             stale += 1;
             continue;
         }
-        if is_already_pending(pending, work.position) {
+        if tracker.generating.contains(&work.position) || tracker.remeshing.contains(&work.position)
+        {
             stale += 1;
             continue;
         }
@@ -625,9 +653,7 @@ fn drain_gen_queue(
             stale += 1;
             continue;
         }
-        // Insert into pending_positions immediately so is_already_pending
-        // catches duplicates within the same unflushed batch.
-        pending.pending_positions.insert(work.position);
+        tracker.generating.insert(work.position);
         batch.push(work.position);
         spawned += 1;
         if batch.len() >= GEN_BATCH_SIZE {
@@ -658,14 +684,15 @@ fn drain_gen_queue(
     plot!("gen_stale_skipped", stale as f64);
 }
 
-fn is_already_pending(pending: &PendingChunks, pos: IVec3) -> bool {
-    pending.pending_positions.contains(&pos)
-}
-
 /// Poll pending chunk generation tasks and spawn mesh entities for completed ones.
 pub fn poll_chunk_tasks(
     mut commands: Commands,
-    mut map_query: Query<(Entity, &mut VoxelMapInstance, &mut PendingChunks)>,
+    mut map_query: Query<(
+        Entity,
+        &mut VoxelMapInstance,
+        &mut PendingChunks,
+        &mut ChunkWorkTracker,
+    )>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     default_material: Option<Res<DefaultVoxelMaterial>>,
@@ -675,7 +702,7 @@ pub fn poll_chunk_tasks(
         return;
     };
 
-    for (map_entity, mut instance, mut pending) in &mut map_query {
+    for (map_entity, mut instance, mut pending, mut tracker) in &mut map_query {
         let finished_count = pending.tasks.iter().filter(|t| t.is_finished()).count();
         plot!("gen_tasks_finished", finished_count as f64);
 
@@ -689,11 +716,11 @@ pub fn poll_chunk_tasks(
                 let _ = pending.tasks.swap_remove(i);
                 for result in results {
                     debug_assert!(
-                        pending.pending_positions.contains(&result.position),
-                        "poll_chunk_tasks: completed chunk at {:?} was not in pending_positions",
+                        tracker.generating.contains(&result.position),
+                        "poll_chunk_tasks: completed chunk at {:?} was not in tracker.generating",
                         result.position
                     );
-                    pending.pending_positions.remove(&result.position);
+                    tracker.generating.remove(&result.position);
                     handle_completed_chunk(
                         &mut commands,
                         &mut instance,
@@ -842,10 +869,11 @@ pub fn spawn_remesh_tasks(
         &mut PendingRemeshes,
         &ChunkWorkBudget,
         &TicketLevelPropagator,
+        &mut ChunkWorkTracker,
     )>,
 ) {
     let pool = AsyncComputeTaskPool::get();
-    for (mut instance, mut pending, budget, propagator) in &mut map_query {
+    for (mut instance, mut pending, budget, propagator, mut tracker) in &mut map_query {
         if pending.tasks.len() >= MAX_PENDING_REMESH_TASKS {
             plot!(
                 "remesh_spawn_stop_reason",
@@ -874,6 +902,12 @@ pub fn spawn_remesh_tasks(
             if !budget.has_time() || spawned >= MAX_REMESH_SPAWNS_PER_FRAME {
                 break;
             }
+            if tracker.generating.contains(&work.position)
+                || tracker.remeshing.contains(&work.position)
+            {
+                // Leave in chunks_needing_remesh for next frame
+                continue;
+            }
             let Some(chunk_data) = instance.get_chunk_data(work.position) else {
                 trace!(
                     "spawn_remesh_tasks: chunk {} no longer in octree, skipping",
@@ -899,6 +933,7 @@ pub fn spawn_remesh_tasks(
                 chunk_pos: work.position,
                 task,
             });
+            tracker.remeshing.insert(work.position);
             instance.chunks_needing_remesh.remove(&work.position);
             spawned += 1;
         }
@@ -924,10 +959,15 @@ pub fn poll_remesh_tasks(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     default_material: Res<DefaultVoxelMaterial>,
-    mut map_query: Query<(Entity, &VoxelMapInstance, &mut PendingRemeshes)>,
+    mut map_query: Query<(
+        Entity,
+        &VoxelMapInstance,
+        &mut PendingRemeshes,
+        &mut ChunkWorkTracker,
+    )>,
     chunk_query: Query<(Entity, &VoxelChunk, &ChildOf)>,
 ) {
-    for (map_entity, instance, mut pending) in &mut map_query {
+    for (map_entity, instance, mut pending, mut tracker) in &mut map_query {
         let mut i = 0;
         let mut polled = 0;
         // NOTE: Polling does NOT check budget — same reasoning as poll_chunk_tasks.
@@ -937,6 +977,7 @@ pub fn poll_remesh_tasks(
                 continue;
             };
             let remesh = pending.tasks.swap_remove(i);
+            tracker.remeshing.remove(&remesh.chunk_pos);
             polled += 1;
 
             if !instance

@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -26,7 +25,6 @@ pub struct ChunkGenResult {
 #[derive(Component, Default)]
 pub struct PendingChunks {
     pub tasks: Vec<Task<Vec<ChunkGenResult>>>,
-    pub pending_positions: HashSet<IVec3>,
 }
 
 /// Spawn an async task that generates a batch of chunks.
@@ -40,10 +38,6 @@ pub fn spawn_chunk_gen_batch(
 ) {
     let generator = Arc::clone(&generator.0);
     let pool = AsyncComputeTaskPool::get();
-
-    for &pos in &positions {
-        pending.pending_positions.insert(pos);
-    }
 
     let task = pool.spawn(async move {
         let _span = info_span!("chunk_gen_batch", count = positions.len()).entered();
