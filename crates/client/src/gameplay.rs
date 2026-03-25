@@ -1,8 +1,10 @@
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
+use lightyear::prelude::client::input::InputSystems;
 use lightyear::prelude::{Controlled, Interpolated, Predicted, Replicated};
 use protocol::*;
+use render::CameraOrbitState;
 
 use crate::world_object::{init_default_vox_model_material, on_world_object_replicated};
 
@@ -14,6 +16,10 @@ impl Plugin for ClientGameplayPlugin {
         app.add_systems(Startup, init_default_vox_model_material);
         app.add_systems(Update, handle_new_character);
         app.add_systems(FixedUpdate, handle_character_movement);
+        app.add_systems(
+            FixedPreUpdate,
+            sync_camera_yaw_to_input.before(InputSystems::BufferClientInputs),
+        );
         app.add_systems(Update, on_world_object_replicated.run_if(ready));
 
         app.add_observer(on_respawn_timer_added);
@@ -140,5 +146,19 @@ fn set_descendants_visibility(
     for &child in children {
         commands.entity(child).insert(visibility);
         set_descendants_visibility(commands, child, children_query, visibility);
+    }
+}
+
+/// Writes the camera's target yaw angle into the player's ActionState for replication.
+fn sync_camera_yaw_to_input(
+    camera_query: Query<&CameraOrbitState>,
+    mut player_query: Query<&mut ActionState<PlayerActions>, With<Predicted>>,
+) {
+    let Ok(orbit) = camera_query.single() else {
+        return;
+    };
+
+    for mut action_state in &mut player_query {
+        action_state.set_value(&PlayerActions::CameraYaw, orbit.target_angle);
     }
 }

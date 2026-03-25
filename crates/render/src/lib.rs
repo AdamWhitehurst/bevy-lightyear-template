@@ -1,6 +1,8 @@
 mod camera;
 mod health_bar;
 
+pub use camera::CameraOrbitState;
+
 use avian3d::prelude::Position;
 use bevy::prelude::*;
 use lightyear::frame_interpolation::{FrameInterpolate, FrameInterpolationPlugin};
@@ -28,10 +30,14 @@ impl Plugin for RenderPlugin {
         app.add_systems(
             Update,
             (
+                camera::handle_camera_rotation_input,
+                camera::update_camera_orbit,
                 camera::follow_player,
+                camera::update_light_position,
                 health_bar::billboard_face_camera,
                 health_bar::update_health_bars,
-            ),
+            )
+                .chain(),
         );
 
         app.add_observer(add_health_bars);

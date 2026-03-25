@@ -48,11 +48,12 @@ pub fn apply_movement(
         }
     }
 
-    // Horizontal movement
+    // Horizontal movement (camera-relative)
     let move_dir = action_state
         .axis_pair(&PlayerActions::Move)
         .clamp_length_max(1.0);
-    let move_dir = Vec3::new(-move_dir.x, 0.0, move_dir.y);
+    let yaw = action_state.value(&PlayerActions::CameraYaw);
+    let move_dir = Quat::from_rotation_y(yaw) * Vec3::new(-move_dir.x, 0.0, move_dir.y);
 
     let linear_velocity = forces.linear_velocity();
     let ground_linear_velocity = Vec3::new(linear_velocity.x, 0.0, linear_velocity.z);
@@ -76,7 +77,10 @@ pub fn update_facing(
             .axis_pair(&PlayerActions::Move)
             .clamp_length_max(1.0);
         if move_dir != Vec2::ZERO {
-            *rotation = Rotation(Quat::from_rotation_y(f32::atan2(move_dir.x, -move_dir.y)));
+            let yaw = action_state.value(&PlayerActions::CameraYaw);
+            *rotation = Rotation(Quat::from_rotation_y(
+                f32::atan2(move_dir.x, -move_dir.y) + yaw,
+            ));
         }
     }
 }

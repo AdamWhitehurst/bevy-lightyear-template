@@ -55,6 +55,7 @@ pub const FIXED_TIMESTEP_HZ: f64 = 64.0;
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, Hash, Reflect)]
 pub enum PlayerActions {
     Move,
+    CameraYaw,
     Jump,
     PlaceVoxel,
     RemoveVoxel,
@@ -68,6 +69,7 @@ impl Actionlike for PlayerActions {
     fn input_control_kind(&self) -> InputControlKind {
         match self {
             Self::Move => InputControlKind::DualAxis,
+            Self::CameraYaw => InputControlKind::Axis,
             _ => InputControlKind::Button,
         }
     }

@@ -274,15 +274,23 @@ pub fn billboard_rigs_face_camera(
     }
 }
 
-/// Updates `Facing` based on horizontal velocity.
+/// Updates `Facing` based on horizontal velocity projected onto camera's right axis.
 pub fn update_facing_from_velocity(
+    camera_query: Query<&Transform, With<Camera3d>>,
     mut query: Query<(&mut Facing, &LinearVelocity), With<CharacterMarker>>,
 ) {
+    let Ok(camera_transform) = camera_query.single() else {
+        return;
+    };
+    let camera_right = camera_transform.right().as_vec3();
+    let camera_right_xz = Vec3::new(camera_right.x, 0.0, camera_right.z);
+
     for (mut facing, velocity) in &mut query {
-        if velocity.x > 0.1 {
-            facing.set_if_neq(Facing::Right);
-        } else if velocity.x < -0.1 {
+        let lateral = velocity.dot(camera_right_xz);
+        if lateral > 0.1 {
             facing.set_if_neq(Facing::Left);
+        } else if lateral < -0.1 {
+            facing.set_if_neq(Facing::Right);
         }
     }
 }

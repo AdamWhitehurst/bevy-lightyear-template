@@ -158,7 +158,7 @@ app.add_systems(
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all`
+- [x] `cargo check-all`
 
 #### Manual Verification:
 - [ ] Camera spawns at default position (unchanged from current behavior)
@@ -282,7 +282,7 @@ app.add_systems(
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all`
+- [x] `cargo check-all`
 
 #### Manual Verification:
 - [ ] Q press: camera smoothly rotates 90° CCW around player
@@ -337,7 +337,7 @@ pub fn update_facing(
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all`
+- [x] `cargo check-all`
 
 #### Manual Verification:
 - [ ] Default camera (0° rotation): WASD unchanged
@@ -425,7 +425,7 @@ app.add_systems(
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all`
+- [x] `cargo check-all`
 
 #### Manual Verification:
 - [ ] Light rotates with camera — shadows shift consistently with view angle
