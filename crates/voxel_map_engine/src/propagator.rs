@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 #[allow(unused_imports)]
 use tracy_client::plot;
 
@@ -36,10 +36,8 @@ pub struct TicketLevelPropagator {
     levels: HashMap<IVec2, u32>,
     /// Active ticket sources.
     sources: HashMap<Entity, TicketSource>,
-    /// Pending BFS updates bucketed by level. Index = level.
-    pending_by_level: Vec<HashSet<IVec2>>,
-    /// Lowest non-empty bucket index for O(1) access to highest-priority work.
-    min_pending_level: usize,
+    /// Pending BFS updates bucketed by level.
+    pending_by_level: BTreeMap<u32, HashSet<IVec2>>,
     /// Whether any sources changed since last propagate().
     dirty: bool,
 }
@@ -79,8 +77,7 @@ impl TicketLevelPropagator {
         Self {
             levels: HashMap::new(),
             sources: HashMap::new(),
-            pending_by_level: (0..=MAX_LEVEL).map(|_| HashSet::new()).collect(),
-            min_pending_level: MAX_LEVEL as usize + 1,
+            pending_by_level: BTreeMap::new(),
             dirty: false,
         }
     }
@@ -126,7 +123,7 @@ impl TicketLevelPropagator {
         let steps = self.process_pending_updates(MAX_BFS_STEPS_PER_FRAME);
 
         // Only mark clean if all pending work is done
-        let has_remaining = self.find_min_pending_from(0) < self.pending_by_level.len();
+        let has_remaining = !self.pending_by_level.is_empty();
         if !has_remaining {
             self.dirty = false;
         }
@@ -189,13 +186,10 @@ impl TicketLevelPropagator {
         }
     }
 
-    /// Inserts a column into the pending bucket at the given level,
-    /// updating `min_pending_level`.
+    /// Inserts a column into the pending bucket at the given level.
     fn insert_pending(&mut self, level: u32, col: IVec2) {
-        let idx = level as usize;
-        if idx < self.pending_by_level.len() {
-            self.pending_by_level[idx].insert(col);
-            self.min_pending_level = self.min_pending_level.min(idx);
+        if level <= MAX_LEVEL {
+            self.pending_by_level.entry(level).or_default().insert(col);
         }
     }
 
@@ -213,14 +207,16 @@ impl TicketLevelPropagator {
     /// remain in their buckets for the next call.
     fn process_pending_updates(&mut self, max_steps: usize) -> usize {
         let mut steps = 0;
-        let mut level_idx = self.min_pending_level;
-        while level_idx < self.pending_by_level.len() && steps < max_steps {
-            if self.pending_by_level[level_idx].is_empty() {
-                level_idx += 1;
-                continue;
-            }
-
-            let columns: Vec<IVec2> = self.pending_by_level[level_idx].drain().collect();
+        while steps < max_steps {
+            let Some((&level, _)) = self.pending_by_level.first_key_value() else {
+                break;
+            };
+            let columns: Vec<IVec2> = self
+                .pending_by_level
+                .remove(&level)
+                .unwrap()
+                .into_iter()
+                .collect();
             let mut processed = 0;
             for &col in &columns {
                 if steps >= max_steps {
@@ -230,15 +226,14 @@ impl TicketLevelPropagator {
                 steps += 1;
                 processed += 1;
             }
-
-            // Re-insert unprocessed columns back into the bucket
             if processed < columns.len() {
-                self.pending_by_level[level_idx].extend(columns[processed..].iter().copied());
+                self.pending_by_level
+                    .entry(level)
+                    .or_default()
+                    .extend(columns[processed..].iter().copied());
             }
-
-            level_idx = self.find_min_pending_from(0);
         }
-        self.min_pending_level = self.find_min_pending_from(0);
+        self.pending_by_level.retain(|_, set| !set.is_empty());
         steps
     }
 
@@ -306,16 +301,6 @@ impl TicketLevelPropagator {
                 self.insert_pending(current, neighbor);
             }
         }
-    }
-
-    /// Finds the lowest non-empty bucket index starting from `from`.
-    fn find_min_pending_from(&self, from: usize) -> usize {
-        for i in from..self.pending_by_level.len() {
-            if !self.pending_by_level[i].is_empty() {
-                return i;
-            }
-        }
-        self.pending_by_level.len()
     }
 
     /// Compares old loaded snapshot to current levels and classifies changes.
@@ -509,7 +494,7 @@ mod tests {
     fn chebyshev_distance_correct_for_diagonals() {
         let mut prop = TicketLevelPropagator::new();
         prop.set_source(entity(1), IVec2::ZERO, 0, 5);
-        prop.propagate();
+        propagate_fully(&mut prop);
 
         assert_eq!(prop.get_level(IVec2::new(3, 3)), Some(3));
         assert_eq!(prop.get_level(IVec2::new(2, 4)), Some(4));

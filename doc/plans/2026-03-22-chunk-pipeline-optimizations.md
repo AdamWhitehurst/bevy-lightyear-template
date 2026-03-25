@@ -1116,8 +1116,8 @@ pub fn new() -> Self {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all`
-- [ ] `cargo test -p voxel_map_engine` — all propagator tests pass unchanged
+- [x] `cargo check-all`
+- [x] `cargo test -p voxel_map_engine` — all propagator tests pass unchanged
 - [ ] `cargo server` && `cargo client -c 1`
 
 #### Manual Verification:
