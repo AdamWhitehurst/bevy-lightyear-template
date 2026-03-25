@@ -85,6 +85,10 @@ impl Plugin for ProtocolPlugin {
         app.add_plugins(InputPlugin::<PlayerActions> {
             config: InputConfig::<PlayerActions> {
                 rebroadcast_inputs: true,
+                // At 5, srv_tick_past_buffer_end occasionally hits +1,
+                // causing axis values to persist (stuck movement) and discrete
+                // transitions (JustPressed) to be missed.
+                packet_redundancy: 20,
                 ..default()
             },
         });
