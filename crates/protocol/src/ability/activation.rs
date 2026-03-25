@@ -12,7 +12,7 @@ use lightyear::prelude::{
     ControlledBy, NetworkTarget, PreSpawned, PredictionDespawnCommandsExt, PredictionTarget,
     Replicate, Tick,
 };
-use tracy_client::{plot, Client as TracyClient};
+use tracy_client::Client as TracyClient;
 
 const ABILITY_ACTIONS: [PlayerActions; 4] = [
     PlayerActions::Ability1,
@@ -50,23 +50,6 @@ pub fn ability_activation(
     let tick = timeline.tick();
 
     for (entity, action_state, slots_opt, mut cooldowns, player_id) in &mut query {
-        // Plot raw just_pressed state for Ability2 (speed_burst) every FixedUpdate tick
-        plot!(
-            "ability2_just_pressed",
-            if action_state.just_pressed(&PlayerActions::Ability2) {
-                1.0
-            } else {
-                0.0
-            }
-        );
-        plot!(
-            "ability2_pressed",
-            if action_state.pressed(&PlayerActions::Ability2) {
-                1.0
-            } else {
-                0.0
-            }
-        );
         let slots = slots_opt.unwrap_or(&default_slots.0);
         for (slot_idx, action) in ABILITY_ACTIONS.iter().enumerate() {
             // Use `pressed()` instead of `just_pressed()` because lightyear's
