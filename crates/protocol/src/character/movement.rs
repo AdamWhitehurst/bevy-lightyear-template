@@ -4,6 +4,7 @@ use crate::PlayerActions;
 use avian3d::prelude::{forces::ForcesItem, *};
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::ActionState;
+use tracy_client::plot;
 
 /// Apply movement based on input direction and jump flag.
 /// Movement uses acceleration-based physics with ground detection for jumping.
@@ -53,6 +54,7 @@ pub fn apply_movement(
     let move_dir = action_state
         .axis_pair(&PlayerActions::Move)
         .clamp_length_max(1.0);
+    plot!("move_input_magnitude", move_dir.length() as f64);
     let move_dir = Vec3::new(-move_dir.x, 0.0, move_dir.y);
 
     let linear_velocity = forces.linear_velocity();
