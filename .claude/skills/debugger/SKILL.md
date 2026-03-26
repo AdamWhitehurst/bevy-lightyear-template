@@ -185,8 +185,8 @@ Rules:
 
 ### Phase 4: Test
 
-Run the application and examine output:
-- `cargo server` / `cargo client` as appropriate
+Instruct the user how to run the application and examine output:
+- `cargo server` / `cargo client` variants as appropriate (inspect `.cargo/config.toml` for variants)
 - Examine logs for the diagnostic output
 - Compare actual output against the prediction
 
