@@ -19,17 +19,143 @@ Accept a bug description from the user. If insufficient, ask:
 ### Phase 1: Gather Evidence
 
 Before hypothesizing, collect raw facts:
+1. **Read any directly mentioned files first:**
+   - If the user mentions specific files (tasks, docs, JSON), read them FULLY first
+   - **IMPORTANT**: Use the Read tool WITHOUT limit/offset parameters to read entire files
+   - **CRITICAL**: Read these files yourself in the main context before spawning any sub-tasks
+   - This ensures you have full context before decomposing the research
+2. **Always check this skill's documents (`.claude/skills/debugger/lessons/`) for lessons relating to the code producing the bug that you need to be aware of**
+    - Refer to the Lessons Index section for high-level overview of area-specific lessons documents
+3. **Analyze and decompose the problem**:
+   - Check `git log --oneline -10` and `git diff` for recent changes
+   - Check build output / runtime logs if available
+   - Break down the user's explanation into composable research areas
+   - Take time to ultrathink about the underlying patterns, connections, and architectural implications the user might be seeking
+   - Identify specific components, patterns, or concepts to investigate
+   - Create a research plan using TodoWrite to track all subtasks
+   - Consider which directories, files, or architectural patterns are relevant
 
-1. Read the relevant source code
-2. Check `git log --oneline -10` and `git diff` for recent changes
-3. Check build output / runtime logs if available
-4. Identify the specific system, component, or code path involved
+3. **Spawn parallel sub-agent tasks for comprehensive research:**
+   - CRITICAL: After understanding the research question, you do NOT do the research yourself. You MUST spawn sub-agents to research different aspects of the question
+   - Create multiple Task agents to research different aspects concurrently
+   - We now have specialized agents that know how to do specific research tasks:
 
-Present a brief **Situation Report**: what the code does, what changed recently, what the symptoms point to.
+   **CRITICAL: SUB-AGENT DIRECTION:**
+   - **Only search and report**: Sub-agents should ONLY search the codebase and return findings in their response
+   - **YOU synthesize**: Only YOU (the main research agent) create the final research document in doc/bug/
+   - **Use "find and report back" language**: When prompting sub-agents, use phrases like:
+     - "Find and report back on..."
+     - "Search for and describe..."
+     - "Locate and return information about..."
+   - **Do NOT use "document" language**: Avoid phrases like "document this" or "create documentation" which may trigger file creation
+
+   **For codebase research (PRIMARY AGENTS FOR RESEARCH):**
+   - Use the **codebase-locator** agent to find WHERE files and components live
+   - Use the **codebase-analyzer** agent to understand HOW specific code works (without critiquing it)
+   - Use the **codebase-pattern-finder** agent to find examples of existing patterns (without evaluating them)
+
+   **IMPORTANT**: All agents are documentarians, not critics. They will describe what exists without suggesting improvements or identifying issues.
+
+   **For doc directory:**
+   - Use the **doc-locator** agent to discover what documents exist about the topic
+   - Use the **doc-analyzer** agent to extract key insights from specific documents (only the most relevant ones)
+
+   **For web research:**
+   - Use the **web-search-researcher** agent for external documentation and resources
+   - IF you use web-research agents, instruct them to return LINKS with their findings, and please INCLUDE those links in your final report
+
+   **WHEN TO USE SPECIALIZED DOMAIN AGENTS:**
+
+   The codebase research agents above are your PRIMARY tools for documentation. However, when research reveals specific implementation needs OR when the user's question explicitly relates to a specialized domain, you may ALSO use domain specialists to provide additional context.
+
+   **CRITICAL GUIDELINES FOR USING DOMAIN SPECIALISTS:**
+   1. **Default to codebase research agents first**: Always start with codebase-locator, codebase-analyzer, and codebase-pattern-finder
+   2. **Add domain specialists when**:
+      - The research question relates to their domain 
+   3. **Domain specialists search and report in research mode**:
+      - Remind them they are FINDING and REPORTING on EXISTING implementations
+      - They should NOT suggest improvements or identify issues
+      - They should NOT create any files - only return findings in their response
+      - They should focus on "what exists" and "how it works"
+   4. **Run agents in parallel when they research different aspects**:
+      - Example: codebase-locator (find files) + game-developer (understand game patterns)
+      - Example: codebase-analyzer (code details) + rust-engineer (Rust idioms)
+   5. **Synthesize findings from all agents** into coherent research document
+
+4. **Wait for all sub-agents to complete and synthesize findings:**
+   - IMPORTANT: Wait for ALL sub-agent tasks to complete before proceeding
+   - Compile all sub-agent results (both codebase and doc findings)
+   - Prioritize live codebase findings as primary source of truth
+   - Use doc/ findings as supplementary historical context
+   - Connect findings across different components
+   - Include specific file paths and line numbers for reference
+   - Verify all doc/ paths are correct (e.g., doc/allison/ not doc/ for personal files)
+   - Highlight patterns, connections, and architectural decisions
+   - Answer the user's specific questions with concrete evidence
+
+5. **Generate or Update research document:**
+   - Document all relevant findings
+   - Use the metadata gathered in step 4
+   - Structure the document with YAML frontmatter followed by content:
+     ```markdown
+     ---
+     date: [Current date and time with timezone in ISO format]
+     researcher: [Researcher name from doc status]
+     git_commit: [Current commit hash]
+     branch: [Current branch name]
+     repository: [Repository name]
+     topic: "[User's Bug]"
+     tags: [bug, codebase, relevant-component-names]
+     status: complete
+     last_updated: [Current date in YYYY-MM-DD format]
+     last_updated_by: [Researcher name]
+     ---
+
+     # Bug: [Bug Summary]
+
+     **Date**: [Current date and time with timezone from step 4]
+     **Researcher**: [Researcher name from doc status]
+     **Git Commit**: [Current commit hash from step 4]
+     **Branch**: [Current branch name from step 4]
+     **Repository**: [Repository name]
+
+     ## User's Prompt
+     [Original user prompt]
+
+     ## Summary
+     [High-level documentation of what was found, answering the user's question by describing what exists]
+
+     ## Investigation
+
+     ### [Component/Area 1]
+     - Description of what exists ([file.ext:line](link))
+     - How it connects to other components
+     - Current implementation details (without evaluation)
+
+     ### [Component/Area 2]
+     ...
+
+     ## Code References
+     - `src/systems/movement.rs:45` - Movement system implementation
+     - `src/components/physics.rs:23-67` - Physics component definitions
+     - `assets/config/gameplay.ron:12` - Game configuration values
+
+     ## Architecture Documentation
+     [Current patterns, conventions, and design implementations found in the codebase]
+
+     ## Hypotheses
+     [filled in later]
+
+     ## Fixes
+     [filled in later]
+
+     ## Solutions
+     [filled in later]
+     ```
 
 ### Phase 2: Hypothesize
 
-Propose a **single root cause hypothesis** with:
+Propose a **single root cause hypothesis** following this template:
 
 ```
 **Hypothesis:** [What you believe is wrong and why]
@@ -38,6 +164,10 @@ Propose a **single root cause hypothesis** with:
 ```
 
 Get user confirmation before instrumenting. Keep hypotheses specific and falsifiable.
+**ALWAYS** update the generated document with the above proposed hypothesis with this line as well:
+```
+**Decision:** [Approved/Rejected] [optional reason]
+```
 
 ### Phase 3: Instrument
 
@@ -72,6 +202,8 @@ Run the application and examine output:
 - State the confirmed root cause clearly
 - Proceed to Phase 6
 
+- **Always** Update files under this skill's directory (`.claude/skills/debugger/lessons`) with area-specific debugging lessons (e.g. `lessons/lightyear.md`, `lessons/avian.md`, `lessons/abilities.md`) **AND** this documents "Lessons Index" when adding new ones
+
 ### Phase 6: Fix
 
 Propose a fix. Present:
@@ -82,6 +214,13 @@ Propose a fix. Present:
 **Risk:** [What else this change could affect]
 ```
 
+Get user confirmation before fixing.
+
+**ALWAYS** update the generated document with the above proposed fix with this line as well:
+```
+**Decision:** [Approved/Rejected] [optional reason]
+```
+
 Implement the fix after user approval. Then verify:
 1. `cargo check-all` passes
 2. Runtime test confirms the bug is resolved
@@ -89,7 +228,17 @@ Implement the fix after user approval. Then verify:
 
 If fix doesn't work, the root cause hypothesis was incomplete — return to Phase 2.
 
-### Phase 7: Clean Up
+### Phase 7: Remember
+
+1. Save a memory if the bug revealed something non-obvious:
+  - A footgun in the codebase architecture
+  - A subtle interaction between systems
+  - A pattern that will likely cause similar bug
+2. **Always** Add or update a file under this skill's directory (`.claude/skills/debugger/lessons`) with area-specific debugging lessons (e.g. `lessons/lightyear.md`, `lessons/tracy.md`) **AND** this documents "Lessons Index" when adding new ones
+
+Only save if genuinely useful for future conversations. Don't save routine fixes.
+
+### Phase 8: Clean Up
 
 After fix is verified:
 
@@ -98,15 +247,6 @@ After fix is verified:
 3. Keep diagnostics that are genuinely useful for future debugging (remove the `// DEBUG` tag, make them permanent with proper log levels)
 4. Verify `cargo check-all` still passes
 
-### Phase 8: Remember
-
-Save a memory if the bug revealed something non-obvious:
-- A footgun in the codebase architecture
-- A subtle interaction between systems
-- A pattern that will likely cause similar bugs
-
-Only save if genuinely useful for future conversations. Don't save routine fixes.
-
 ## Anti-Patterns
 
 - **Shotgun debugging**: Changing multiple things at once hoping one works. Change one thing, test, evaluate.
@@ -114,3 +254,6 @@ Only save if genuinely useful for future conversations. Don't save routine fixes
 - **Stale diagnostics**: Leaving debug instrumentation from previous hypotheses. Clean as you go.
 - **Scope creep**: Fixing other issues discovered during debugging. Note them, stay focused on the reported bug.
 - **Premature fixing**: Proposing a fix before confirming root cause. Instrument first.
+- **Assuming outdated architecture**: When debugging a dependency, verify the actual version in use. Architecture can change between major versions (e.g., lightyear 0.25 merged Predicted/Confirmed into one entity). Check `Cargo.toml`, `git log`, and release notes before building theories on entity layout.
+
+## Lessons Index
