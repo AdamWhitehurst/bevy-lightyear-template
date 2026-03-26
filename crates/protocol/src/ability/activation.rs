@@ -52,11 +52,7 @@ pub fn ability_activation(
     for (entity, action_state, slots_opt, mut cooldowns, player_id) in &mut query {
         let slots = slots_opt.unwrap_or(&default_slots.0);
         for (slot_idx, action) in ABILITY_ACTIONS.iter().enumerate() {
-            // Use `pressed()` instead of `just_pressed()` because lightyear's
-            // input snapshot deserialization loses the JustPressed transient state —
-            // the server only ever sees Pressed. The cooldown check below prevents
-            // re-activation while the button is held.
-            if !action_state.pressed(action) {
+            if !action_state.just_pressed(action) {
                 continue;
             }
             let Some(ref ability_id) = slots.0[slot_idx] else {

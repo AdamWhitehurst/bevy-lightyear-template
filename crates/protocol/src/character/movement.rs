@@ -22,10 +22,7 @@ pub fn apply_movement(
 
     let max_velocity_delta_per_tick = MAX_ACCELERATION * delta_secs;
 
-    // Use `pressed()` instead of `just_pressed()` — lightyear's input snapshot
-    // deserialization loses the JustPressed transient state on the server.
-    // The ground raycast prevents multi-jump (must be grounded to jump).
-    if action_state.pressed(&PlayerActions::Jump) {
+    if action_state.just_pressed(&PlayerActions::Jump) {
         let ray_cast_origin = position.0;
 
         let filter = SpatialQueryFilter::from_excluded_entities([entity]);
