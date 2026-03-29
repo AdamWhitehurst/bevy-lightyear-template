@@ -12,9 +12,8 @@ use protocol::{
 };
 use ui::MapTransitionState;
 use voxel_map_engine::prelude::{
-    chunk_to_column, column_to_chunks, flat_terrain_voxels, mesh_chunk_greedy, ChunkData,
-    ChunkTicket, DefaultVoxelMaterial, VoxelChunk, VoxelGenerator, VoxelMapConfig,
-    VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel, DEFAULT_COLUMN_Y_MAX,
+    chunk_to_column, column_to_chunks, flat_terrain_voxels, ChunkData, ChunkTicket, VoxelGenerator,
+    VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel, DEFAULT_COLUMN_Y_MAX,
     DEFAULT_COLUMN_Y_MIN,
 };
 
@@ -129,17 +128,11 @@ fn attach_chunk_ticket_to_player(
     }
 }
 
-/// Receives chunk data from server and inserts into the local VoxelMapInstance.
-/// If the predicted player isn't ready yet, buffers messages in `PendingChunkSyncs`
-/// since Lightyear clears MessageReceiver each frame.
+/// Receives chunk data from server and queues async meshing via the remesh pipeline.
 fn handle_chunk_data_sync(
-    mut commands: Commands,
     mut receivers: Query<&mut MessageReceiver<ChunkDataSync>>,
-    mut map_query: Query<(Entity, &mut VoxelMapInstance)>,
+    mut map_query: Query<&mut VoxelMapInstance>,
     registry: Res<MapRegistry>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    default_material: Res<DefaultVoxelMaterial>,
 ) {
     let mut incoming: Vec<ChunkDataSync> = Vec::new();
     for mut receiver in &mut receivers {
@@ -154,50 +147,18 @@ fn handle_chunk_data_sync(
         let Some(&map_entity) = registry.0.get(&sync.map_id) else {
             continue;
         };
-        let Ok((_, mut instance)) = map_query.get_mut(map_entity) else {
+        let Ok(mut instance) = map_query.get_mut(map_entity) else {
             continue;
         };
 
-        let voxels = sync.data.to_voxels();
-        let chunk_data = ChunkData::from_voxels(&voxels);
+        let chunk_data = ChunkData::from_voxels(&sync.data.to_voxels());
 
         instance.insert_chunk_data(sync.chunk_pos, chunk_data);
         instance
             .chunk_levels
             .entry(chunk_to_column(sync.chunk_pos))
             .or_insert(0);
-
-        let Some(mesh) = mesh_chunk_greedy(&voxels) else {
-            continue;
-        };
-        let mesh_handle = meshes.add(mesh);
-        let offset = sync.chunk_pos.as_vec3() * 16.0 - Vec3::ONE;
-        let material = if instance.debug_colors {
-            let hash = (sync.chunk_pos.x.wrapping_mul(73856093))
-                ^ (sync.chunk_pos.y.wrapping_mul(19349663))
-                ^ (sync.chunk_pos.z.wrapping_mul(83492791));
-            let hue = ((hash as u32) % 360) as f32;
-            materials.add(StandardMaterial {
-                base_color: Color::hsl(hue, 0.5, 0.5),
-                perceptual_roughness: 0.9,
-                ..default()
-            })
-        } else {
-            default_material.0.clone()
-        };
-
-        let chunk_entity = commands
-            .spawn((
-                VoxelChunk {
-                    position: sync.chunk_pos,
-                    lod_level: 0,
-                },
-                Mesh3d(mesh_handle),
-                MeshMaterial3d(material),
-                Transform::from_translation(offset),
-            ))
-            .id();
-        commands.entity(map_entity).add_child(chunk_entity);
+        instance.chunks_needing_remesh.insert(sync.chunk_pos);
     }
 }
 

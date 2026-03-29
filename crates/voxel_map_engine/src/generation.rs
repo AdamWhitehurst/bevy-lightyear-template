@@ -10,7 +10,7 @@ use crate::meshing::mesh_chunk_greedy;
 use crate::types::{ChunkData, FillType, WorldVoxel};
 
 /// Number of chunks to generate per async task.
-pub const GEN_BATCH_SIZE: usize = 4;
+pub const GEN_BATCH_SIZE: usize = 8;
 
 /// Result of an async chunk generation task.
 pub struct ChunkGenResult {

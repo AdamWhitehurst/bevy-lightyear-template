@@ -63,6 +63,7 @@
         ),
     },
     events: [
-        (time: 0.3, name: "footstep_right"),
+        (time: 0.1, name: "run_footstep_left"),
+        (time: 0.3, name: "run_footstep_right"),
     ],
 )

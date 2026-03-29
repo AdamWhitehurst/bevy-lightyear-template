@@ -57,7 +57,7 @@ impl ChunkTicket {
         }
     }
 
-    /// Player ticket with default radius (10).
+    /// Player ticket with default radius (200).
     pub fn player(map_entity: Entity) -> Self {
         Self::new(
             map_entity,
@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn ticket_type_default_radii() {
-        assert_eq!(TicketType::Player.default_radius(), 10);
+        assert_eq!(TicketType::Player.default_radius(), 200);
         assert_eq!(TicketType::Npc.default_radius(), 1);
         assert_eq!(TicketType::MapTransition.default_radius(), 4);
     }
@@ -203,7 +203,7 @@ mod tests {
         let e = test_entity();
         let p = ChunkTicket::player(e);
         assert_eq!(p.ticket_type, TicketType::Player);
-        assert_eq!(p.radius, 10);
+        assert_eq!(p.radius, 200);
         let n = ChunkTicket::npc(e);
         assert_eq!(n.ticket_type, TicketType::Npc);
         assert_eq!(n.radius, 1);

@@ -144,10 +144,10 @@ Before hypothesizing, collect raw facts:
      [Current patterns, conventions, and design implementations found in the codebase]
 
      ## Hypotheses
-     [filled in later]
+     [Sequential H1, H2, H3... — each with Hypothesis, Prediction, Test, Decision fields]
 
      ## Fixes
-     [filled in later]
+     [Sequential F1, F2, F3... — each linked to a hypothesis, with Root Cause, Fix, Risk, Decision fields]
 
      ## Solutions
      [filled in later]
@@ -155,19 +155,19 @@ Before hypothesizing, collect raw facts:
 
 ### Phase 2: Hypothesize
 
-Propose a **single root cause hypothesis** following this template:
+Propose a **single root cause hypothesis** using sequential IDs: **H1**, **H2**, **H3**, etc.
 
 ```
+### H[N]: [Short descriptive title]
+
 **Hypothesis:** [What you believe is wrong and why]
 **Prediction:** [If this hypothesis is correct, then instrumenting X will show Y]
 **Test:** [Exact diagnostics to add — trace!, warn!, info_span!, event!]
+**Decision:** Pending
 ```
 
 Get user confirmation before instrumenting. Keep hypotheses specific and falsifiable.
-**ALWAYS** update the generated document with the above proposed hypothesis with this line as well:
-```
-**Decision:** [Approved/Rejected] [optional reason]
-```
+Update **Decision** to `Validated` or `Invalidated [reason]` after testing.
 
 ### Phase 3: Instrument
 
@@ -206,20 +206,18 @@ Instruct the user how to run the application and examine output:
 
 ### Phase 6: Fix
 
-Propose a fix. Present:
+Propose a fix using sequential IDs: **F1**, **F2**, **F3**, etc. Link to the hypothesis it addresses.
 
 ```
+### F[N]: [Short descriptive title] (addresses H[N])
+
 **Root Cause:** [Confirmed explanation]
 **Fix:** [What to change and why]
 **Risk:** [What else this change could affect]
+**Decision:** Pending
 ```
 
-Get user confirmation before fixing.
-
-**ALWAYS** update the generated document with the above proposed fix with this line as well:
-```
-**Decision:** [Approved/Rejected] [optional reason]
-```
+Get user confirmation before implementing. Update **Decision** to `Approved` or `Rejected [reason]` after review.
 
 Implement the fix after user approval. Then verify:
 1. `cargo check-all` passes
@@ -254,7 +252,7 @@ After fix is verified:
 - **Stale diagnostics**: Leaving debug instrumentation from previous hypotheses. Clean as you go.
 - **Scope creep**: Fixing other issues discovered during debugging. Note them, stay focused on the reported bug.
 - **Premature fixing**: Proposing a fix before confirming root cause. Instrument first.
-- **Assuming outdated architecture**: When debugging a dependency, verify the actual version in use. Architecture can change between major versions (e.g., lightyear 0.25 merged Predicted/Confirmed into one entity). Check `Cargo.toml`, `git log`, and release notes before building theories on entity layout.
+- **Not checking for outdated dependencies or architecture**: When debugging a dependency, verify the actual version in use of a dependency. Architecture can change between major versions (e.g., lightyear 0.25 merged Predicted/Confirmed into one entity) **as well as through undocumented changes**. Check `Cargo.toml`, `git log`, and release notes and review the relevant code **before** building hypotheses.
 
 ## Lessons Index
 

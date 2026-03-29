@@ -279,6 +279,15 @@ fn set_voxel_isolated_between_instances() {
         has_loaded_chunk(app, map_a, IVec3::ZERO) && has_loaded_chunk(app, map_b, IVec3::ZERO)
     });
 
+    // Snapshot map_a's dirty set before editing map_b.
+    // Generation may have already dirtied chunks, so we compare before/after.
+    let dirty_a_before = app
+        .world()
+        .get::<VoxelMapInstance>(map_a)
+        .unwrap()
+        .dirty_chunks
+        .clone();
+
     let edit_pos = IVec3::new(2, 3, 4);
     app.world_mut()
         .run_system_once(move |mut vw: VoxelWorld| {
@@ -286,10 +295,14 @@ fn set_voxel_isolated_between_instances() {
         })
         .unwrap();
 
-    let instance_a = app.world().get::<VoxelMapInstance>(map_a).unwrap();
-    assert!(
-        instance_a.dirty_chunks.is_empty(),
-        "map_a should have no dirty chunks after editing map_b"
+    let dirty_a_after = &app
+        .world()
+        .get::<VoxelMapInstance>(map_a)
+        .unwrap()
+        .dirty_chunks;
+    assert_eq!(
+        dirty_a_before, *dirty_a_after,
+        "map_a dirty set should not change after editing map_b"
     );
 
     let instance_b = app.world().get::<VoxelMapInstance>(map_b).unwrap();

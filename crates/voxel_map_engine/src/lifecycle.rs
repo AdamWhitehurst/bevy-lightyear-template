@@ -29,19 +29,19 @@ pub struct ChunkWorkBudget {
     budget: std::time::Duration,
 }
 
-/// Default budget: ~25% of a 16ms frame at 60fps.
-const CHUNK_WORK_BUDGET_MS: u64 = 4;
+/// Default budget: ~50% of a 16ms frame at 60fps.
+const CHUNK_WORK_BUDGET_MS: u64 = 8;
 
 /// Safety caps -- even within budget, don't exceed these per frame.
-const MAX_GEN_SPAWNS_PER_FRAME: usize = 64;
-const MAX_GEN_POLLS_PER_FRAME: usize = 64;
-const MAX_REMESH_SPAWNS_PER_FRAME: usize = 32;
-const MAX_REMESH_POLLS_PER_FRAME: usize = 32;
+const MAX_GEN_SPAWNS_PER_FRAME: usize = 256;
+const MAX_GEN_POLLS_PER_FRAME: usize = 256;
+const MAX_REMESH_SPAWNS_PER_FRAME: usize = 256;
+const MAX_REMESH_POLLS_PER_FRAME: usize = 256;
 
 /// Maximum number of generation tasks allowed in-flight at once.
-const MAX_PENDING_GEN_TASKS: usize = 256;
+const MAX_PENDING_GEN_TASKS: usize = 512;
 /// Maximum number of remesh tasks allowed in-flight at once.
-const MAX_PENDING_REMESH_TASKS: usize = 64;
+const MAX_PENDING_REMESH_TASKS: usize = 512;
 
 impl ChunkWorkBudget {
     fn reset(&mut self) {
