@@ -11,7 +11,6 @@ use std::collections::HashMap;
 
 pub use animation::{
     AnimBoneDefaults, BuiltAnimGraphs, BuiltAnimations, LoadedAnimHandles, LocomotionBlendWeights,
-    LocomotionState,
 };
 pub use animset::AnimationEventFired;
 pub use spawn::{

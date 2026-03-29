@@ -45,10 +45,15 @@ pub struct AnimBoneDefaults(pub HashMap<AssetId<SpriteAnimAsset>, Vec<BoneAnimDe
 pub struct BuiltAnimGraph {
     /// Handle to the graph asset.
     pub graph_handle: Handle<AnimationGraph>,
-    /// Maps clip path string to `AnimationNodeIndex`.
+    /// Maps clip path string (locomotion) or ability ID to `AnimationNodeIndex`.
     pub node_map: HashMap<String, AnimationNodeIndex>,
     /// Locomotion entries in order of speed_threshold.
     pub locomotion_entries: Vec<LocomotionNodeEntry>,
+    /// Index of the locomotion blend node, used for runtime mask toggling.
+    pub locomotion_blend_node: AnimationNodeIndex,
+    /// Per-ability mask of bones the ability animates (to apply to locomotion blend
+    /// during playback, masking those bones out of locomotion).
+    pub ability_bone_masks: HashMap<String, AnimationMask>,
 }
 
 /// A locomotion clip node and its speed threshold for blend weight calculation.
@@ -60,12 +65,6 @@ pub struct LocomotionNodeEntry {
 /// Pre-built animation graphs, one per animset asset.
 #[derive(Resource, Default)]
 pub struct BuiltAnimGraphs(pub HashMap<AssetId<SpriteAnimSetAsset>, BuiltAnimGraph>);
-
-/// Tracks whether the character is in locomotion mode (vs ability animation).
-#[derive(Component)]
-pub struct LocomotionState {
-    pub active: bool,
-}
 
 /// Smoothed blend weights for locomotion clips, lerped toward target each frame.
 #[derive(Component)]
@@ -370,8 +369,10 @@ fn add_scale_curve(
 pub fn build_anim_graphs(
     registry: Res<RigRegistry>,
     animset_assets: Res<Assets<SpriteAnimSetAsset>>,
+    source_assets: Res<Assets<SpriteAnimAsset>>,
     built_anims: Res<BuiltAnimations>,
     loaded_handles: Res<LoadedAnimHandles>,
+    bone_defaults: Res<AnimBoneDefaults>,
     mut built_graphs: ResMut<BuiltAnimGraphs>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
 ) {
@@ -389,16 +390,23 @@ pub fn build_anim_graphs(
             continue; // clips not all built yet — expected during startup
         }
 
-        let (graph, node_map, locomotion_entries) =
-            build_graph_for_animset(animset, &*loaded_handles, &*built_anims);
-        let graph_handle = graphs.add(graph);
+        let built = build_graph_for_animset(
+            animset,
+            &*loaded_handles,
+            &*built_anims,
+            &*source_assets,
+            &*bone_defaults,
+        );
+        let graph_handle = graphs.add(built.0);
 
         built_graphs.0.insert(
             animset_id,
             BuiltAnimGraph {
                 graph_handle,
-                node_map,
-                locomotion_entries,
+                node_map: built.1,
+                locomotion_entries: built.2,
+                locomotion_blend_node: built.3,
+                ability_bone_masks: built.4,
             },
         );
     }
@@ -427,19 +435,32 @@ fn all_clips_built(
     })
 }
 
-/// Constructs an `AnimationGraph` with a locomotion blend node and ability clip nodes.
+/// Constructs an `AnimationGraph` with per-bone mask groups for body-region independence.
+///
+/// Each bone gets its own mask group (index = position in rig bone list). Ability clips
+/// are masked to only affect bones they explicitly define in `bone_timelines`. The returned
+/// `ability_bone_masks` maps ability_id → mask of bones the ability animates (used at
+/// runtime to mask those bones out of locomotion during ability playback).
 fn build_graph_for_animset(
     animset: &SpriteAnimSetAsset,
     loaded_handles: &LoadedAnimHandles,
     built_anims: &BuiltAnimations,
+    source_assets: &Assets<SpriteAnimAsset>,
+    bone_defaults: &AnimBoneDefaults,
 ) -> (
     AnimationGraph,
     HashMap<String, AnimationNodeIndex>,
     Vec<LocomotionNodeEntry>,
+    AnimationNodeIndex,
+    HashMap<String, AnimationMask>,
 ) {
     let mut graph = AnimationGraph::new();
     let mut node_map = HashMap::new();
     let mut locomotion_entries = Vec::new();
+    let mut ability_bone_masks = HashMap::new();
+
+    let bone_names = resolve_bone_names(animset, loaded_handles, bone_defaults);
+    register_bone_mask_groups(&mut graph, &bone_names);
 
     let blend_node = graph.add_blend(1.0, graph.root);
 
@@ -455,8 +476,12 @@ fn build_graph_for_animset(
 
     for (ability_id, clip_path) in &animset.ability_animations {
         let clip_handle = resolve_clip_handle(clip_path, loaded_handles, built_anims);
-        let node_idx = graph.add_clip(clip_handle, 1.0, graph.root);
+        let unspecified_mask =
+            compute_unspecified_bone_mask(clip_path, loaded_handles, source_assets, &bone_names);
+        let specified_mask = !unspecified_mask;
+        let node_idx = graph.add_clip_with_mask(clip_handle, unspecified_mask, 1.0, graph.root);
         node_map.insert(ability_id.clone(), node_idx);
+        ability_bone_masks.insert(ability_id.clone(), specified_mask);
     }
 
     if let Some(ref clip_path) = animset.hit_react {
@@ -465,7 +490,72 @@ fn build_graph_for_animset(
         node_map.insert(clip_path.clone(), node_idx);
     }
 
-    (graph, node_map, locomotion_entries)
+    (
+        graph,
+        node_map,
+        locomotion_entries,
+        blend_node,
+        ability_bone_masks,
+    )
+}
+
+/// Gets bone names from the first locomotion clip's bone defaults (all clips in an animset
+/// share the same rig, so any clip's defaults give the canonical bone list).
+fn resolve_bone_names(
+    animset: &SpriteAnimSetAsset,
+    loaded_handles: &LoadedAnimHandles,
+    bone_defaults: &AnimBoneDefaults,
+) -> Vec<String> {
+    let first_clip_path = &animset.locomotion.entries[0].clip;
+    let handle = loaded_handles
+        .0
+        .get(first_clip_path)
+        .expect("first locomotion clip must be loaded");
+    let defaults = bone_defaults
+        .0
+        .get(&handle.id())
+        .expect("bone defaults must exist for first locomotion clip");
+    defaults.iter().map(|b| b.name.clone()).collect()
+}
+
+/// Assigns each bone its own mask group in the animation graph (bone index = group index).
+fn register_bone_mask_groups(graph: &mut AnimationGraph, bone_names: &[String]) {
+    debug_assert!(
+        bone_names.len() <= 64,
+        "AnimationMask is u64: max 64 bones per rig, got {}",
+        bone_names.len()
+    );
+    for (i, name) in bone_names.iter().enumerate() {
+        let target_id = AnimationTargetId::from_names(std::iter::once(&Name::new(name.clone())));
+        graph.add_target_to_mask_group(target_id, i as u32);
+    }
+}
+
+/// Computes a mask of bones NOT specified in the ability clip's `bone_timelines`.
+///
+/// Bits set in the returned mask correspond to bones the ability does NOT animate,
+/// so the ability clip node won't affect those bones.
+fn compute_unspecified_bone_mask(
+    clip_path: &str,
+    loaded_handles: &LoadedAnimHandles,
+    source_assets: &Assets<SpriteAnimAsset>,
+    bone_names: &[String],
+) -> AnimationMask {
+    let handle = loaded_handles
+        .0
+        .get(clip_path)
+        .unwrap_or_else(|| panic!("LoadedAnimHandles missing entry for {clip_path}"));
+    let source = source_assets
+        .get(handle.id())
+        .unwrap_or_else(|| panic!("SpriteAnimAsset not loaded for {clip_path}"));
+
+    let mut mask: AnimationMask = 0;
+    for (i, name) in bone_names.iter().enumerate() {
+        if !source.bone_timelines.contains_key(name) {
+            mask |= 1 << i;
+        }
+    }
+    mask
 }
 
 /// Looks up a built `AnimationClip` handle by its source path.
@@ -502,9 +592,7 @@ pub fn attach_animation_players(
 
         commands.entity(entity).insert((
             AnimationPlayer::default(),
-            AnimationTransitions::default(),
             AnimationGraphHandle(built_graph.graph_handle.clone()),
-            LocomotionState { active: true },
         ));
 
         for (bone_name, &bone_entity) in &bone_entities.0 {
@@ -549,7 +637,6 @@ pub fn update_locomotion_blend_weights(
     mut characters: Query<
         (
             &mut AnimationPlayer,
-            &LocomotionState,
             &AnimSetRef,
             &LinearVelocity,
             &mut LocomotionBlendWeights,
@@ -562,10 +649,7 @@ pub fn update_locomotion_blend_weights(
     let dt = time.delta_secs();
     let lerp_factor = (BLEND_LERP_SPEED * dt).min(1.0);
 
-    for (mut player, loco_state, animset_ref, velocity, mut blend_weights) in &mut characters {
-        if !loco_state.active {
-            continue; // locomotion disabled during ability animations
-        }
+    for (mut player, animset_ref, velocity, mut blend_weights) in &mut characters {
         let Some(built_graph) = built_graphs.0.get(&animset_ref.0.id()) else {
             continue; // graph not built yet — expected during startup
         };

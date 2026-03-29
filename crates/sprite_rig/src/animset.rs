@@ -1,9 +1,7 @@
-use std::time::Duration;
-
 use bevy::{animation::AnimationEvent, animation::AnimationEventTrigger, prelude::*};
 use protocol::{ActiveAbility, CharacterMarker};
 
-use crate::animation::{BuiltAnimGraphs, LocomotionState};
+use crate::animation::BuiltAnimGraphs;
 use crate::asset::AnimEventKeyframe;
 use crate::spawn::AnimSetRef;
 
@@ -16,30 +14,31 @@ pub struct AnimationEventFired {
 /// Minimum blend weight below which animation events are suppressed.
 const EVENT_WEIGHT_THRESHOLD: f32 = 0.01;
 
-/// Crossfade duration when transitioning to an ability animation.
-const ABILITY_CROSSFADE: Duration = Duration::from_millis(80);
+/// Tracks the currently active ability animation on a character, so `return_to_locomotion`
+/// knows which mask to remove from the locomotion blend node.
+#[derive(Component)]
+pub struct ActiveAbilityAnim {
+    pub ability_id: String,
+    pub node_index: AnimationNodeIndex,
+}
 
 /// Triggers ability animation playback when an `ActiveAbility` is first added.
 ///
-/// Suppresses locomotion blending and crossfades to the ability clip identified
-/// by `ActiveAbility::def_id` in the character's built animation graph.
+/// Plays the ability clip directly on the `AnimationPlayer` (not via `AnimationTransitions`)
+/// and masks the ability's specified bones out of the locomotion blend node so locomotion
+/// only drives bones the ability doesn't touch.
 pub fn trigger_ability_animations(
+    mut commands: Commands,
     added_abilities: Query<&ActiveAbility, Added<ActiveAbility>>,
     mut characters: Query<
-        (
-            &mut AnimationPlayer,
-            &mut AnimationTransitions,
-            &mut LocomotionState,
-            &AnimSetRef,
-        ),
+        (&mut AnimationPlayer, &AnimSetRef, &AnimationGraphHandle),
         With<CharacterMarker>,
     >,
     built_graphs: Res<BuiltAnimGraphs>,
+    mut graph_assets: ResMut<Assets<AnimationGraph>>,
 ) {
     for ability in &added_abilities {
-        let Ok((mut player, mut transitions, mut loco_state, animset_ref)) =
-            characters.get_mut(ability.caster)
-        else {
+        let Ok((mut player, animset_ref, graph_handle)) = characters.get_mut(ability.caster) else {
             continue; // caster may not have animation components yet during startup
         };
 
@@ -57,46 +56,81 @@ pub fn trigger_ability_animations(
             continue;
         };
 
-        transitions.play(&mut player, node_idx, ABILITY_CROSSFADE);
-        loco_state.active = false;
+        let Some(&specified_mask) = built_graph.ability_bone_masks.get(ability_key) else {
+            warn!(
+                ability_id = %ability_key,
+                "no bone mask for ability_id in animset"
+            );
+            continue;
+        };
+
+        // Mask the ability's bones out of locomotion so locomotion only drives unaffected bones
+        if let Some(graph) = graph_assets.get_mut(&graph_handle.0) {
+            if let Some(loco_node) = graph.get_mut(built_graph.locomotion_blend_node) {
+                loco_node.add_mask(specified_mask);
+            }
+        }
+
+        // Play ability clip directly — locomotion clips keep running for unmasked bones
+        let anim = player.play(node_idx);
+        anim.set_weight(1.0);
+
+        commands.entity(ability.caster).insert(ActiveAbilityAnim {
+            ability_id: ability_key.clone(),
+            node_index: node_idx,
+        });
     }
 }
 
-/// Restores locomotion blending when a character's ability animation ends.
-///
-/// Detects the end condition as: `LocomotionState.active == false` and no
-/// `ActiveAbility` entity references this character as its caster.
+/// Restores full locomotion when a character's ability animation clip finishes or the
+/// ability entity is removed — whichever comes first.
 pub fn return_to_locomotion(
+    mut commands: Commands,
     abilities: Query<&ActiveAbility>,
     mut characters: Query<
         (
-            &mut LocomotionState,
+            &ActiveAbilityAnim,
             &mut AnimationPlayer,
             &AnimSetRef,
+            &AnimationGraphHandle,
             Entity,
         ),
         With<CharacterMarker>,
     >,
     built_graphs: Res<BuiltAnimGraphs>,
+    mut graph_assets: ResMut<Assets<AnimationGraph>>,
 ) {
-    for (mut loco_state, mut player, animset_ref, entity) in &mut characters {
-        if loco_state.active {
-            continue; // already in locomotion mode
-        }
+    for (active_anim, mut player, animset_ref, graph_handle, entity) in &mut characters {
+        let clip_finished = player
+            .animation(active_anim.node_index)
+            .is_none_or(|anim| anim.is_finished());
+        let ability_removed = !abilities.iter().any(|a| a.caster == entity);
 
-        let still_casting = abilities.iter().any(|a| a.caster == entity);
-        if still_casting {
-            continue; // ability still active — wait for it to end
+        if !clip_finished && !ability_removed {
+            continue; // animation still playing and ability still active
         }
-
-        loco_state.active = true;
 
         let built_graph = built_graphs
             .0
             .get(&animset_ref.0.id())
-            .expect("LocomotionState exists but graph not built");
+            .expect("ActiveAbilityAnim exists but graph not built");
 
+        // Remove the bone mask from locomotion blend, restoring full-body locomotion
+        if let Some(&specified_mask) = built_graph.ability_bone_masks.get(&active_anim.ability_id) {
+            if let Some(graph) = graph_assets.get_mut(&graph_handle.0) {
+                if let Some(loco_node) = graph.get_mut(built_graph.locomotion_blend_node) {
+                    loco_node.remove_mask(specified_mask);
+                }
+            }
+        }
+
+        // Stop the ability clip
+        player.stop(active_anim.node_index);
+
+        // Restart any locomotion clips that stopped during ability
         restart_stopped_locomotion_clips(&mut player, &built_graph.locomotion_entries);
+
+        commands.entity(entity).remove::<ActiveAbilityAnim>();
     }
 }
 
