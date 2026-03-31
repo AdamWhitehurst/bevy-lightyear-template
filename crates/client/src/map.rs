@@ -12,9 +12,9 @@ use protocol::{
 };
 use ui::MapTransitionState;
 use voxel_map_engine::prelude::{
-    chunk_to_column, column_to_chunks, flat_terrain_voxels, ChunkData, ChunkTicket, VoxelGenerator,
-    VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel, DEFAULT_COLUMN_Y_MAX,
-    DEFAULT_COLUMN_Y_MIN,
+    chunk_to_column, column_to_chunks, flat_terrain_voxels, ChunkData, ChunkStatus, ChunkTicket,
+    VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
+    DEFAULT_COLUMN_Y_MAX, DEFAULT_COLUMN_Y_MIN,
 };
 
 const RAYCAST_MAX_DISTANCE: f32 = 100.0;
@@ -151,7 +151,7 @@ fn handle_chunk_data_sync(
             continue;
         };
 
-        let chunk_data = ChunkData::from_voxels(&sync.data.to_voxels());
+        let chunk_data = ChunkData::from_voxels(&sync.data.to_voxels(), ChunkStatus::Full);
 
         instance.insert_chunk_data(sync.chunk_pos, chunk_data);
         instance

@@ -13,7 +13,10 @@ fn dirty_chunks_saved_on_debounce() {
     let mut instance = VoxelMapInstance::new(5);
     let chunk_pos = IVec3::new(1, 0, 0);
     let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
-    instance.insert_chunk_data(chunk_pos, ChunkData::from_voxels(&voxels));
+    instance.insert_chunk_data(
+        chunk_pos,
+        ChunkData::from_voxels(&voxels, ChunkStatus::Full),
+    );
     instance.chunk_levels.insert(chunk_to_column(chunk_pos), 0);
     instance.dirty_chunks.insert(chunk_pos);
 
@@ -31,7 +34,10 @@ fn clean_chunks_not_saved() {
     let mut instance = VoxelMapInstance::new(5);
     let chunk_pos = IVec3::ZERO;
     let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
-    instance.insert_chunk_data(chunk_pos, ChunkData::from_voxels(&voxels));
+    instance.insert_chunk_data(
+        chunk_pos,
+        ChunkData::from_voxels(&voxels, ChunkStatus::Full),
+    );
     instance.chunk_levels.insert(chunk_to_column(chunk_pos), 0);
     // NOT marking dirty
 
@@ -49,7 +55,7 @@ fn terrain_persists_across_save_load() {
     {
         let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
         voxels[100] = WorldVoxel::Solid(42);
-        let chunk_data = ChunkData::from_voxels(&voxels);
+        let chunk_data = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
         chunk_persist::save_chunk(&map_dir, IVec3::ZERO, &chunk_data).unwrap();
 
         let meta = MapMeta {
@@ -86,7 +92,10 @@ fn evicted_dirty_chunk_saved_before_removal() {
     let chunk_pos = IVec3::new(3, 0, 0);
     let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
     voxels[50] = WorldVoxel::Solid(7);
-    instance.insert_chunk_data(chunk_pos, ChunkData::from_voxels(&voxels));
+    instance.insert_chunk_data(
+        chunk_pos,
+        ChunkData::from_voxels(&voxels, ChunkStatus::Full),
+    );
     instance.chunk_levels.insert(chunk_to_column(chunk_pos), 0);
     instance.dirty_chunks.insert(chunk_pos);
 

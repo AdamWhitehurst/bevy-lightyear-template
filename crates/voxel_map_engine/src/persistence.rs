@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::ChunkData;
 
-const CHUNK_SAVE_VERSION: u32 = 2;
+const CHUNK_SAVE_VERSION: u32 = 3;
 const ZSTD_COMPRESSION_LEVEL: i32 = 3;
 
 /// Versioned envelope wrapping chunk data on disk.
@@ -120,7 +120,7 @@ pub fn parse_chunk_filename(name: &str) -> Option<IVec3> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{PaddedChunkShape, WorldVoxel};
+    use crate::types::{ChunkStatus, PaddedChunkShape, WorldVoxel};
     use ndshape::ConstShape;
 
     #[test]
@@ -129,7 +129,7 @@ mod tests {
         let pos = IVec3::new(1, -2, 3);
         let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
         voxels[100] = WorldVoxel::Solid(5);
-        let chunk = ChunkData::from_voxels(&voxels);
+        let chunk = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
 
         save_chunk(dir.path(), pos, &chunk).unwrap();
         let loaded = load_chunk(dir.path(), pos)
@@ -149,7 +149,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let map_dir = dir.path().join("deep/nested/map");
         let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
-        save_chunk(&map_dir, IVec3::ZERO, &ChunkData::from_voxels(&voxels)).unwrap();
+        save_chunk(
+            &map_dir,
+            IVec3::ZERO,
+            &ChunkData::from_voxels(&voxels, ChunkStatus::Full),
+        )
+        .unwrap();
         assert!(map_dir.join("terrain").exists());
     }
 
@@ -201,7 +206,7 @@ mod tests {
     fn list_saved_chunks_with_files() {
         let dir = tempfile::tempdir().unwrap();
         let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
-        let chunk = ChunkData::from_voxels(&voxels);
+        let chunk = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
         let positions = [IVec3::new(0, 0, 0), IVec3::new(1, -1, 2)];
         for &pos in &positions {
             save_chunk(dir.path(), pos, &chunk).unwrap();
@@ -217,7 +222,12 @@ mod tests {
     fn delete_chunk_removes_file() {
         let dir = tempfile::tempdir().unwrap();
         let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
-        save_chunk(dir.path(), IVec3::ZERO, &ChunkData::from_voxels(&voxels)).unwrap();
+        save_chunk(
+            dir.path(),
+            IVec3::ZERO,
+            &ChunkData::from_voxels(&voxels, ChunkStatus::Full),
+        )
+        .unwrap();
         assert!(chunk_file_path(dir.path(), IVec3::ZERO).exists());
         delete_chunk(dir.path(), IVec3::ZERO).unwrap();
         assert!(!chunk_file_path(dir.path(), IVec3::ZERO).exists());
@@ -239,7 +249,7 @@ mod tests {
         for i in 0..100 {
             voxels[i] = WorldVoxel::Solid((i % 5) as u8);
         }
-        let chunk = ChunkData::from_voxels(&voxels);
+        let chunk = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
         save_chunk(dir.path(), IVec3::ZERO, &chunk).unwrap();
 
         let path = chunk_file_path(dir.path(), IVec3::ZERO);

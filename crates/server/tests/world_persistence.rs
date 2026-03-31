@@ -19,7 +19,7 @@ fn terrain_persists_across_server_restart() {
     {
         let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
         voxels[100] = WorldVoxel::Solid(42);
-        let chunk_data = ChunkData::from_voxels(&voxels);
+        let chunk_data = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
         let chunk_pos = IVec3::new(0, 0, 0);
 
         chunk_persist::save_chunk(&map_dir, chunk_pos, &chunk_data).expect("save chunk");
@@ -67,7 +67,7 @@ fn multiple_chunks_persist_independently() {
     for (i, &pos) in positions.iter().enumerate() {
         let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
         voxels[i + 10] = WorldVoxel::Solid(i as u8 + 1);
-        let chunk_data = ChunkData::from_voxels(&voxels);
+        let chunk_data = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
         chunk_persist::save_chunk(&map_dir, pos, &chunk_data).unwrap();
     }
 
@@ -110,7 +110,10 @@ fn dirty_instance_save_then_reload() {
     let mut instance = VoxelMapInstance::new(5);
     let chunk_pos = IVec3::ZERO;
     let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
-    instance.insert_chunk_data(chunk_pos, ChunkData::from_voxels(&voxels));
+    instance.insert_chunk_data(
+        chunk_pos,
+        ChunkData::from_voxels(&voxels, ChunkStatus::Full),
+    );
     instance.chunk_levels.insert(chunk_to_column(chunk_pos), 0);
 
     // Mutate a voxel (marks chunk dirty)
@@ -151,7 +154,12 @@ fn meta_and_chunks_coexist_in_map_directory() {
 
     // Save a chunk
     let voxels = vec![WorldVoxel::Solid(1); PaddedChunkShape::USIZE];
-    chunk_persist::save_chunk(&map_dir, IVec3::ZERO, &ChunkData::from_voxels(&voxels)).unwrap();
+    chunk_persist::save_chunk(
+        &map_dir,
+        IVec3::ZERO,
+        &ChunkData::from_voxels(&voxels, ChunkStatus::Full),
+    )
+    .unwrap();
 
     // Both should exist and load independently
     assert!(map_dir.join("map.meta.bin").exists());
@@ -174,11 +182,21 @@ fn multiple_maps_save_independently() {
 
     let mut ow_voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
     ow_voxels[0] = WorldVoxel::Solid(1);
-    chunk_persist::save_chunk(&ow_dir, IVec3::ZERO, &ChunkData::from_voxels(&ow_voxels)).unwrap();
+    chunk_persist::save_chunk(
+        &ow_dir,
+        IVec3::ZERO,
+        &ChunkData::from_voxels(&ow_voxels, ChunkStatus::Full),
+    )
+    .unwrap();
 
     let mut hb_voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
     hb_voxels[0] = WorldVoxel::Solid(99);
-    chunk_persist::save_chunk(&hb_dir, IVec3::ZERO, &ChunkData::from_voxels(&hb_voxels)).unwrap();
+    chunk_persist::save_chunk(
+        &hb_dir,
+        IVec3::ZERO,
+        &ChunkData::from_voxels(&hb_voxels, ChunkStatus::Full),
+    )
+    .unwrap();
 
     let ow_loaded = chunk_persist::load_chunk(&ow_dir, IVec3::ZERO)
         .unwrap()
@@ -320,7 +338,12 @@ fn entities_and_chunks_coexist_in_map_directory() {
 
     // Save a chunk
     let voxels = vec![WorldVoxel::Solid(1); PaddedChunkShape::USIZE];
-    chunk_persist::save_chunk(&map_dir, IVec3::ZERO, &ChunkData::from_voxels(&voxels)).unwrap();
+    chunk_persist::save_chunk(
+        &map_dir,
+        IVec3::ZERO,
+        &ChunkData::from_voxels(&voxels, ChunkStatus::Full),
+    )
+    .unwrap();
 
     // Save metadata
     let meta = MapMeta {

@@ -149,8 +149,8 @@ Pass `ChunkStatus::Full` at existing call sites to preserve current behavior:
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all`
-- [ ] `cargo test -p voxel_map_engine`
+- [x] `cargo check-all`
+- [x] `cargo test -p voxel_map_engine`
 
 #### Manual Verification:
 - [ ] `cargo server` — chunks still generate and display correctly

@@ -4,9 +4,9 @@ use bevy::prelude::*;
 use lightyear::prelude::{Controlled, Predicted};
 use protocol::{CharacterMarker, MapInstanceId, MapRegistry};
 use voxel_map_engine::prelude::{
-    chunk_to_column, column_to_chunks, flat_terrain_voxels, ChunkData, ChunkTicket, FillType,
-    PalettedChunk, TicketType, VoxelChunk, VoxelGenerator, VoxelMapConfig, VoxelMapInstance,
-    VoxelPlugin, WorldVoxel, DEFAULT_COLUMN_Y_MAX, DEFAULT_COLUMN_Y_MIN,
+    chunk_to_column, column_to_chunks, flat_terrain_voxels, ChunkData, ChunkStatus, ChunkTicket,
+    FillType, PalettedChunk, TicketType, VoxelChunk, VoxelGenerator, VoxelMapConfig,
+    VoxelMapInstance, VoxelPlugin, WorldVoxel, DEFAULT_COLUMN_Y_MAX, DEFAULT_COLUMN_Y_MIN,
 };
 
 fn test_app() -> App {
@@ -50,6 +50,7 @@ fn simulate_chunk_sync(app: &mut App, map: Entity, chunk_pos: IVec3, voxels: Pal
         voxels,
         fill_type: FillType::Uniform(WorldVoxel::Solid(1)),
         hash: 1,
+        status: ChunkStatus::Full,
     };
     instance.insert_chunk_data(chunk_pos, chunk_data);
     instance

@@ -1302,7 +1302,7 @@ fn server_and_client_spawn_matching_homebase_configs() {
 /// Test that client sends `VoxelEditRequest` and receives `VoxelEditAck` from server.
 #[test]
 fn test_voxel_edit_ack_received() {
-    use voxel_map_engine::prelude::{ChunkData, FillType, PalettedChunk, WorldVoxel};
+    use voxel_map_engine::prelude::{ChunkData, ChunkStatus, FillType, PalettedChunk, WorldVoxel};
 
     let mut stepper = CrossbeamTestStepper::new();
 
@@ -1333,6 +1333,7 @@ fn test_voxel_edit_ack_received() {
             voxels: PalettedChunk::SingleValue(WorldVoxel::Solid(1)),
             fill_type: FillType::Uniform(WorldVoxel::Solid(1)),
             hash: 0,
+            status: ChunkStatus::Full,
         },
     );
     instance
@@ -1428,7 +1429,8 @@ fn test_server_pushes_chunks_without_request() {
     use ::server::map::ClientChunkVisibility;
     use avian3d::prelude::Position;
     use voxel_map_engine::prelude::{
-        chunk_to_column, ChunkData, ChunkTicket, FillType, PalettedChunk, TicketType, WorldVoxel,
+        chunk_to_column, ChunkData, ChunkStatus, ChunkTicket, FillType, PalettedChunk, TicketType,
+        WorldVoxel,
     };
 
     let mut stepper = CrossbeamTestStepper::new();
@@ -1459,6 +1461,7 @@ fn test_server_pushes_chunks_without_request() {
             voxels: chunk_voxels.clone(),
             fill_type: FillType::Uniform(WorldVoxel::Solid(1)),
             hash: 0,
+            status: ChunkStatus::Full,
         },
     );
     instance.chunk_levels.insert(chunk_to_column(chunk_pos), 0);
@@ -1535,7 +1538,8 @@ fn test_server_sends_unload_column_when_out_of_range() {
     use ::server::map::ClientChunkVisibility;
     use avian3d::prelude::Position;
     use voxel_map_engine::prelude::{
-        chunk_to_column, ChunkData, ChunkTicket, FillType, PalettedChunk, TicketType, WorldVoxel,
+        chunk_to_column, ChunkData, ChunkStatus, ChunkTicket, FillType, PalettedChunk, TicketType,
+        WorldVoxel,
     };
 
     let mut stepper = CrossbeamTestStepper::new();
@@ -1571,6 +1575,7 @@ fn test_server_sends_unload_column_when_out_of_range() {
             voxels: PalettedChunk::SingleValue(WorldVoxel::Solid(1)),
             fill_type: FillType::Uniform(WorldVoxel::Solid(1)),
             hash: 0,
+            status: ChunkStatus::Full,
         },
     );
     instance.chunk_levels.insert(chunk_to_column(chunk_pos), 0);

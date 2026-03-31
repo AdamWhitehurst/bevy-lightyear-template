@@ -196,7 +196,7 @@ pub fn seed_from_id(id: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::FillType;
+    use crate::types::{ChunkStatus, FillType};
 
     #[test]
     fn new_creates_empty_instance() {
@@ -329,7 +329,7 @@ mod tests {
 
         let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
         voxels[0] = WorldVoxel::Solid(1);
-        let solid_chunk = ChunkData::from_voxels(&voxels);
+        let solid_chunk = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
         instance.insert_chunk_data(pos, solid_chunk);
 
         let data = instance.get_chunk_data(pos).unwrap();
@@ -342,7 +342,10 @@ mod tests {
         let mut instance = VoxelMapInstance::new(5);
         let chunk_pos = IVec3::ZERO;
         let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
-        instance.insert_chunk_data(chunk_pos, ChunkData::from_voxels(&voxels));
+        instance.insert_chunk_data(
+            chunk_pos,
+            ChunkData::from_voxels(&voxels, ChunkStatus::Full),
+        );
 
         let world_pos = IVec3::new(5, 5, 5);
         instance.set_voxel(world_pos, WorldVoxel::Solid(42));
@@ -373,7 +376,10 @@ mod tests {
         let mut instance = VoxelMapInstance::new(5);
         let chunk_pos = IVec3::ZERO;
         let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
-        instance.insert_chunk_data(chunk_pos, ChunkData::from_voxels(&voxels));
+        instance.insert_chunk_data(
+            chunk_pos,
+            ChunkData::from_voxels(&voxels, ChunkStatus::Full),
+        );
 
         instance.set_voxel(IVec3::new(1, 1, 1), WorldVoxel::Solid(1));
         instance.set_voxel(IVec3::new(2, 2, 2), WorldVoxel::Solid(2));
@@ -391,8 +397,14 @@ mod tests {
 
         let voxels_a = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
         let voxels_b = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
-        instance.insert_chunk_data(chunk_a, ChunkData::from_voxels(&voxels_a));
-        instance.insert_chunk_data(chunk_b, ChunkData::from_voxels(&voxels_b));
+        instance.insert_chunk_data(
+            chunk_a,
+            ChunkData::from_voxels(&voxels_a, ChunkStatus::Full),
+        );
+        instance.insert_chunk_data(
+            chunk_b,
+            ChunkData::from_voxels(&voxels_b, ChunkStatus::Full),
+        );
 
         // Edit at x=15 (last voxel in chunk_a along x) — boundary with chunk_b
         let world_pos = IVec3::new(15, 5, 5);
@@ -424,8 +436,11 @@ mod tests {
         let chunk_neg = -IVec3::X; // neighbor in -x direction
 
         let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
-        instance.insert_chunk_data(chunk_a, ChunkData::from_voxels(&voxels));
-        instance.insert_chunk_data(chunk_neg, ChunkData::from_voxels(&voxels));
+        instance.insert_chunk_data(chunk_a, ChunkData::from_voxels(&voxels, ChunkStatus::Full));
+        instance.insert_chunk_data(
+            chunk_neg,
+            ChunkData::from_voxels(&voxels, ChunkStatus::Full),
+        );
 
         // Edit at x=0 (first voxel in chunk_a along x) — boundary with chunk_neg
         let world_pos = IVec3::new(0, 3, 3);
