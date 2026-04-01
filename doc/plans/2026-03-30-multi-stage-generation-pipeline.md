@@ -1232,9 +1232,9 @@ If any documented features, commands, or architecture changed, update accordingl
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all`
-- [ ] `cargo test -p voxel_map_engine`
-- [ ] `cargo test -p server`
+- [x] `cargo check-all`
+- [x] `cargo test -p voxel_map_engine`
+- [x] `cargo test -p server`
 - [ ] `cargo server` builds and runs
 - [ ] `cargo client -c 1` builds and runs
 

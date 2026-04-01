@@ -14,5 +14,4 @@
         memberships: (32),
         filters: (14),
     ),
-    "avian3d::physics_transform::transform::Position": ((5.0, 5.0, 5.0)),
 }

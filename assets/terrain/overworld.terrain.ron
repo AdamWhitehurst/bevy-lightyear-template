@@ -19,4 +19,14 @@
         (biome_id: "mountains", height_range: (10.0, 100.0), moisture_range: (-1.0, 1.0),
          surface_material: 2, subsurface_material: 2, subsurface_depth: 8),
     ]),
+    "voxel_map_engine::terrain::PlacementRules": ([
+        (
+            object_id: "tree_circle",
+            allowed_biomes: ["forest", "grassland"],
+            density: 0.0015,
+            min_spacing: 50.0,
+            slope_max: Some(0.5),
+            height_range: (0.0, 30.0),
+        ),
+    ]),
 }
