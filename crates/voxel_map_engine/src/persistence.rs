@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::config::WorldObjectSpawn;
 use crate::types::ChunkData;
 
 const CHUNK_SAVE_VERSION: u32 = 3;
@@ -115,6 +116,82 @@ pub fn parse_chunk_filename(name: &str) -> Option<IVec3> {
     let y: i32 = rest[mid_sep + 1..].parse().ok()?;
     let x: i32 = rest[..mid_sep].parse().ok()?;
     Some(IVec3::new(x, y, z))
+}
+
+const ENTITY_SAVE_VERSION: u32 = 1;
+
+/// Versioned envelope wrapping per-chunk entity spawn data on disk.
+#[derive(Serialize, Deserialize)]
+struct EntityFileEnvelope {
+    version: u32,
+    spawns: Vec<WorldObjectSpawn>,
+}
+
+/// File path for per-chunk entity data.
+pub fn entity_file_path(map_dir: &Path, chunk_pos: IVec3) -> PathBuf {
+    map_dir.join("entities").join(format!(
+        "chunk_{}_{}_{}.entities.bin",
+        chunk_pos.x, chunk_pos.y, chunk_pos.z
+    ))
+}
+
+/// Save per-chunk entity spawns to a compressed file. Uses atomic write via tmp+rename.
+pub fn save_chunk_entities(
+    map_dir: &Path,
+    chunk_pos: IVec3,
+    spawns: &[WorldObjectSpawn],
+) -> Result<(), String> {
+    let path = entity_file_path(map_dir, chunk_pos);
+    fs::create_dir_all(path.parent().expect("entity path has parent"))
+        .map_err(|e| format!("mkdir entities: {e}"))?;
+
+    let envelope = EntityFileEnvelope {
+        version: ENTITY_SAVE_VERSION,
+        spawns: spawns.to_vec(),
+    };
+    let bytes = bincode::serialize(&envelope).map_err(|e| format!("serialize entities: {e}"))?;
+
+    let tmp_path = path.with_extension("bin.tmp");
+    let file = fs::File::create(&tmp_path).map_err(|e| format!("create tmp: {e}"))?;
+    let mut encoder = zstd::Encoder::new(file, ZSTD_COMPRESSION_LEVEL)
+        .map_err(|e| format!("zstd encoder: {e}"))?;
+    encoder
+        .write_all(&bytes)
+        .map_err(|e| format!("write entities: {e}"))?;
+    encoder.finish().map_err(|e| format!("zstd finish: {e}"))?;
+
+    fs::rename(&tmp_path, &path).map_err(|e| format!("atomic rename: {e}"))?;
+    Ok(())
+}
+
+/// Load per-chunk entity spawns from disk. Returns `None` if the file does not exist.
+pub fn load_chunk_entities(
+    map_dir: &Path,
+    chunk_pos: IVec3,
+) -> Result<Option<Vec<WorldObjectSpawn>>, String> {
+    let path = entity_file_path(map_dir, chunk_pos);
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let file = fs::File::open(&path).map_err(|e| format!("open entities: {e}"))?;
+    let mut decoder = zstd::Decoder::new(file).map_err(|e| format!("zstd decoder: {e}"))?;
+    let mut bytes = Vec::new();
+    decoder
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("read entities: {e}"))?;
+
+    let envelope: EntityFileEnvelope =
+        bincode::deserialize(&bytes).map_err(|e| format!("deserialize entities: {e}"))?;
+
+    if envelope.version != ENTITY_SAVE_VERSION {
+        return Err(format!(
+            "entity version mismatch: expected {ENTITY_SAVE_VERSION}, got {}",
+            envelope.version
+        ));
+    }
+
+    Ok(Some(envelope.spawns))
 }
 
 #[cfg(test)]
@@ -265,5 +342,61 @@ mod tests {
             compressed_size < raw_size / 2,
             "compressed {compressed_size} should be < half of raw {raw_size}"
         );
+    }
+
+    fn sample_spawns() -> Vec<WorldObjectSpawn> {
+        vec![
+            WorldObjectSpawn {
+                object_id: "tree_oak".to_string(),
+                position: Vec3::new(1.0, 2.0, 3.0),
+            },
+            WorldObjectSpawn {
+                object_id: "rock_large".to_string(),
+                position: Vec3::new(-4.0, 0.0, 5.5),
+            },
+        ]
+    }
+
+    fn assert_spawns_eq(a: &[WorldObjectSpawn], b: &[WorldObjectSpawn]) {
+        assert_eq!(a.len(), b.len(), "spawn count mismatch");
+        for (i, (sa, sb)) in a.iter().zip(b.iter()).enumerate() {
+            assert_eq!(sa.object_id, sb.object_id, "object_id mismatch at {i}");
+            assert_eq!(sa.position, sb.position, "position mismatch at {i}");
+        }
+    }
+
+    #[test]
+    fn save_load_chunk_entities_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let pos = IVec3::new(3, -1, 7);
+        let spawns = sample_spawns();
+
+        save_chunk_entities(dir.path(), pos, &spawns).unwrap();
+        let loaded = load_chunk_entities(dir.path(), pos)
+            .unwrap()
+            .expect("entities should exist");
+        assert_spawns_eq(&spawns, &loaded);
+    }
+
+    #[test]
+    fn load_nonexistent_entities_returns_none() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(
+            load_chunk_entities(dir.path(), IVec3::ZERO)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn empty_entities_save_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let spawns: Vec<WorldObjectSpawn> = Vec::new();
+
+        save_chunk_entities(dir.path(), IVec3::ZERO, &spawns).unwrap();
+        let loaded = load_chunk_entities(dir.path(), IVec3::ZERO)
+            .unwrap()
+            .expect("entities file should exist");
+        assert!(loaded.is_empty());
     }
 }

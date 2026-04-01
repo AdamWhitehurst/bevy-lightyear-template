@@ -1,3 +1,4 @@
+pub mod chunk_entities;
 pub mod diagnostics;
 pub mod gameplay;
 pub mod map;

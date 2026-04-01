@@ -66,11 +66,23 @@ pub fn spawn_terrain_batch(
                                 let _span = info_span!("mesh_chunk").entered();
                                 mesh_chunk_greedy(&voxels)
                             };
+                            let entity_spawns = if let Some(ref dir) = save_dir {
+                                match crate::persistence::load_chunk_entities(dir, pos) {
+                                    Ok(Some(spawns)) => spawns,
+                                    Ok(None) => vec![],
+                                    Err(e) => {
+                                        bevy::log::warn!("Failed to load entities at {pos}: {e}");
+                                        vec![]
+                                    }
+                                }
+                            } else {
+                                vec![]
+                            };
                             return ChunkGenResult {
                                 position: pos,
                                 mesh,
                                 chunk_data: Some(chunk_data),
-                                entity_spawns: vec![],
+                                entity_spawns,
                                 from_disk: true,
                             };
                         }
@@ -90,21 +102,34 @@ pub fn spawn_terrain_batch(
 
 /// Spawn an async task that runs the Features stage for a single chunk.
 ///
-/// The generator's `place_features` is called with the provided surface height
-/// map. Returns a result with `chunk_data: None` (status update is handled
-/// in-place by the caller) and any entity spawns from the generator.
+/// Tries loading entity data from disk first (generate-once, save-forever).
+/// If no saved entities exist, runs the generator's `place_features`.
+/// Returns a result with `chunk_data: None` (status update is handled
+/// in-place by the caller) and any entity spawns.
 pub fn spawn_features_task(
     pending: &mut PendingChunks,
     position: IVec3,
     height_map: SurfaceHeightMap,
     generator: &VoxelGenerator,
+    save_dir: Option<PathBuf>,
 ) {
     let generator = Arc::clone(&generator.0);
     let pool = AsyncComputeTaskPool::get();
 
     let task = pool.spawn(async move {
         let _span = info_span!("features_stage", ?position).entered();
-        let entity_spawns = generator.place_features(position, &height_map);
+        let entity_spawns = if let Some(ref dir) = save_dir {
+            match crate::persistence::load_chunk_entities(dir, position) {
+                Ok(Some(spawns)) => spawns,
+                Ok(None) => generator.place_features(position, &height_map),
+                Err(e) => {
+                    bevy::log::warn!("Failed to load entities at {position}: {e}");
+                    generator.place_features(position, &height_map)
+                }
+            }
+        } else {
+            generator.place_features(position, &height_map)
+        };
         vec![ChunkGenResult {
             position,
             mesh: None,

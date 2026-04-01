@@ -725,7 +725,13 @@ fn drain_gen_queue(
                     .expect("chunk must exist at Terrain status");
                 let height_map = build_surface_height_map(work.position, &chunk_data.voxels);
                 tracker.generating.insert(work.position);
-                spawn_features_task(pending, work.position, height_map, generator);
+                spawn_features_task(
+                    pending,
+                    work.position,
+                    height_map,
+                    generator,
+                    config.save_dir.clone(),
+                );
                 spawned += 1;
             }
             ChunkStatus::Mesh => {

@@ -1169,13 +1169,13 @@ This ensures destroyed entities (no longer in the query) are excluded from the s
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] `cargo check-all`
-- [ ] `cargo test -p voxel_map_engine`
-- [ ] `cargo test -p server`
+- [x] `cargo check-all`
+- [x] `cargo test -p voxel_map_engine`
+- [x] `cargo test -p server`
 
 #### Manual Verification:
 - [ ] `cargo server` — no entity spawns yet (no PlacementRules in terrain.ron)
-- [ ] Entity persistence tests pass
+- [x] Entity persistence tests pass
 
 ---
 

@@ -30,7 +30,8 @@ use crate::persistence::{
     WorldSavePath,
 };
 use protocol::map::{MapSaveTarget, SavedEntity, SavedEntityKind};
-use protocol::world_object::apply_object_components;
+use protocol::vox_model::VoxModelRegistry;
+use protocol::world_object::{apply_object_components, WorldObjectDefRegistry};
 use protocol::{RespawnPoint, TerrainDefRegistry};
 use voxel_map_engine::persistence as chunk_persist;
 
@@ -458,9 +459,23 @@ impl Plugin for ServerMapPlugin {
                     handle_map_switch_requests,
                     handle_map_transition_ready,
                     protocol::attach_chunk_colliders,
+                    crate::chunk_entities::spawn_chunk_entities
+                        .after(lifecycle::poll_chunk_tasks)
+                        .run_if(
+                            resource_exists::<WorldObjectDefRegistry>
+                                .and(resource_exists::<VoxModelRegistry>),
+                        ),
+                    crate::chunk_entities::evict_chunk_entities
+                        .after(lifecycle::despawn_out_of_range_chunks),
                 ),
             )
-            .add_systems(Last, save_world_on_shutdown)
+            .add_systems(
+                Last,
+                (
+                    save_world_on_shutdown,
+                    crate::chunk_entities::save_all_chunk_entities_on_exit,
+                ),
+            )
             .add_observer(on_map_instance_id_added);
     }
 }
