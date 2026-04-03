@@ -1,4 +1,7 @@
 # TODO
+- Template:
+  - built-in claude qrspi skills
+- skills: component design, system design, networking, physics knowledge
 - dampen player stats by distance from spawn?
 - user will run `cargo server` and `cargo client` for validation
 - update world object system on hot reload by first remove WorldObjectId's components using old loaded Def, load new Def, insert_if_new(...) ?
