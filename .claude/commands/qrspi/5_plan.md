@@ -21,6 +21,7 @@ Read `$ARGUMENTS/structure.md`, `$ARGUMENTS/design.md`, and `$ARGUMENTS/research
    - Code snippets for non-trivial changes (new functions, type definitions, migrations)
    - Specific automated verification commands
    - Manual verification steps
+   - When you realize a deviation might be necessary, you must stop and get the user's approval on deviation first. NEVER deviate from plan without first getting users approval to deviate.
 
 3. **Write `plan.md`** to the artifact directory:
 
@@ -83,6 +84,7 @@ Read `$ARGUMENTS/structure.md`, `$ARGUMENTS/design.md`, and `$ARGUMENTS/research
 - Only include changes described in `design.md` and `structure.md`. Do not add refactoring, cleanup, or improvements to adjacent code — even if it's obviously messy.
 - If the plan includes schema migrations, include updating any test assertions that reference the current schema version.
 - If the plan includes codegen steps, note what to do if codegen fails or is unavailable (e.g., manually adding fields to generated files as a fallback).
+- When you realize a deviation might be necessary, you must stop and get the user's approval on deviation first. NEVER deviate from plan without first getting users approval to deviate.
 
 ## When to Go Back
 
