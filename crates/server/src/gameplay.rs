@@ -23,6 +23,7 @@ impl Plugin for ServerGameplayPlugin {
             (spawn_dummy_target, validate_respawn_points).after(load_startup_entities),
         );
         app.add_systems(FixedUpdate, handle_character_movement);
+        app.add_message::<DeathEvent>();
         app.add_systems(
             FixedUpdate,
             (
