@@ -30,8 +30,8 @@ pub use ability::{
 pub use app_state::{AppState, AppStatePlugin, TrackedAssets};
 pub use character::{apply_movement, update_facing};
 pub use character::{
-    CharacterMarker, CharacterPhysicsBundle, CharacterType, ColorComponent, DummyTarget, Health,
-    Invulnerable, PlayerId, RespawnPoint, RespawnTimer, RespawnTimerConfig,
+    CharacterMarker, CharacterPhysicsBundle, CharacterType, ColorComponent, DeathEvent,
+    DummyTarget, Health, Invulnerable, PlayerId, RespawnPoint, RespawnTimer, RespawnTimerConfig,
     CHARACTER_CAPSULE_HEIGHT, CHARACTER_CAPSULE_RADIUS, DEFAULT_RESPAWN_TICKS,
 };
 pub use hit_detection::{

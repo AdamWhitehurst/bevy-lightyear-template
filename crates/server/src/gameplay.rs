@@ -23,10 +23,13 @@ impl Plugin for ServerGameplayPlugin {
             (spawn_dummy_target, validate_respawn_points).after(load_startup_entities),
         );
         app.add_systems(FixedUpdate, handle_character_movement);
+        app.add_message::<DeathEvent>();
         app.add_systems(
             FixedUpdate,
             (
-                start_respawn_timer.after(hit_detection::process_projectile_hits),
+                start_respawn_timer
+                    .after(hit_detection::process_projectile_hits)
+                    .after(hit_detection::process_hitbox_hits),
                 process_respawn_timers.after(start_respawn_timer),
                 expire_invulnerability,
             ),
@@ -129,25 +132,22 @@ fn validate_respawn_points(
     }
 }
 
-/// Detects newly-dead entities and starts their respawn timer.
-/// Only fires for entities that are dead but don't yet have a RespawnTimer.
+/// Starts respawn timers for entities that just died (via DeathEvent).
 fn start_respawn_timer(
     mut commands: Commands,
     timeline: Res<LocalTimeline>,
-    query: Query<
-        (Entity, &Health, Option<&RespawnTimerConfig>),
-        (Without<RespawnTimer>, Without<RespawnPoint>),
-    >,
+    mut events: MessageReader<DeathEvent>,
+    query: Query<Option<&RespawnTimerConfig>, (Without<RespawnTimer>, Without<RespawnPoint>)>,
 ) {
     let tick = timeline.tick();
-    for (entity, health, config) in &query {
-        if !health.is_dead() {
+    for event in events.read() {
+        let Ok(config) = query.get(event.entity) else {
             continue;
-        }
+        };
         let duration = config
             .map(|c| c.duration_ticks)
             .unwrap_or(DEFAULT_RESPAWN_TICKS);
-        commands.entity(entity).insert((
+        commands.entity(event.entity).insert((
             RespawnTimer {
                 expires_at: tick + duration as i16,
             },

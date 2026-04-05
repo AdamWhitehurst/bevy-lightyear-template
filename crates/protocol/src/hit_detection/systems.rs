@@ -1,4 +1,5 @@
 use avian3d::prelude::*;
+use bevy::ecs::message::MessageWriter;
 use bevy::prelude::*;
 use lightyear::prelude::{ControlledBy, LocalTimeline};
 
@@ -8,7 +9,7 @@ use crate::ability::{
     facing_direction, AbilityAsset, AbilityBulletOf, AbilityDefs, AbilityPhase, ActiveAbility,
     ActiveBuffs, ActiveShield, HitTargets, HitboxOf, MeleeHitbox, OnHitEffects,
 };
-use crate::{Health, Invulnerable, PlayerId};
+use crate::{DeathEvent, Health, Invulnerable, PlayerId};
 
 /// Update melee hitbox positions to follow caster's position + facing offset.
 pub fn update_hitbox_positions(
@@ -53,6 +54,7 @@ pub fn process_hitbox_hits(
     mut shield_query: Query<&mut ActiveShield>,
     buff_query: Query<&ActiveBuffs>,
     rotation_query: Query<&Rotation>,
+    mut death_events: MessageWriter<DeathEvent>,
 ) {
     let tick = timeline.tick();
     for (colliding, on_hit, mut hit_targets, hitbox_pos) in &mut hitbox_query {
@@ -81,6 +83,7 @@ pub fn process_hitbox_hits(
                 &mut shield_query,
                 &buff_query,
                 &rotation_query,
+                &mut death_events,
             );
         }
     }
@@ -125,6 +128,7 @@ pub fn process_projectile_hits(
     mut shield_query: Query<&mut ActiveShield>,
     buff_query: Query<&ActiveBuffs>,
     rotation_query: Query<&Rotation>,
+    mut death_events: MessageWriter<DeathEvent>,
 ) {
     let tick = timeline.tick();
     for (bullet, colliding, on_hit, bullet_pos) in &bullet_query {
@@ -150,6 +154,7 @@ pub fn process_projectile_hits(
                 &mut shield_query,
                 &buff_query,
                 &rotation_query,
+                &mut death_events,
             );
             commands.entity(bullet).try_despawn();
             break;

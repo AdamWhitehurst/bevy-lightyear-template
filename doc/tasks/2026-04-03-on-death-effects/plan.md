@@ -338,7 +338,7 @@ Delete the line:
 
 ### Verification
 #### Automated
-- [ ] `cargo check-all` passes
+- [x] `cargo check-all` passes
 
 #### Manual
 - [ ] `cargo server` + `cargo client` — damage a character to death
