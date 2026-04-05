@@ -169,6 +169,8 @@ Check that new work follows established codebase precedents. A finding is a **VI
    let d = transform.translation - last_pos;
    %% [SUGGESTION] Quality — Naming: `d` is opaque. Use `displacement` or `movement_delta`. The comment becomes unnecessary with a clear name.
    ```
+- Treat any `%%` annotations as part of your review, you do not need to actually go and fix them yourself. They are meant the planner or implementor.
+- You may elaborate or respond to existing `%%` annotations with additional `%%` lines but do not remove them.
 
 6. **Write the annotated document** back to the same file path
 7. **Present summary**:
