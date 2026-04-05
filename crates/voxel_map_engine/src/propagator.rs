@@ -115,7 +115,7 @@ impl TicketLevelPropagator {
     /// propagator remains dirty until all pending work is drained.
     pub fn propagate(&mut self) -> LevelDiff {
         if !self.dirty {
-            trace!("propagate: not dirty, returning empty diff");
+            // not dirty, returning empty diff
             return LevelDiff::default();
         }
 

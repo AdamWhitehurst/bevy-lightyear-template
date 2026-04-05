@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{SurfaceHeightMap, VoxelGenerator, VoxelGeneratorImpl, WorldObjectSpawn};
 use crate::meshing::flat_terrain_voxels;
-use crate::placement::{placement_seed, poisson_disk_sample};
+use crate::placement::jittered_grid_sample;
 use crate::types::{CHUNK_SIZE, PaddedChunkShape, WorldVoxel};
 
 /// Base noise algorithm.
@@ -373,14 +373,13 @@ impl VoxelGeneratorImpl for HeightmapGenerator {
         };
         let mut spawns = Vec::new();
 
-        for (rule_idx, rule) in rules.0.iter().enumerate() {
-            let seed = placement_seed(self.seed, chunk_pos, rule_idx);
-            let max_candidates = (rule.density * (CHUNK_SIZE as f64).powi(2)).ceil() as usize;
-            let candidates = poisson_disk_sample(seed, chunk_pos, rule.min_spacing, max_candidates);
+        for (_rule_idx, rule) in rules.0.iter().enumerate() {
+            let candidates =
+                jittered_grid_sample(self.seed, chunk_pos, rule.min_spacing, rule.density);
 
-            for pos_xz in candidates {
-                let local_x = pos_xz.x as u32;
-                let local_z = pos_xz.y as u32;
+            for world_pos in candidates {
+                let local_x = (world_pos.x - chunk_pos.x as f32 * CHUNK_SIZE as f32).floor() as u32;
+                let local_z = (world_pos.y - chunk_pos.z as f32 * CHUNK_SIZE as f32).floor() as u32;
                 if local_x >= CHUNK_SIZE || local_z >= CHUNK_SIZE {
                     trace!("place_features: candidate ({local_x}, {local_z}) out of chunk bounds");
                     continue;
@@ -396,19 +395,23 @@ impl VoxelGeneratorImpl for HeightmapGenerator {
                     continue;
                 }
 
+                if let Some(slope_max) = rule.slope_max {
+                    if exceeds_slope(local_x, local_z, &heights.heights, slope_max) {
+                        continue;
+                    }
+                }
+
                 if !rule.allowed_biomes.is_empty() {
                     if let (Some(moisture_map), Some(biome_rules)) =
                         (&self.moisture_map, &self.biome_rules)
                     {
-                        let world_x = chunk_pos.x as f64 * CHUNK_SIZE as f64 + pos_xz.x as f64;
-                        let world_z = chunk_pos.z as f64 * CHUNK_SIZE as f64 + pos_xz.y as f64;
                         let biome = select_biome_at_pos(
                             self.seed,
                             &self.height_map,
                             moisture_map,
                             biome_rules,
-                            world_x,
-                            world_z,
+                            world_pos.x as f64,
+                            world_pos.y as f64,
                         );
                         if !rule.allowed_biomes.iter().any(|b| b == &biome.biome_id) {
                             continue;
@@ -416,16 +419,42 @@ impl VoxelGeneratorImpl for HeightmapGenerator {
                     }
                 }
 
-                let world_x = chunk_pos.x as f32 * CHUNK_SIZE as f32 + pos_xz.x;
-                let world_z = chunk_pos.z as f32 * CHUNK_SIZE as f32 + pos_xz.y;
                 spawns.push(WorldObjectSpawn {
                     object_id: rule.object_id.clone(),
-                    position: Vec3::new(world_x, height as f32, world_z),
+                    position: Vec3::new(world_pos.x, height as f32, world_pos.y),
                 });
             }
         }
         spawns
     }
+}
+
+/// Returns `true` if the terrain slope at `(x, z)` exceeds `max_slope` (rise/run).
+///
+/// Estimates slope from the height difference to cardinal neighbors in the
+/// surface height map. If a neighbor is out of bounds or has no surface, that
+/// direction is skipped.
+fn exceeds_slope(x: u32, z: u32, heights: &[Option<f64>; 256], max_slope: f64) -> bool {
+    let center = match heights[(x * CHUNK_SIZE + z) as usize] {
+        Some(h) => h,
+        None => return false,
+    };
+
+    let neighbors: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+    for (dx, dz) in neighbors {
+        let nx = x as i32 + dx;
+        let nz = z as i32 + dz;
+        if nx < 0 || nx >= CHUNK_SIZE as i32 || nz < 0 || nz >= CHUNK_SIZE as i32 {
+            continue;
+        }
+        if let Some(nh) = heights[(nx as u32 * CHUNK_SIZE + nz as u32) as usize] {
+            let slope = (nh - center).abs();
+            if slope > max_slope {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Flat terrain generator (no noise).

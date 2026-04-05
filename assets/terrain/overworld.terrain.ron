@@ -23,7 +23,7 @@
         (
             object_id: "tree_circle",
             allowed_biomes: ["mountains"],
-            density: 0.000015,
+            density: 0.0015,
             min_spacing: 100.0,
             slope_max: None,
             height_range: (-100.0, 100.0),
@@ -31,9 +31,9 @@
         (
             object_id: "tree_circle",
             allowed_biomes: ["forest", "grassland"],
-            density: 0.0001,
-            min_spacing: 100.0,
-            slope_max: Some(0.75),
+            density: 0.01,
+            min_spacing: 20.0,
+            slope_max: Some(0.01),
             height_range: (-30.0, 30.0),
         ),
     ]),

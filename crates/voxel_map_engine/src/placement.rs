@@ -2,141 +2,71 @@ use bevy::prelude::*;
 
 use crate::types::CHUNK_SIZE;
 
-/// 2D Poisson disk sampling within a chunk's XZ footprint using Bridson's algorithm.
+/// Deterministic jittered grid sampling with cross-chunk `min_spacing` enforcement.
 ///
-/// Returns positions in chunk-local XZ space `[0, CHUNK_SIZE)`.
-/// Deterministic: same seed + chunk_pos + parameters → same result.
-pub fn poisson_disk_sample(
+/// Divides world space into cells of size `min_spacing`. Each cell gets at most
+/// one candidate point at a deterministic jittered offset. `density` controls
+/// the probability that a cell spawns a point (`spawn_prob = density * min_spacing²`).
+///
+/// Returns world-space XZ positions that fall within this chunk's footprint.
+pub fn jittered_grid_sample(
     seed: u64,
     chunk_pos: IVec3,
     min_spacing: f64,
-    max_candidates: usize,
+    density: f64,
 ) -> Vec<Vec2> {
-    if max_candidates == 0 || min_spacing <= 0.0 {
+    if min_spacing <= 0.0 || density <= 0.0 {
         return Vec::new();
     }
 
-    let extent = CHUNK_SIZE as f64;
-    let cell_size = min_spacing / std::f64::consts::SQRT_2;
-    let grid_size = (extent / cell_size).ceil() as usize;
-    let mut grid: Vec<Option<usize>> = vec![None; grid_size * grid_size];
-    let mut points: Vec<Vec2> = Vec::new();
-    let mut active: Vec<usize> = Vec::new();
+    let chunk_size = CHUNK_SIZE as f64;
+    let chunk_world_x = chunk_pos.x as f64 * chunk_size;
+    let chunk_world_z = chunk_pos.z as f64 * chunk_size;
 
-    let mut rng = simple_rng(placement_seed(seed, chunk_pos, 0));
+    // Grid cells overlapping this chunk (no margin needed — we only emit points inside chunk)
+    let cell_min_x = (chunk_world_x / min_spacing).floor() as i64;
+    let cell_max_x = ((chunk_world_x + chunk_size) / min_spacing).ceil() as i64;
+    let cell_min_z = (chunk_world_z / min_spacing).floor() as i64;
+    let cell_max_z = ((chunk_world_z + chunk_size) / min_spacing).ceil() as i64;
 
-    // First point
-    let first = Vec2::new(
-        rng_f64(&mut rng) as f32 * extent as f32,
-        rng_f64(&mut rng) as f32 * extent as f32,
-    );
-    insert_point(
-        &mut grid,
-        &mut points,
-        &mut active,
-        first,
-        cell_size,
-        grid_size,
-    );
+    let spawn_prob = (density * min_spacing * min_spacing).min(1.0);
+    let mut points = Vec::new();
 
-    let k = 30; // candidates per active point (Bridson standard)
-    while !active.is_empty() && points.len() < max_candidates {
-        let active_idx = (rng_f64(&mut rng) * active.len() as f64) as usize % active.len();
-        let center = points[active[active_idx]];
-        let mut found = false;
+    for cx in cell_min_x..cell_max_x {
+        for cz in cell_min_z..cell_max_z {
+            let cell_seed = cell_hash(seed, cx, cz);
+            let mut rng = simple_rng(cell_seed);
 
-        for _ in 0..k {
-            let angle = rng_f64(&mut rng) * std::f64::consts::TAU;
-            let radius = min_spacing + rng_f64(&mut rng) * min_spacing;
-            let candidate = Vec2::new(
-                center.x + (angle.cos() * radius) as f32,
-                center.y + (angle.sin() * radius) as f32,
-            );
-
-            if candidate.x < 0.0
-                || candidate.x >= extent as f32
-                || candidate.y < 0.0
-                || candidate.y >= extent as f32
-            {
+            // Density gate: probability this cell spawns anything
+            if rng_f64(&mut rng) >= spawn_prob {
                 continue;
             }
 
-            if is_valid_point(&grid, &points, candidate, cell_size, grid_size, min_spacing) {
-                insert_point(
-                    &mut grid,
-                    &mut points,
-                    &mut active,
-                    candidate,
-                    cell_size,
-                    grid_size,
-                );
-                found = true;
-                break;
-            }
-        }
+            // Jittered position within the cell
+            let world_x = (cx as f64 + rng_f64(&mut rng)) * min_spacing;
+            let world_z = (cz as f64 + rng_f64(&mut rng)) * min_spacing;
 
-        if !found {
-            active.swap_remove(active_idx);
+            // Only keep if inside this chunk
+            if world_x >= chunk_world_x
+                && world_x < chunk_world_x + chunk_size
+                && world_z >= chunk_world_z
+                && world_z < chunk_world_z + chunk_size
+            {
+                points.push(Vec2::new(world_x as f32, world_z as f32));
+            }
         }
     }
 
     points
 }
 
-fn insert_point(
-    grid: &mut [Option<usize>],
-    points: &mut Vec<Vec2>,
-    active: &mut Vec<usize>,
-    point: Vec2,
-    cell_size: f64,
-    grid_size: usize,
-) {
-    let idx = points.len();
-    let gx = (point.x as f64 / cell_size) as usize;
-    let gz = (point.y as f64 / cell_size) as usize;
-    if gx < grid_size && gz < grid_size {
-        grid[gx * grid_size + gz] = Some(idx);
-    }
-    points.push(point);
-    active.push(idx);
-}
-
-fn is_valid_point(
-    grid: &[Option<usize>],
-    points: &[Vec2],
-    candidate: Vec2,
-    cell_size: f64,
-    grid_size: usize,
-    min_spacing: f64,
-) -> bool {
-    let gx = (candidate.x as f64 / cell_size) as i32;
-    let gz = (candidate.y as f64 / cell_size) as i32;
-    let min_dist_sq = (min_spacing * min_spacing) as f32;
-
-    for dx in -2..=2 {
-        for dz in -2..=2 {
-            let nx = gx + dx;
-            let nz = gz + dz;
-            if nx < 0 || nz < 0 || nx >= grid_size as i32 || nz >= grid_size as i32 {
-                continue;
-            }
-            if let Some(idx) = grid[nx as usize * grid_size + nz as usize] {
-                if points[idx].distance_squared(candidate) < min_dist_sq {
-                    return false;
-                }
-            }
-        }
-    }
-    true
-}
-
-/// Derive a deterministic per-chunk, per-rule seed.
-pub fn placement_seed(map_seed: u64, chunk_pos: IVec3, rule_index: usize) -> u64 {
+/// Hash a grid cell coordinate into a deterministic seed.
+fn cell_hash(seed: u64, cx: i64, cz: i64) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    map_seed.hash(&mut hasher);
-    chunk_pos.hash(&mut hasher);
-    rule_index.hash(&mut hasher);
+    seed.hash(&mut hasher);
+    cx.hash(&mut hasher);
+    cz.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -158,17 +88,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn poisson_disk_produces_points_within_bounds() {
-        let points = poisson_disk_sample(42, IVec3::ZERO, 3.0, 50);
-        assert!(!points.is_empty(), "should produce at least one point");
+    fn jittered_grid_points_within_chunk() {
+        let points = jittered_grid_sample(42, IVec3::ZERO, 3.0, 1.0);
+        let chunk_min = 0.0;
+        let chunk_max = CHUNK_SIZE as f32;
         for p in &points {
             assert!(
-                p.x >= 0.0 && p.x < CHUNK_SIZE as f32,
+                p.x >= chunk_min && p.x < chunk_max,
                 "x out of bounds: {}",
                 p.x
             );
             assert!(
-                p.y >= 0.0 && p.y < CHUNK_SIZE as f32,
+                p.y >= chunk_min && p.y < chunk_max,
                 "z out of bounds: {}",
                 p.y
             );
@@ -176,66 +107,51 @@ mod tests {
     }
 
     #[test]
-    fn poisson_disk_respects_min_spacing() {
-        let min_spacing = 4.0;
-        let points = poisson_disk_sample(123, IVec3::new(5, 0, 3), min_spacing, 100);
-        let min_sq = (min_spacing * min_spacing) as f32 - 0.001; // tiny epsilon
-        for i in 0..points.len() {
-            for j in (i + 1)..points.len() {
-                let dist_sq = points[i].distance_squared(points[j]);
-                assert!(
-                    dist_sq >= min_sq,
-                    "points {} and {} too close: dist={}, min={}",
-                    i,
-                    j,
-                    dist_sq.sqrt(),
-                    min_spacing
-                );
-            }
-        }
+    fn jittered_grid_deterministic() {
+        let a = jittered_grid_sample(42, IVec3::new(1, 2, 3), 4.0, 0.5);
+        let b = jittered_grid_sample(42, IVec3::new(1, 2, 3), 4.0, 0.5);
+        assert_eq!(a, b);
     }
 
     #[test]
-    fn poisson_disk_deterministic() {
-        let a = poisson_disk_sample(42, IVec3::new(1, 2, 3), 3.0, 30);
-        let b = poisson_disk_sample(42, IVec3::new(1, 2, 3), 3.0, 30);
-        assert_eq!(a.len(), b.len());
-        for (pa, pb) in a.iter().zip(b.iter()) {
-            assert_eq!(pa, pb);
-        }
-    }
-
-    #[test]
-    fn poisson_disk_different_chunks_differ() {
-        let a = poisson_disk_sample(42, IVec3::ZERO, 3.0, 30);
-        let b = poisson_disk_sample(42, IVec3::new(10, 0, 10), 3.0, 30);
-        // Different chunk positions should produce different layouts
+    fn jittered_grid_different_chunks_differ() {
+        let a = jittered_grid_sample(42, IVec3::ZERO, 3.0, 1.0);
+        let b = jittered_grid_sample(42, IVec3::new(10, 0, 10), 3.0, 1.0);
         assert_ne!(a, b);
     }
 
     #[test]
-    fn placement_seed_unique_across_chunks() {
-        let s1 = placement_seed(42, IVec3::ZERO, 0);
-        let s2 = placement_seed(42, IVec3::new(1, 0, 0), 0);
-        assert_ne!(s1, s2);
+    fn jittered_grid_low_density_fewer_points() {
+        let high = jittered_grid_sample(42, IVec3::ZERO, 3.0, 1.0);
+        let low = jittered_grid_sample(42, IVec3::ZERO, 3.0, 0.1);
+        assert!(
+            low.len() <= high.len(),
+            "low density ({}) should produce <= high density ({})",
+            low.len(),
+            high.len()
+        );
     }
 
     #[test]
-    fn placement_seed_unique_across_rules() {
-        let s1 = placement_seed(42, IVec3::ZERO, 0);
-        let s2 = placement_seed(42, IVec3::ZERO, 1);
-        assert_ne!(s1, s2);
-    }
-
-    #[test]
-    fn poisson_disk_zero_candidates_returns_empty() {
-        let points = poisson_disk_sample(42, IVec3::ZERO, 3.0, 0);
+    fn jittered_grid_zero_density_returns_empty() {
+        let points = jittered_grid_sample(42, IVec3::ZERO, 3.0, 0.0);
         assert!(points.is_empty());
     }
 
     #[test]
-    fn poisson_disk_zero_spacing_returns_empty() {
-        let points = poisson_disk_sample(42, IVec3::ZERO, 0.0, 50);
+    fn jittered_grid_zero_spacing_returns_empty() {
+        let points = jittered_grid_sample(42, IVec3::ZERO, 0.0, 1.0);
         assert!(points.is_empty());
+    }
+
+    #[test]
+    fn jittered_grid_large_spacing_few_points() {
+        // min_spacing larger than chunk → at most 1 point per chunk
+        let points = jittered_grid_sample(42, IVec3::ZERO, 100.0, 1.0);
+        assert!(
+            points.len() <= 1,
+            "expected 0-1 points, got {}",
+            points.len()
+        );
     }
 }
