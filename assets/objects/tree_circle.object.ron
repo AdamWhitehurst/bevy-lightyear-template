@@ -17,7 +17,7 @@
     ),
     "protocol::world_object::types::OnDeathEffects": ([
         TransformInto(
-            source: "stump_circle.object.ron",
+            source: "stump_circle",
             revert_after_ticks: Some(1000),
         ),
     ]),

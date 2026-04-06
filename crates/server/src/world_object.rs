@@ -83,6 +83,11 @@ pub fn apply_transformation(
         type_registry,
     );
 
+    // Always remove the old collider — it may have been built from a vox trimesh
+    // (not present in the def's component list) and won't be caught by
+    // remove_absent_components.
+    commands.entity(entity).remove::<Collider>();
+
     let vox_collider = vox_trimesh_collider(source_def, vox_registry, vox_assets, meshes);
     let use_vox_collider = vox_collider.is_some();
     let components = clone_def_components(source_def, use_vox_collider);

@@ -33,7 +33,11 @@ impl Plugin for ServerGameplayPlugin {
             (
                 on_death_effects
                     .after(hit_detection::process_projectile_hits)
-                    .after(hit_detection::process_hitbox_hits),
+                    .after(hit_detection::process_hitbox_hits)
+                    .run_if(
+                        resource_exists::<WorldObjectDefRegistry>
+                            .and(resource_exists::<VoxModelRegistry>),
+                    ),
                 start_respawn_timer
                     .after(hit_detection::process_projectile_hits)
                     .after(hit_detection::process_hitbox_hits),
