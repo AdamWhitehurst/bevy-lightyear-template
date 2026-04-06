@@ -34,6 +34,16 @@ pub trait VoxelGeneratorImpl: Send + Sync {
 pub struct WorldObjectSpawn {
     pub object_id: String,
     pub position: Vec3,
+    /// RON-serialized persisted components. Empty for fresh spawns.
+    #[serde(default)]
+    pub persisted_components: Vec<PersistedComponent>,
+}
+
+/// A single persisted component: type path + RON data.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PersistedComponent {
+    pub type_path: String,
+    pub ron_data: String,
 }
 
 /// `CHUNK_SIZE` × `CHUNK_SIZE` surface height map built from PalettedChunk on the main thread.

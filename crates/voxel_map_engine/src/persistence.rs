@@ -118,7 +118,7 @@ pub fn parse_chunk_filename(name: &str) -> Option<IVec3> {
     Some(IVec3::new(x, y, z))
 }
 
-const ENTITY_SAVE_VERSION: u32 = 1;
+const ENTITY_SAVE_VERSION: u32 = 2;
 
 /// Versioned envelope wrapping per-chunk entity spawn data on disk.
 #[derive(Serialize, Deserialize)]
@@ -349,10 +349,12 @@ mod tests {
             WorldObjectSpawn {
                 object_id: "tree_oak".to_string(),
                 position: Vec3::new(1.0, 2.0, 3.0),
+                persisted_components: Vec::new(),
             },
             WorldObjectSpawn {
                 object_id: "rock_large".to_string(),
                 position: Vec3::new(-4.0, 0.0, 5.5),
+                persisted_components: Vec::new(),
             },
         ]
     }

@@ -15,7 +15,7 @@ pub struct WorldObjectId(pub String);
 /// Vox models are often centered at their geometric midpoint, so this shifts the
 /// spawn position (e.g. `(0, 1.5, 0)` raises the object so its base sits on the surface).
 #[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
-#[reflect(Component, Serialize, Deserialize)]
+#[reflect(Component, Serialize, Deserialize, SpawnOnly)]
 pub struct PlacementOffset(pub Vec3);
 
 /// Broad classification of world objects.
@@ -63,10 +63,30 @@ pub enum DeathEffect {
 
 /// Tracks an active transformation on a world object. Persisted across chunk eviction.
 #[derive(Component, Reflect, Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[reflect(Component)]
+#[reflect(Component, Persist)]
 pub struct ActiveTransformation {
     pub source: String,
     pub ticks_remaining: Option<u16>,
+}
+
+/// Reflect type data: marks a component for serialization during chunk eviction.
+#[derive(Clone)]
+pub struct ReflectPersist;
+
+impl<T: Reflect> bevy::reflect::FromType<T> for ReflectPersist {
+    fn from_type() -> Self {
+        ReflectPersist
+    }
+}
+
+/// Reflect type data: marks a component as spawn-only (skipped on reload).
+#[derive(Clone)]
+pub struct ReflectSpawnOnly;
+
+impl<T: Reflect> bevy::reflect::FromType<T> for ReflectSpawnOnly {
+    fn from_type() -> Self {
+        ReflectSpawnOnly
+    }
 }
 
 /// A loaded world object definition.

@@ -1,5 +1,6 @@
 use crate::hit_detection::character_collision_layers;
 use crate::map::MapSaveTarget;
+use crate::world_object::ReflectPersist;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use lightyear::prelude::{PeerId, Tick};
@@ -39,7 +40,7 @@ pub struct RespawnPoint;
 
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Default)]
 #[type_path = "protocol"]
-#[reflect(Component, Default)]
+#[reflect(Component, Default, Persist)]
 pub struct Health {
     pub current: f32,
     pub max: f32,

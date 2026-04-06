@@ -1124,7 +1124,7 @@ Key difference from `evict_chunk_entities`: saves all entities (not just evictab
 
 ### Verification
 #### Automated
-- [ ] `cargo check-all` passes
+- [x] `cargo check-all` passes
 
 #### Manual
 - [ ] `cargo server` + `cargo client` — damage tree, observe stump
