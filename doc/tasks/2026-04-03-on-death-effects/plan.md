@@ -1,19 +1,21 @@
 # Implementation Plan
 
 ## Overview
-When a world object with `OnDeathEffects` dies, it transforms in-place into another object def (e.g. tree→stump), optionally reverting after a tick countdown. Transformation state persists across chunk eviction/reload. Also fixes the `PlacementOffset` double-apply bug on reload.
+All death behavior flows through `DeathEvent` → `OnDeathEffects` dispatch. Character respawn is `StartRespawnPointTimer`, tree→stump is `TransformInto`, one-time props use `DespawnEntity`. `RespawnTimerConfig` is deleted. `RespawnTimer` changes from absolute `expires_at: Tick` to relative `ticks_remaining: u16` for persistence compatibility. Transformation state persists across chunk eviction. `PlacementOffset` double-apply bug fixed.
 
 ---
 
-## Phase 1: DeathEvent Infrastructure
+## Phase 1: Unified Death Handling
+
+Replace polling-based `start_respawn_timer` with event-driven `DeathEvent` → `on_death_effects` dispatch. Character respawn becomes a `DeathEffect` variant. No new visual behavior — existing respawn flow preserved through the new path.
 
 ### Changes
 
-#### 1. DeathEvent type
+#### 1. DeathEvent type and apply_damage transition detection
 **File**: `crates/protocol/src/character/types.rs`
 **Action**: modify
 
-Add `DeathEvent` after the `Health` impl block (~line 64):
+Add after the `Health` impl block (lines 48–64):
 
 ```rust
 /// Emitted when an entity's health transitions from alive to dead.
@@ -23,7 +25,7 @@ pub struct DeathEvent {
 }
 ```
 
-Modify `Health::apply_damage` (line 53–55) to return whether the entity just died:
+Modify `apply_damage` (line 53–55) to return alive→dead transition:
 
 ```rust
 /// Applies damage, clamping to zero. Returns `true` if this caused the alive→dead transition.
@@ -34,21 +36,113 @@ pub fn apply_damage(&mut self, damage: f32) -> bool {
 }
 ```
 
-#### 2. Emit DeathEvent at the damage site
-**File**: `crates/protocol/src/hit_detection/effects.rs`
+#### 2. Change RespawnTimer and Invulnerable to relative ticks
+**File**: `crates/protocol/src/character/types.rs`
 **Action**: modify
 
-Thread `&mut EventWriter<DeathEvent>` through `apply_on_hit_effects`. Add parameter after `rotation_query`:
+Replace `Invulnerable` (lines 66–70):
 
 ```rust
-pub(crate) fn apply_on_hit_effects(
-    // ... existing params ...
-    rotation_query: &Query<&Rotation>,
-    death_events: &mut EventWriter<DeathEvent>,
-) {
+/// Post-respawn invulnerability. Prevents damage while present. Decremented each tick.
+#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
+#[reflect(Component)]
+pub struct Invulnerable {
+    pub ticks_remaining: u16,
+}
 ```
 
-In the `Damage` arm (~line 98–101), use the `bool` return to emit:
+Replace `RespawnTimer` (lines 91–96):
+
+```rust
+/// Marks an entity as dead and awaiting respawn. Decremented each FixedUpdate tick.
+#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect)]
+#[reflect(Component)]
+pub struct RespawnTimer {
+    pub ticks_remaining: u16,
+}
+```
+
+#### 3. Delete RespawnTimerConfig
+**File**: `crates/protocol/src/character/types.rs`
+**Action**: modify
+
+Delete `DEFAULT_RESPAWN_TICKS` constant (line 73), `RespawnTimerConfig` struct (lines 75–89).
+
+#### 4. Update re-exports
+**File**: `crates/protocol/src/character/mod.rs`
+**Action**: modify
+
+Remove `RespawnTimerConfig` and `DEFAULT_RESPAWN_TICKS` from `pub use types::` line (line 7).
+Add `DeathEvent` to the re-export.
+
+**File**: `crates/protocol/src/lib.rs`
+**Action**: modify
+
+Remove `RespawnTimerConfig` and `DEFAULT_RESPAWN_TICKS` from `pub use character::` (line 34).
+Add `DeathEvent`.
+
+#### 5. OnDeathEffects and DeathEffect types
+**File**: `crates/protocol/src/world_object/types.rs`
+**Action**: modify
+
+Add after existing types (after `VisualKind` enum):
+
+```rust
+/// Describes effects triggered when this object dies. Defined in `.object.ron`
+/// or inserted programmatically (e.g. on characters).
+#[derive(Component, Reflect, Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[reflect(Component)]
+pub struct OnDeathEffects(pub Vec<DeathEffect>);
+```
+
+```rust
+/// A single effect applied on death.
+#[derive(Reflect, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub enum DeathEffect {
+    /// Lock entity, teleport to nearest RespawnPoint after timer expires.
+    StartRespawnPointTimer { duration_ticks: u16 },
+    /// Replace this entity's components with those from another object def.
+    TransformInto {
+        source: String,
+        revert_after_ticks: Option<u16>,
+    },
+    /// Despawn the entity immediately.
+    DespawnEntity,
+}
+```
+
+Add `serde::{Deserialize, Serialize}` to imports if not already present.
+
+#### 6. Re-export new types
+**File**: `crates/protocol/src/world_object/mod.rs`
+**Action**: modify
+
+Add to `pub use types::`: `DeathEffect, OnDeathEffects`
+
+#### 7. Register types in WorldObjectPlugin
+**File**: `crates/protocol/src/world_object/plugin.rs`
+**Action**: modify
+
+Remove `app.register_type::<crate::RespawnTimerConfig>();` (line 51).
+
+Add:
+```rust
+app.register_type::<super::types::OnDeathEffects>();
+app.register_type::<super::types::DeathEffect>();
+```
+
+#### 8. Remove RespawnTimerConfig lightyear registration
+**File**: `crates/protocol/src/lib.rs`
+**Action**: modify
+
+Delete line 168: `app.register_component::<RespawnTimerConfig>();`
+
+#### 9. Emit DeathEvent at the damage site
+**File**: `crates/protocol/src/hit_detection/effects.rs`
+**Action**: modify
+Add `death_events: &mut EventWriter<DeathEvent>` parameter to `apply_on_hit_effects` (after `rotation_query`).
+
+In the `Damage` arm (~line 98–101):
 
 ```rust
 if let Ok((_, _, mut health, invulnerable)) = target_query.get_mut(entity) {
@@ -62,116 +156,212 @@ if let Ok((_, _, mut health, invulnerable)) = target_query.get_mut(entity) {
 
 Add `use crate::DeathEvent;` to imports.
 
-#### 3. Thread EventWriter through call sites
+#### 10. Thread EventWriter through call sites
 **File**: `crates/protocol/src/hit_detection/systems.rs`
 **Action**: modify
+Add `mut death_events: EventWriter<DeathEvent>` system parameter to both `process_hitbox_hits` (~line 33) and `process_projectile_hits` (~line 107). Pass `&mut death_events` to each `apply_on_hit_effects` call.
 
-Both `process_hitbox_hits` and `process_projectile_hits` need `mut death_events: EventWriter<DeathEvent>` as a system parameter, passed to `apply_on_hit_effects`.
+Add `use crate::DeathEvent;` to imports.
 
-In `process_hitbox_hits` (~line 33): add `mut death_events: EventWriter<DeathEvent>` param, pass `&mut death_events` to the call at line 69.
-
-In `process_projectile_hits` (~line 107): add `mut death_events: EventWriter<DeathEvent>` param, pass `&mut death_events` to the call at line 138.
-
-Add `use crate::DeathEvent;` to imports (or `use super::effects::DeathEvent` depending on module structure — `DeathEvent` is defined in `character/types.rs` and re-exported from `crate`).
-
-#### 4. Refactor start_respawn_timer to consume DeathEvent
+#### 11. on_death_effects system (Phase 1: only StartRespawnPointTimer and DespawnEntity)
 **File**: `crates/server/src/gameplay.rs`
 **Action**: modify
-
-Replace `start_respawn_timer` (lines 133–157):
+Add new system:
 
 ```rust
-fn start_respawn_timer(
+/// Dispatches death effects for entities with OnDeathEffects.
+fn on_death_effects(
     mut commands: Commands,
-    timeline: Res<LocalTimeline>,
     mut events: EventReader<DeathEvent>,
-    query: Query<
-        Option<&RespawnTimerConfig>,
-        (Without<RespawnTimer>, Without<RespawnPoint>),
-    >,
+    query: Query<&OnDeathEffects>,
 ) {
-    let tick = timeline.tick();
     for event in events.read() {
-        let Ok(config) = query.get(event.entity) else {
+        let Ok(effects) = query.get(event.entity) else {
+            trace!("Entity {:?} died without OnDeathEffects, no dispatch", event.entity);
             continue;
         };
-        let duration = config
-            .map(|c| c.duration_ticks)
-            .unwrap_or(DEFAULT_RESPAWN_TICKS);
-        commands.entity(event.entity).insert((
-            RespawnTimer {
-                expires_at: tick + duration as i16,
-            },
-            RigidBodyDisabled,
-            ColliderDisabled,
-        ));
+        for effect in &effects.0 {
+            match effect {
+                DeathEffect::StartRespawnPointTimer { duration_ticks } => {
+                    commands.entity(event.entity).insert((
+                        RespawnTimer {
+                            ticks_remaining: *duration_ticks,
+                        },
+                        RigidBodyDisabled,
+                        ColliderDisabled,
+                    ));
+                }
+                DeathEffect::DespawnEntity => {
+                    commands.entity(event.entity).try_despawn();
+                }
+                DeathEffect::TransformInto { .. } => {
+                    trace!("TransformInto not yet implemented until phase 2");
+                }
+            }
+        }
     }
 }
 ```
 
-#### 5. Register event and update system ordering
+#### 12. Rewrite process_respawn_timers for relative ticks, always teleport
 **File**: `crates/server/src/gameplay.rs`
 **Action**: modify
 
-In `GameplayPlugin::build` (around lines 19–35):
+Replace `process_respawn_timers` (lines 160–203):
+
+```rust
+/// Decrements respawn timers. On expiry: teleport to nearest RespawnPoint,
+/// restore health, grant invulnerability, re-enable physics.
+fn process_respawn_timers(
+    mut commands: Commands,
+    mut query: Query<
+        (
+            Entity,
+            &mut RespawnTimer,
+            &mut Health,
+            &mut Position,
+            Option<&mut LinearVelocity>,
+        ),
+        Without<RespawnPoint>,
+    >,
+    respawn_query: Query<&Position, With<RespawnPoint>>,
+) {
+    for (entity, mut timer, mut health, mut position, velocity) in &mut query {
+        timer.ticks_remaining = timer.ticks_remaining.saturating_sub(1);
+        if timer.ticks_remaining > 0 {
+            continue;
+        }
+        let respawn_pos = nearest_respawn_pos(&position, &respawn_query);
+        trace!("Entity {entity:?} respawn timer expired, respawning at {respawn_pos:?}");
+        position.0 = respawn_pos;
+        if let Some(mut velocity) = velocity {
+            velocity.0 = Vec3::ZERO;
+        }
+        health.restore_full();
+        commands
+            .entity(entity)
+            .remove::<(RespawnTimer, RigidBodyDisabled, ColliderDisabled)>();
+        commands.entity(entity).insert(Invulnerable {
+            ticks_remaining: 128,
+        });
+    }
+}
+```
+
+Update `nearest_respawn_pos` — remove `Without<CharacterMarker>` filter:
+
+```rust
+fn nearest_respawn_pos(
+    current_pos: &Position,
+    respawn_query: &Query<&Position, With<RespawnPoint>>,
+) -> Vec3 {
+    // ... body unchanged ...
+}
+```
+
+#### 13. Rewrite expire_invulnerability for relative ticks
+**File**: `crates/server/src/gameplay.rs`
+**Action**: modify
+
+Replace `expire_invulnerability` (lines 220–231):
+
+```rust
+fn expire_invulnerability(
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut Invulnerable)>,
+) {
+    for (entity, mut invuln) in &mut query {
+        invuln.ticks_remaining = invuln.ticks_remaining.saturating_sub(1);
+        if invuln.ticks_remaining == 0 {
+            commands.entity(entity).remove::<Invulnerable>();
+        }
+    }
+}
+```
+
+No longer needs `Res<LocalTimeline>`.
+
+#### 14. Delete start_respawn_timer, update system schedule
+**File**: `crates/server/src/gameplay.rs`
+**Action**: modify
+
+Delete `start_respawn_timer` function entirely (lines 133–157).
+
+Update system schedule inside `ServerGameplayPlugin::build` (starts at line 19, schedule at lines 26–33):
 
 ```rust
 app.add_event::<DeathEvent>();
-app.add_systems(FixedUpdate, (
-    start_respawn_timer
-        .after(hit_detection::process_projectile_hits)
-        .after(hit_detection::process_hitbox_hits),
-    process_respawn_timers.after(start_respawn_timer),
-    expire_invulnerability,
-));
+app.add_systems(
+    FixedUpdate,
+    (
+        on_death_effects
+            .after(hit_detection::process_projectile_hits)
+            .after(hit_detection::process_hitbox_hits),
+        process_respawn_timers.after(on_death_effects),
+        expire_invulnerability,
+    ),
+);
 ```
 
-No `emit_death_events` system needed — events are emitted directly at the damage site.
+Add imports: `OnDeathEffects`, `DeathEffect`, `WorldObjectId` from `protocol::world_object`.
 
-Add `DeathEvent` to imports from `protocol`.
-
-#### 6. Re-export DeathEvent
-**File**: `crates/protocol/src/lib.rs`
+#### 15. Insert OnDeathEffects on characters at spawn
+**File**: `crates/server/src/gameplay.rs`
 **Action**: modify
 
-Add `DeathEvent` to the public re-exports (wherever `Health` is re-exported).
+In `handle_connected` (~line 285–289), replace `RespawnTimerConfig::default()` with:
+
+```rust
+OnDeathEffects(vec![DeathEffect::StartRespawnPointTimer {
+    duration_ticks: 256,
+}]),
+```
+
+In `spawn_dummy_target` (~line 65), replace `RespawnTimerConfig::default()` with:
+
+```rust
+OnDeathEffects(vec![DeathEffect::StartRespawnPointTimer {
+    duration_ticks: 256,
+}]),
+```
+
+#### 16. Remove RespawnTimerConfig from tree_circle.object.ron
+**File**: `assets/objects/tree_circle.object.ron`
+**Action**: modify
+
+Delete the line:
+```ron
+    "protocol::RespawnTimerConfig": (duration_ticks: 384),
+```
+
+(Tree will get `OnDeathEffects([TransformInto { ... }])` in Phase 2.)
 
 ### Verification
 #### Automated
 - [ ] `cargo check-all` passes
 
 #### Manual
-- [ ] `cargo server` + `cargo client` — damage a character to death, confirm respawn behavior unchanged (teleport to respawn point, full health, invulnerability)
-- [ ] Damage an already-dead entity (multiple hits same tick) — confirm only one `DeathEvent` fires (add temporary `info!` in `start_respawn_timer` to verify, then remove)
+- [ ] `cargo server` + `cargo client` — damage a character to death
+- [ ] Confirm: entity gets `RespawnTimer`, physics disabled, teleports to `RespawnPoint` after countdown, health restored, invulnerability granted
+- [ ] Confirm: multiple hits on dead entity don't produce duplicate events (only one `RespawnTimer` inserted)
+- [ ] Confirm: trees with `Health` but no `OnDeathEffects` sit at 0 HP with no death behavior (intentional — they get `OnDeathEffects` in Phase 2)
+- [ ] Confirm: `DeathEvent` fires only once per alive→dead transition (hitting a 0 HP entity again does not re-emit)
 
 ---
 
 ## Phase 2: Transform on Death (End-to-End)
 
+Tree dies → stump appears in-place. Implements `TransformInto` handler, transformation diff logic, lightyear registration, and client visual reconstruction.
+
 ### Changes
 
-#### 1. New types: OnDeathEffects, DeathEffect, ActiveTransformation
+#### 1. ActiveTransformation type
 **File**: `crates/protocol/src/world_object/types.rs`
 **Action**: modify
 
-Add after existing types (after `VisualKind` enum):
+Add after `DeathEffect`:
 
 ```rust
-/// Describes effects triggered when this object dies. Defined in `.object.ron`.
-#[derive(Component, Reflect, Deserialize, Clone, Debug)]
-#[reflect(Component)]
-pub struct OnDeathEffects(pub Vec<DeathEffect>);
-
-/// A single effect applied on death.
-#[derive(Reflect, Deserialize, Clone, Debug)]
-pub enum DeathEffect {
-    /// Replace this entity's components with those from another object def.
-    TransformInto {
-        source: String,
-        revert_after_ticks: Option<u16>,
-    },
-}
-
 /// Tracks an active transformation on a world object. Persisted across chunk eviction.
 #[derive(Component, Reflect, Clone, Debug)]
 #[reflect(Component)]
@@ -181,28 +371,21 @@ pub struct ActiveTransformation {
 }
 ```
 
-Add `serde::Deserialize` to imports if not already present.
-
-#### 2. Re-export new types
+#### 2. Re-export and register
 **File**: `crates/protocol/src/world_object/mod.rs`
 **Action**: modify
 
-Add to the `pub use types::` line:
-`ActiveTransformation, DeathEffect, OnDeathEffects`
+Add `ActiveTransformation` to `pub use types::`.
 
-#### 3. Register types in WorldObjectPlugin
 **File**: `crates/protocol/src/world_object/plugin.rs`
 **Action**: modify
 
-Add after existing `register_type` calls (line 56):
-
+Add:
 ```rust
-app.register_type::<super::types::OnDeathEffects>();
-app.register_type::<super::types::DeathEffect>();
 app.register_type::<super::types::ActiveTransformation>();
 ```
 
-#### 4. Register VisualKind and ActiveTransformation with lightyear
+#### 3. Register VisualKind and ActiveTransformation with lightyear
 **File**: `crates/protocol/src/lib.rs`
 **Action**: modify
 
@@ -213,30 +396,46 @@ app.register_component::<world_object::VisualKind>();
 app.register_component::<world_object::ActiveTransformation>();
 ```
 
-No `.add_prediction()` — these are replicated-only, server-authoritative.
+No `.add_prediction()` — replicated-only. Note: `VisualKind` was not previously lightyear-registered. This registration is a **prerequisite** for `on_visual_kind_changed` (Phase 2 step 6) — without it, the client never receives `VisualKind` changes on existing entities.
 
-#### 5. apply_transformation helper
+#### 4. apply_transformation helper and TransformationContext SystemParam
 **File**: `crates/server/src/world_object.rs`
 **Action**: modify
 
-Add new public function. This diffs the source def against the entity's current def: removes components present on entity's original def but absent from source, inserts/overwrites components from source.
+`apply_transformation` and its callers (`on_death_effects`, `tick_active_transformations`) share the same 5 read-only resources. Bundle them:
 
 ```rust
-/// Transforms an entity from its current def to a source def by diffing components.
+#[derive(SystemParam)]
+pub struct TransformationContext<'w> {
+    pub defs: Res<'w, WorldObjectDefRegistry>,
+    pub type_registry: Res<'w, AppTypeRegistry>,
+    pub vox_registry: Res<'w, VoxModelRegistry>,
+    pub vox_assets: Res<'w, Assets<VoxModelAsset>>,
+    pub meshes: Res<'w, Assets<Mesh>>,
+}
+```
+
+`apply_transformation` then takes `&TransformationContext` instead of 5 separate params. Callers use `ctx: TransformationContext` as a single system param.
+
+Note: this is the first resource-only `SystemParam` in the codebase (existing ones like `VoxelWorld` and `MapCollisionHooks` bundle queries). Justified here by the 5-resource signature shared across 3 call sites. The Phase 4 exclusive systems (`evict_chunk_entities`, `save_all_chunk_entities_on_exit`) do NOT call `apply_transformation` — they only serialize — so no `SystemState` extraction is needed. `spawn_chunk_entities` (Phase 4 step 6) is a regular system and uses `TransformationContext` directly.
+
+Add `use std::collections::HashSet;` and `use bevy::ecs::reflect::ReflectComponent;`.
+Make `clone_def_components` and `vox_trimesh_collider` `pub(crate)` (both are private fns in this file).
+Note: `apply_object_components` is imported from `protocol::world_object`, not defined here.
+
+Add:
+
+```rust
+/// Transforms an entity by diffing current def against source def.
 ///
-/// Removes components present in `current_def` but absent from `source_def`.
+/// Removes components in `current_def` but absent from `source_def`.
 /// Inserts/overwrites components from `source_def`.
-/// Handles vox collider swap: if source has a Vox visual, builds trimesh; otherwise
-/// removes the old collider and applies ColliderConstructor from source def if present.
 pub fn apply_transformation(
     commands: &mut Commands,
     entity: Entity,
     current_def: &WorldObjectDef,
     source_def: &WorldObjectDef,
-    type_registry: &AppTypeRegistry,
-    vox_registry: &VoxModelRegistry,
-    vox_assets: &Assets<VoxModelAsset>,
-    meshes: &Assets<Mesh>,
+    ctx: &TransformationContext,
 ) {
     let source_type_paths: HashSet<&str> = source_def
         .components
@@ -244,27 +443,18 @@ pub fn apply_transformation(
         .map(|c| c.reflect_type_path())
         .collect();
 
-    let current_type_paths: HashSet<&str> = current_def
-        .components
-        .iter()
-        .map(|c| c.reflect_type_path())
-        .collect();
+    remove_absent_components(commands, entity, current_def, &source_type_paths, &ctx.type_registry);
 
-    // Remove components present on current but absent from source
-    remove_absent_components(commands, entity, current_def, &source_type_paths, type_registry);
-
-    // Apply source def components (collider-aware)
-    let vox_collider = vox_trimesh_collider(source_def, vox_registry, vox_assets, meshes);
+    let vox_collider = vox_trimesh_collider(source_def, &ctx.vox_registry, &ctx.vox_assets, &ctx.meshes);
     let use_vox_collider = vox_collider.is_some();
     let components = clone_def_components(source_def, use_vox_collider);
-    apply_object_components(commands, entity, components, type_registry.0.clone());
+    apply_object_components(commands, entity, components, ctx.type_registry.0.clone());
 
     if let Some(collider) = vox_collider {
         commands.entity(entity).insert(collider);
     }
 }
 
-/// Removes reflected components from `entity` that are in `current_def` but not in `keep_paths`.
 fn remove_absent_components(
     commands: &mut Commands,
     entity: Entity,
@@ -281,7 +471,7 @@ fn remove_absent_components(
         let Some(registration) = registry.get_with_type_path(path) else {
             continue;
         };
-        let Some(reflect_component) = registration.data::<ReflectComponent>() else {
+        let Some(reflect_component) = registration.data::<ReflectComponent>().cloned() else {
             continue;
         };
         commands.queue(move |world: &mut World| {
@@ -293,52 +483,55 @@ fn remove_absent_components(
 }
 ```
 
-Add `use std::collections::HashSet;` and `use bevy::ecs::reflect::ReflectComponent;` to imports.
-Make `clone_def_components` and `vox_trimesh_collider` `pub(crate)` (currently private).
-
-#### 6. on_death_effects system
+#### 5. Implement TransformInto in on_death_effects
 **File**: `crates/server/src/gameplay.rs`
 **Action**: modify
 
-Add new system:
+Expand `on_death_effects` signature and `TransformInto` arm:
 
 ```rust
-/// Processes death effects for world objects that just died.
 fn on_death_effects(
     mut commands: Commands,
     mut events: EventReader<DeathEvent>,
-    effect_query: Query<(&OnDeathEffects, &WorldObjectId)>,
-    defs: Res<WorldObjectDefRegistry>,
-    type_registry: Res<AppTypeRegistry>,
-    vox_registry: Res<VoxModelRegistry>,
-    vox_assets: Res<Assets<VoxModelAsset>>,
-    meshes: Res<Assets<Mesh>>,
+    query: Query<(&OnDeathEffects, Option<&WorldObjectId>)>,
+    ctx: TransformationContext,
 ) {
     for event in events.read() {
-        let Ok((effects, obj_id)) = effect_query.get(event.entity) else {
+        let Ok((effects, obj_id)) = query.get(event.entity) else {
+            trace!("Entity {:?} died without OnDeathEffects, no dispatch", event.entity);
             continue;
         };
         for effect in &effects.0 {
             match effect {
+                DeathEffect::StartRespawnPointTimer { duration_ticks } => {
+                    commands.entity(event.entity).insert((
+                        RespawnTimer {
+                            ticks_remaining: *duration_ticks,
+                        },
+                        RigidBodyDisabled,
+                        ColliderDisabled,
+                    ));
+                }
+                DeathEffect::DespawnEntity => {
+                    commands.entity(event.entity).try_despawn();
+                }
                 DeathEffect::TransformInto { source, revert_after_ticks } => {
+                    let Some(obj_id) = obj_id else {
+                        debug_assert!(false, "TransformInto on entity without WorldObjectId");
+                        continue;
+                    };
                     let source_id = WorldObjectId(source.clone());
-                    let Some(source_def) = defs.get(&source_id) else {
+                    let Some(source_def) = ctx.defs.get(&source_id) else {
                         warn!("Unknown transformation source '{source}'");
                         continue;
                     };
-                    let Some(current_def) = defs.get(obj_id) else {
+                    let Some(current_def) = ctx.defs.get(obj_id) else {
                         warn!("Unknown current def '{}'", obj_id.0);
                         continue;
                     };
                     crate::world_object::apply_transformation(
-                        &mut commands,
-                        event.entity,
-                        current_def,
-                        source_def,
-                        &type_registry,
-                        &vox_registry,
-                        &vox_assets,
-                        &meshes,
+                        &mut commands, event.entity,
+                        current_def, source_def, &ctx,
                     );
                     commands.entity(event.entity).insert(ActiveTransformation {
                         source: source.clone(),
@@ -351,99 +544,95 @@ fn on_death_effects(
 }
 ```
 
-Add imports: `OnDeathEffects`, `DeathEffect`, `ActiveTransformation`, `WorldObjectId`, `WorldObjectDefRegistry`, `VoxModelAsset`, `VoxModelRegistry`.
+`debug_assert!` for missing `WorldObjectId` — this is a configuration error (TransformInto should only exist on world objects which always have an ID). `warn!` for missing defs — could be a typo in RON data, non-fatal.
 
-#### 7. Filter OnDeathEffects entities from respawn timer
-**File**: `crates/server/src/gameplay.rs`
+Add imports: `ActiveTransformation`, `TransformationContext`.
+
+#### 6. Refactor attach_visual and add on_visual_kind_changed
+**File**: `crates/client/src/world_object.rs`
 **Action**: modify
 
-In `start_respawn_timer`, add `Without<OnDeathEffects>` to the query filter so world objects with death effects skip the respawn path. Note: since we changed to `EventReader<DeathEvent>`, we need to filter inside the loop:
+Now that `VisualKind` is replicated via lightyear (step 3), the client receives it as a component. Visual setup moves entirely to `on_visual_kind_changed` — which fires on both initial replication (`Added` implies `Changed`) and subsequent transformations. Remove all visual/mesh handling from `on_world_object_replicated` (the `attach_visual` / `attach_vox_mesh` calls and the child entity spawn). `on_world_object_replicated` continues to handle collider setup and non-visual def components only.
+
+Refactor `attach_visual` to take `&VisualKind` directly (instead of `&WorldObjectDef`):
 
 ```rust
-fn start_respawn_timer(
-    mut commands: Commands,
-    timeline: Res<LocalTimeline>,
-    mut events: EventReader<DeathEvent>,
-    query: Query<
-        (Option<&RespawnTimerConfig>, Has<OnDeathEffects>),
-        (Without<RespawnTimer>, Without<RespawnPoint>),
-    >,
+/// Attaches visual mesh for the given VisualKind.
+fn attach_visual(
+    commands: &mut Commands,
+    entity: Entity,
+    visual: &VisualKind,
+    vox_registry: &VoxModelRegistry,
+    vox_assets: &Assets<VoxModelAsset>,
+    default_material: &DefaultVoxModelMaterial,
 ) {
-    let tick = timeline.tick();
-    for event in events.read() {
-        let Ok((config, has_death_effects)) = query.get(event.entity) else {
-            continue;
-        };
-        if has_death_effects {
-            continue;
+    match visual {
+        VisualKind::Vox(path) => {
+            attach_vox_mesh(commands, entity, path, vox_registry, vox_assets, default_material);
         }
-        let duration = config
-            .map(|c| c.duration_ticks)
-            .unwrap_or(DEFAULT_RESPAWN_TICKS);
-        commands.entity(event.entity).insert((
-            RespawnTimer {
-                expires_at: tick + duration as i16,
-            },
-            RigidBodyDisabled,
-            ColliderDisabled,
-        ));
+        _ => {
+            trace!("World object entity {entity:?} has no Vox visual, skipping mesh attachment");
+        }
     }
 }
 ```
 
-#### 8. System ordering for on_death_effects
-**File**: `crates/server/src/gameplay.rs`
-**Action**: modify
-
-Add to `FixedUpdate` schedule:
+Add `on_visual_kind_changed` — the single system for all world object visual setup (initial and subsequent):
 
 ```rust
-on_death_effects
-    .after(hit_detection::process_projectile_hits)
-    .after(hit_detection::process_hitbox_hits),
-```
-
-`on_death_effects` reads `EventReader<DeathEvent>`, so it must run after the systems that emit those events. `start_respawn_timer` must also run after `on_death_effects` (since Phase 2 step 7 adds the `Has<OnDeathEffects>` filter there).
-
-#### 9. Client: on_visual_kind_changed system
-**File**: `crates/client/src/world_object.rs`
-**Action**: modify
-
-Add system that rebuilds visuals when `VisualKind` changes on a replicated entity. Move mesh components to parent entity (currently on a child).
-
-```rust
-/// Rebuilds visuals when VisualKind changes via replication (e.g. tree→stump transformation).
-fn on_visual_kind_changed(
+/// Rebuilds visuals when VisualKind changes via replication (e.g. tree→stump).
+pub fn on_visual_kind_changed(
     mut commands: Commands,
     query: Query<(Entity, &VisualKind), Changed<VisualKind>>,
     vox_registry: Res<VoxModelRegistry>,
     vox_assets: Res<Assets<VoxModelAsset>>,
-    meshes: Res<Assets<Mesh>>,
     default_material: Res<DefaultVoxModelMaterial>,
     children_query: Query<&Children>,
 ) {
     for (entity, visual) in &query {
-        // Despawn old visual children
-        if let Ok(children) = children_query.get(entity) {
-            for &child in children.iter() {
-                commands.entity(child).despawn();
-            }
+        despawn_visual_children(&mut commands, entity, &children_query);
+        attach_visual(
+            &mut commands, entity, visual,
+            &vox_registry, &vox_assets, &default_material,
+        );
+    }
+}
+
+fn despawn_visual_children(
+    commands: &mut Commands,
+    entity: Entity,
+    children_query: &Query<&Children>,
+) {
+    if let Ok(children) = children_query.get(entity) {
+        for &child in children.iter() {
+            commands.entity(child).despawn();
         }
-        // Rebuild visual
-        attach_visual(&mut commands, entity, visual, &vox_registry, &vox_assets, &meshes, &default_material);
     }
 }
 ```
 
-Register this system in the client's world object plugin/setup (wherever `on_world_object_replicated` is registered). Run condition: after replication.
+**File**: `crates/client/src/gameplay.rs`
+**Action**: modify
 
-#### 10. Stump object def
+Register alongside `on_world_object_replicated` (line 23):
+
+```rust
+app.add_systems(Update, (
+    on_world_object_replicated,
+    on_visual_kind_changed,
+).run_if(ready));
+```
+
+Add `on_visual_kind_changed` to import from `crate::world_object`.
+
+#### 7. Stump object def
 **File**: `assets/objects/stump_circle.object.ron`
 **Action**: create
 
 ```ron
 {
     "protocol::world_object::types::ObjectCategory": Scenery,
+    // Placeholder: reuses tree model until a stump vox model is created
     "protocol::world_object::types::VisualKind": Vox("models/trees/tree_circle.vox"),
     "avian3d::collision::collider::constructor::ColliderConstructor": Cylinder(radius: 0.5, height: 1.0),
     "avian3d::dynamics::rigid_body::RigidBody": Static,
@@ -451,14 +640,13 @@ Register this system in the client's world object plugin/setup (wherever `on_wor
 }
 ```
 
-Note: Uses the same vox model as a placeholder until a stump model exists. No `Health` — transformed stumps shouldn't be damageable. No `PlacementOffset` — position is inherited from the tree. Shorter collider to represent a stump.
+No `Health` — stumps are intentionally undamageable. No `PlacementOffset` — position inherited from original entity.
 
-#### 11. Add OnDeathEffects to tree_circle.object.ron
+#### 8. Add OnDeathEffects to tree_circle.object.ron
 **File**: `assets/objects/tree_circle.object.ron`
 **Action**: modify
 
-Add entry:
-
+Add:
 ```ron
     "protocol::world_object::types::OnDeathEffects": ([
         TransformInto(
@@ -473,15 +661,17 @@ Add entry:
 - [ ] `cargo check-all` passes
 
 #### Manual
-- [ ] `cargo server` + `cargo client` — spawn near trees, damage a tree to death
-- [ ] Observe: tree visuals change (stump appears in same position, no pop or gap)
-- [ ] Observe: stump has no health component (not damageable)
-- [ ] Observe: characters still respawn normally (teleport, heal, invulnerability)
-- [ ] Observe: `ActiveTransformation` component is present on the stump entity (debug log or inspector)
+- [ ] `cargo server` + `cargo client` — damage tree to death
+- [ ] Observe: stump appears in same position (no pop, no gap)
+- [ ] Observe: stump has no health (not damageable)
+- [ ] Observe: characters still respawn via `StartRespawnPointTimer` path
+- [ ] Observe: `ActiveTransformation` present on stump entity
 
 ---
 
 ## Phase 3: Revert After Delay
+
+Stump reverts to tree after configured ticks.
 
 ### Changes
 
@@ -489,48 +679,35 @@ Add entry:
 **File**: `crates/server/src/gameplay.rs`
 **Action**: modify
 
-Add new system:
+Add:
 
 ```rust
-/// Decrements active transformation timers. Triggers revert when countdown reaches zero.
+/// Decrements active transformation timers. Reverts entity when countdown reaches zero.
 fn tick_active_transformations(
     mut commands: Commands,
     mut query: Query<(Entity, &mut ActiveTransformation, &WorldObjectId)>,
-    defs: Res<WorldObjectDefRegistry>,
-    type_registry: Res<AppTypeRegistry>,
-    vox_registry: Res<VoxModelRegistry>,
-    vox_assets: Res<Assets<VoxModelAsset>>,
-    meshes: Res<Assets<Mesh>>,
+    ctx: TransformationContext,
 ) {
     for (entity, mut transform, obj_id) in &mut query {
         let Some(ref mut remaining) = transform.ticks_remaining else {
-            continue; // Permanent transformation, no revert
+            continue; // Permanent transformation — trace emitted at insertion time (on_death_effects)
         };
         *remaining = remaining.saturating_sub(1);
         if *remaining > 0 {
             continue;
         }
-
-        // Revert: apply original def, remove ActiveTransformation
         let source_id = WorldObjectId(transform.source.clone());
-        let Some(source_def) = defs.get(&source_id) else {
+        let Some(source_def) = ctx.defs.get(&source_id) else {
             warn!("Cannot revert: unknown source def '{}'", transform.source);
             continue;
         };
-        let Some(original_def) = defs.get(obj_id) else {
+        let Some(original_def) = ctx.defs.get(obj_id) else {
             warn!("Cannot revert: unknown original def '{}'", obj_id.0);
             continue;
         };
-
         crate::world_object::apply_transformation(
-            &mut commands,
-            entity,
-            source_def,     // current state is the source
-            original_def,   // target is the original
-            &type_registry,
-            &vox_registry,
-            &vox_assets,
-            &meshes,
+            &mut commands, entity,
+            source_def, original_def, &ctx,
         );
         commands.entity(entity).remove::<ActiveTransformation>();
     }
@@ -547,33 +724,33 @@ Add to `FixedUpdate` schedule:
 tick_active_transformations,
 ```
 
-No strict ordering needed — runs each tick independently.
-
 ### Verification
 #### Automated
 - [ ] `cargo check-all` passes
 
 #### Manual
-- [ ] `cargo server` + `cargo client` — damage tree to death, observe stump
-- [ ] Wait for `revert_after_ticks` (1000 ticks ≈ ~16 seconds at 60Hz) — observe tree reappears
-- [ ] Confirm tree has full health after revert
-- [ ] Damage tree again — full cycle repeats (tree→stump→tree→stump)
-- [ ] Confirm characters are unaffected by this system
+- [ ] `cargo server` + `cargo client` — damage tree, observe stump
+- [ ] Wait ~16s (1000 ticks at 60Hz) — tree reappears with full health
+- [ ] Damage again — full cycle repeats
+- [ ] Characters unaffected
 
 ---
 
 ## Phase 4: Persistence Across Eviction
+
+Transformation and respawn timer state survive chunk unload/reload. Fixes `PlacementOffset` double-apply.
 
 ### Changes
 
 #### 1. ReflectPersist and ReflectSpawnOnly type data markers
 **File**: `crates/protocol/src/world_object/types.rs`
 **Action**: modify
+These are the first custom reflect type data markers in the codebase. The `FromType` pattern follows Bevy's own convention (`ReflectComponent`, `ReflectDefault`, etc.) — novel for this project but well-established in the ecosystem.
 
-Add after `ActiveTransformation`:
+Add:
 
 ```rust
-/// Reflect type data: marks a component for serialization during chunk eviction.
+/// Reflect type data: component is serialized during chunk eviction.
 #[derive(Clone)]
 pub struct ReflectPersist;
 
@@ -583,7 +760,7 @@ impl<T: Reflect> bevy::reflect::FromType<T> for ReflectPersist {
     }
 }
 
-/// Reflect type data: marks a component as spawn-only (skipped on reload).
+/// Reflect type data: component is only applied on first spawn, skipped on reload.
 #[derive(Clone)]
 pub struct ReflectSpawnOnly;
 
@@ -594,42 +771,44 @@ impl<T: Reflect> bevy::reflect::FromType<T> for ReflectSpawnOnly {
 }
 ```
 
-#### 2. Apply markers to components
-**File**: `crates/protocol/src/world_object/types.rs`
-**Action**: modify
+Re-export `ReflectPersist`, `ReflectSpawnOnly` from `mod.rs`.
 
-On `ActiveTransformation`:
+#### 2. Apply markers
+**File**: `crates/protocol/src/world_object/types.rs` — on `ActiveTransformation`:
 ```rust
 #[reflect(Component, Persist)]
 ```
 
-On `PlacementOffset`:
+**File**: `crates/protocol/src/world_object/types.rs` — on `PlacementOffset`:
 ```rust
 #[reflect(Component, SpawnOnly)]
 ```
 
-**File**: `crates/protocol/src/character/types.rs`
-**Action**: modify
-
-On `Health`:
+**File**: `crates/protocol/src/character/types.rs` — on `Health`:
 ```rust
 #[reflect(Component, Default, Persist)]
 ```
+Add `use crate::world_object::ReflectPersist;` to imports.
 
-This requires importing `ReflectPersist` (via `use crate::world_object::ReflectPersist;`) or registering it so reflect can find it. The `#[reflect(Persist)]` attribute looks up `ReflectPersist` in the type data registry — it must be registered.
+**File**: `crates/protocol/src/character/types.rs` — on `RespawnTimer`:
+```rust
+#[reflect(Component, Persist)]
+```
 
-#### 3. Register type data markers in WorldObjectPlugin
+Note: both `Health` and `RespawnTimer` are in `character/types.rs`. The single `use crate::world_object::ReflectPersist;` import covers both.
+
+#### 3. Register markers in WorldObjectPlugin
 **File**: `crates/protocol/src/world_object/plugin.rs`
 **Action**: modify
 
-Add:
+The `#[reflect(Persist)]` / `#[reflect(SpawnOnly)]` attributes should auto-register via `FromType` during `register_type`. If not, add explicit:
+
 ```rust
 app.register_type_data::<super::types::ActiveTransformation, super::types::ReflectPersist>();
 app.register_type_data::<super::types::PlacementOffset, super::types::ReflectSpawnOnly>();
 app.register_type_data::<crate::Health, super::types::ReflectPersist>();
+app.register_type_data::<crate::character::RespawnTimer, super::types::ReflectPersist>();
 ```
-
-Note: `#[reflect(Persist)]` on the derive should handle this automatically if `ReflectPersist` implements `FromType<T>`. If the derive doesn't find it, fall back to explicit `register_type_data` calls.
 
 #### 4. Expand WorldObjectSpawn with persisted components
 **File**: `crates/voxel_map_engine/src/config.rs`
@@ -640,12 +819,10 @@ Note: `#[reflect(Persist)]` on the derive should handle this automatically if `R
 pub struct WorldObjectSpawn {
     pub object_id: String,
     pub position: Vec3,
-    /// RON-serialized persisted components. Empty for fresh spawns.
     #[serde(default)]
     pub persisted_components: Vec<PersistedComponent>,
 }
 
-/// A single persisted component: type path + RON data.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PersistedComponent {
     pub type_path: String,
@@ -653,57 +830,108 @@ pub struct PersistedComponent {
 }
 ```
 
-`#[serde(default)]` ensures backward compatibility — old save files without this field deserialize as empty vec.
+`#[serde(default)]` ensures backward compatibility with old save files.
 
-Bump `ENTITY_SAVE_VERSION` in `crates/voxel_map_engine/src/persistence.rs` from `1` to `2`.
+**File**: `crates/voxel_map_engine/src/persistence.rs`
+**Action**: modify
+
+Bump `ENTITY_SAVE_VERSION` from `1` to `2`.
 
 #### 5. Serialize ReflectPersist components during eviction
 **File**: `crates/server/src/chunk_entities.rs`
 **Action**: modify
-
-Change `evict_chunk_entities` signature to access `World` (or use `&AppTypeRegistry` + component access). The system needs to iterate the entity's components, check for `ReflectPersist` type data, and serialize matching components to RON.
+Refactor `evict_chunk_entities` to an exclusive system (`&mut World`) to access both query results and arbitrary reflected components. The two-pass approach (collect entity IDs, then serialize) is required because `query.iter(world)` borrows `world` immutably, preventing `world.entity()` during iteration.
 
 ```rust
-pub fn evict_chunk_entities(
-    mut commands: Commands,
-    entity_query: Query<(Entity, &ChunkEntityRef, &WorldObjectId, &Position)>,
-    map_query: Query<(&VoxelMapInstance, &VoxelMapConfig)>,
-    type_registry: Res<AppTypeRegistry>,
-    world: &World,
-) {
-    let registry = type_registry.read();
-    // ... existing grouping logic ...
-
-    // For each entity being evicted, scan for ReflectPersist components
-    for (entity, chunk_ref, obj_id, pos) in &entity_query {
-        // ... existing eviction check ...
-
-        let persisted = serialize_persisted_components(entity, world, &registry);
-
-        by_chunk
-            .entry((chunk_ref.map_entity, chunk_ref.chunk_pos))
-            .or_default()
-            .push((
-                entity,
-                WorldObjectSpawn {
-                    object_id: obj_id.0.clone(),
-                    position: Vec3::from(pos.0),
-                    persisted_components: persisted,
-                },
-            ));
+/// Collects entities whose chunk column is no longer loaded.
+fn collect_evictable_entities(
+    world: &mut World,
+) -> Vec<(Entity, Entity, IVec3, String, Vec3)> {
+    let mut entity_query = world.query::<(Entity, &ChunkEntityRef, &WorldObjectId, &Position)>();
+    let mut map_query = world.query::<(&VoxelMapInstance, &VoxelMapConfig)>();
+    let mut result = Vec::new();
+    for (entity, chunk_ref, obj_id, pos) in entity_query.iter(world) {
+        let Ok((instance, _)) = map_query.get(world, chunk_ref.map_entity) else {
+            continue;
+        };
+        let col = chunk_to_column(chunk_ref.chunk_pos);
+        if instance.chunk_levels.contains_key(&col) {
+            continue;
+        }
+        result.push((
+            entity,
+            chunk_ref.map_entity,
+            chunk_ref.chunk_pos,
+            obj_id.0.clone(),
+            Vec3::from(pos.0),
+        ));
     }
-    // ... rest unchanged ...
+    result
 }
 
-/// Serializes all components with ReflectPersist type data to RON.
+/// Saves chunk entity data to disk and despawns entities.
+fn save_and_despawn_evicted(
+    world: &mut World,
+    by_chunk: HashMap<(Entity, IVec3), Vec<(Entity, WorldObjectSpawn)>>,
+) {
+    let mut map_query = world.query::<&VoxelMapConfig>();
+    for ((map_entity, chunk_pos), entities) in by_chunk {
+        let Ok(config) = map_query.get(world, map_entity) else {
+            continue;
+        };
+        let spawns: Vec<WorldObjectSpawn> = entities.iter().map(|(_, s)| s.clone()).collect();
+        if let Some(ref dir) = config.save_dir {
+            let dir = dir.clone();
+            let pool = AsyncComputeTaskPool::get();
+            pool.spawn(async move {
+                if let Err(e) =
+                    voxel_map_engine::persistence::save_chunk_entities(&dir, chunk_pos, &spawns)
+                {
+                    error!("Failed to save evicted chunk entities at {chunk_pos}: {e}");
+                }
+            })
+            .detach();
+        }
+        for (entity, _) in entities {
+            world.despawn(entity);
+        }
+    }
+}
+```
+
+Then `evict_chunk_entities` becomes:
+
+```rust
+pub fn evict_chunk_entities(world: &mut World) {
+    let type_registry = world.resource::<AppTypeRegistry>().clone();
+    let registry = type_registry.read();
+
+    let to_process = collect_evictable_entities(world);
+    if to_process.is_empty() {
+        return;
+    }
+
+    let mut by_chunk: HashMap<(Entity, IVec3), Vec<(Entity, WorldObjectSpawn)>> = HashMap::new();
+    for (entity, map_entity, chunk_pos, object_id, position) in to_process {
+        let entity_ref = world.entity(entity);
+        let persisted = serialize_persisted_components(entity_ref, &registry);
+        by_chunk
+            .entry((map_entity, chunk_pos))
+            .or_default()
+            .push((entity, WorldObjectSpawn { object_id, position, persisted_components: persisted }));
+    }
+
+    drop(registry);
+    save_and_despawn_evicted(world, by_chunk);
+}
+```
+
+```rust
 fn serialize_persisted_components(
-    entity: Entity,
-    world: &World,
+    entity_ref: EntityRef,
     registry: &bevy::reflect::TypeRegistry,
 ) -> Vec<PersistedComponent> {
     let mut result = Vec::new();
-    let entity_ref = world.entity(entity);
-
     for registration in registry.iter() {
         if registration.data::<ReflectPersist>().is_none() {
             continue;
@@ -723,7 +951,10 @@ fn serialize_persisted_components(
                 });
             }
             Err(e) => {
-                warn!("Failed to serialize persisted component '{}': {e}", registration.type_info().type_path());
+                warn!(
+                    "Failed to serialize persisted '{}': {e}",
+                    registration.type_info().type_path()
+                );
             }
         }
     }
@@ -731,46 +962,50 @@ fn serialize_persisted_components(
 }
 ```
 
-Note: `evict_chunk_entities` currently takes `Query` params. Accessing raw `&World` alongside `Query` requires an exclusive system (`&mut World`) or a `SystemParam` that doesn't conflict. Alternative: use `entity_query` to get entity IDs, then use the type registry to reflect-read components. This may require refactoring to an exclusive system or using `Commands` with a deferred world access. Investigate the cleanest pattern — may need `world.entity(entity).get::<T>()` or `ReflectComponent::reflect(entity_ref)` which works with `EntityRef`.
-
-Actually, `&World` conflicts with `Query` borrows. Use a system param approach:
-- Keep `Query` params for the main logic
-- After grouping entities, use a deferred `commands.queue(|world: &mut World| { ... })` to do the serialization before despawn
-- Or refactor to an exclusive system
-
-The simplest approach: make `evict_chunk_entities` an exclusive system that takes `&mut World` directly and does manual queries.
-
 #### 6. Restore persisted components on reload
 **File**: `crates/server/src/chunk_entities.rs`
 **Action**: modify
 
-In `spawn_chunk_entities`, after spawning and applying def components, check for persisted components:
+Add `TransformationContext` as a system param to `spawn_chunk_entities` (replacing the individual `defs`, `type_registry`, `vox_registry`, `vox_assets`, `meshes` params). This aligns with `apply_transformation`'s `&TransformationContext` signature from Phase 2 step 4.
+
+In `spawn_chunk_entities`, after spawning entity and applying def components:
 
 ```rust
-// After apply_object_components and position insertion:
-if !spawn.persisted_components.is_empty() {
-    restore_persisted_components(
-        &mut commands,
-        entity,
-        &spawn.persisted_components,
-        &type_registry,
-    );
+let is_reload = !spawn.persisted_components.is_empty();
+let offset = extract_placement_offset(def, is_reload);
+// ... existing position + ChunkEntityRef insertion ...
 
-    // If ActiveTransformation is persisted, apply source def instead of base def
-    if let Some(active) = find_persisted::<ActiveTransformation>(&spawn.persisted_components, &type_registry) {
-        let source_id = WorldObjectId(active.source.clone());
-        if let Some(source_def) = defs.get(&source_id) {
+if is_reload {
+    restore_persisted_components(&mut commands, entity, &spawn.persisted_components, &ctx.type_registry);
+
+    if let Some(source_name) = find_persisted_source(&spawn.persisted_components) {
+        let source_id = WorldObjectId(source_name);
+        if let Some(source_def) = ctx.defs.get(&source_id) {
             crate::world_object::apply_transformation(
-                &mut commands, entity, def, source_def,
-                &type_registry, &vox_registry, &vox_assets, &meshes,
+                &mut commands, entity, def, source_def, &ctx,
             );
         }
     }
 }
 ```
 
+Extract the transformation source from persisted RON without full deserialization:
+
 ```rust
-/// Deserializes and inserts persisted components onto an entity.
+fn find_persisted_source(persisted: &[PersistedComponent]) -> Option<String> {
+    let pc = persisted.iter().find(|pc| pc.type_path.ends_with("ActiveTransformation"))?;
+    #[derive(Deserialize)]
+    struct Partial { source: String }
+    let partial: Partial = ron::from_str(&pc.ron_data).ok()?;
+    Some(partial.source)
+}
+```
+
+This is safe because `ActiveTransformation`'s RON format is stable (we control the type). Avoids deferred-command complexity — the source name is available before command flush.
+
+Deserialize persisted components, then reuse `apply_object_components` for batched insertion (single deferred command, same pattern as initial spawn):
+
+```rust
 fn restore_persisted_components(
     commands: &mut Commands,
     entity: Entity,
@@ -778,48 +1013,30 @@ fn restore_persisted_components(
     type_registry: &AppTypeRegistry,
 ) {
     let registry = type_registry.read();
+    let mut values: Vec<Box<dyn PartialReflect>> = Vec::new();
     for pc in persisted {
         let Some(registration) = registry.get_with_type_path(&pc.type_path) else {
             warn!("Unknown persisted type '{}'", pc.type_path);
             continue;
         };
-        let Some(reflect_component) = registration.data::<ReflectComponent>() else {
-            warn!("Persisted type '{}' missing ReflectComponent", pc.type_path);
+        let Ok(mut de) = ron::Deserializer::from_str(&pc.ron_data) else {
+            warn!("Invalid RON for persisted '{}'", pc.type_path);
             continue;
         };
-        let deserializer = ron::Deserializer::from_str(&pc.ron_data);
-        match deserializer {
-            Ok(mut de) => {
-                let type_deserializer = bevy::reflect::serde::TypedReflectDeserializer::new(registration, &registry);
-                match type_deserializer.deserialize(&mut de) {
-                    Ok(value) => {
-                        let registry_arc = type_registry.0.clone();
-                        let value_owned = value;
-                        commands.queue(move |world: &mut World| {
-                            let registry = registry_arc.read();
-                            if let Some(registration) = registry.get_with_type_path(value_owned.reflect_type_path()) {
-                                if let Some(reflect_component) = registration.data::<ReflectComponent>() {
-                                    if let Some(mut entity_mut) = world.get_entity_mut(entity) {
-                                        reflect_component.insert(&mut entity_mut, value_owned.as_ref(), &registry);
-                                    }
-                                }
-                            }
-                        });
-                    }
-                    Err(e) => warn!("Failed to deserialize persisted '{}': {e}", pc.type_path),
-                }
-            }
-            Err(e) => warn!("Invalid RON for persisted '{}': {e}", pc.type_path),
+        let type_de = bevy::reflect::serde::TypedReflectDeserializer::new(registration, &registry);
+        match type_de.deserialize(&mut de) {
+            Ok(value) => values.push(value),
+            Err(e) => warn!("Failed to deserialize persisted '{}': {e}", pc.type_path),
         }
     }
+    drop(registry);
+    apply_object_components(commands, entity, values, type_registry.0.clone());
 }
 ```
 
-#### 7. Skip PlacementOffset on reload (ReflectSpawnOnly)
+#### 7. Skip PlacementOffset on reload
 **File**: `crates/server/src/chunk_entities.rs`
 **Action**: modify
-
-Modify `extract_placement_offset` to skip when persisted components are non-empty (indicating reload):
 
 ```rust
 fn extract_placement_offset(def: &WorldObjectDef, is_reload: bool) -> Vec3 {
@@ -834,27 +1051,86 @@ fn extract_placement_offset(def: &WorldObjectDef, is_reload: bool) -> Vec3 {
 }
 ```
 
-Update call site in `spawn_chunk_entities`:
-```rust
-let is_reload = !spawn.persisted_components.is_empty();
-let offset = extract_placement_offset(def, is_reload);
-```
-
 #### 8. Update save_all_chunk_entities_on_exit
 **File**: `crates/server/src/chunk_entities.rs`
 **Action**: modify
 
-The shutdown save also needs to capture persisted components, same as eviction. Apply the same `serialize_persisted_components` logic.
+Refactor to an exclusive system to access reflected components. Current system reads `AppExit` messages, groups all entities by chunk, saves synchronously.
+
+```rust
+pub fn save_all_chunk_entities_on_exit(world: &mut World) {
+    if !has_app_exit(world) {
+        return;
+    }
+
+    let type_registry = world.resource::<AppTypeRegistry>().clone();
+    let registry = type_registry.read();
+    let by_chunk = collect_all_chunk_spawns(world, &registry);
+    drop(registry);
+
+    save_chunks_synchronously(world, by_chunk);
+}
+
+fn has_app_exit(world: &mut World) -> bool {
+    world.resource_mut::<MessageReader<AppExit>>().read().next().is_some()
+}
+
+/// Collects all chunk entities grouped by (map_entity, chunk_pos) with persisted components.
+fn collect_all_chunk_spawns(
+    world: &mut World,
+    registry: &bevy::reflect::TypeRegistry,
+) -> HashMap<(Entity, IVec3), Vec<WorldObjectSpawn>> {
+    let mut entity_query = world.query::<(Entity, &ChunkEntityRef, &WorldObjectId, &Position)>();
+    let entities: Vec<_> = entity_query
+        .iter(world)
+        .map(|(entity, chunk_ref, obj_id, pos)| {
+            (entity, chunk_ref.map_entity, chunk_ref.chunk_pos, obj_id.0.clone(), Vec3::from(pos.0))
+        })
+        .collect();
+
+    let mut by_chunk: HashMap<(Entity, IVec3), Vec<WorldObjectSpawn>> = HashMap::new();
+    for (entity, map_entity, chunk_pos, object_id, position) in entities {
+        let entity_ref = world.entity(entity);
+        let persisted = serialize_persisted_components(entity_ref, registry);
+        by_chunk
+            .entry((map_entity, chunk_pos))
+            .or_default()
+            .push(WorldObjectSpawn { object_id, position, persisted_components: persisted });
+    }
+    by_chunk
+}
+
+fn save_chunks_synchronously(
+    world: &mut World,
+    by_chunk: HashMap<(Entity, IVec3), Vec<WorldObjectSpawn>>,
+) {
+    let mut map_query = world.query::<&VoxelMapConfig>();
+    for ((map_entity, chunk_pos), spawns) in by_chunk {
+        let Ok(config) = map_query.get(world, map_entity) else {
+            continue;
+        };
+        if let Some(ref dir) = config.save_dir {
+            if let Err(e) =
+                voxel_map_engine::persistence::save_chunk_entities(dir, chunk_pos, &spawns)
+            {
+                error!("Shutdown save failed for chunk {chunk_pos}: {e}");
+            }
+        }
+    }
+}
+```
+
+Key difference from `evict_chunk_entities`: saves all entities (not just evictable ones), saves synchronously (not async), and does not despawn. `collect_all_chunk_spawns` is reusable by both if needed.
 
 ### Verification
 #### Automated
 - [ ] `cargo check-all` passes
 
 #### Manual
-- [ ] `cargo server` + `cargo client` — damage tree to death, observe stump
-- [ ] Move far enough to trigger chunk eviction (walk away until chunk unloads)
-- [ ] Return to the chunk — stump reloads with remaining countdown
-- [ ] Wait for countdown to expire — tree reverts with full health
+- [ ] `cargo server` + `cargo client` — damage tree, observe stump
+- [ ] Walk away to trigger chunk eviction, return — stump reloads with remaining countdown
+- [ ] Wait for countdown — tree reverts with full health
 - [ ] Verify fresh trees spawn at correct position (PlacementOffset applied once)
-- [ ] Verify reloaded trees don't double-offset (position matches pre-eviction position)
-- [ ] Restart server — verify entities load correctly from disk (shutdown save works)
+- [ ] Verify reloaded trees don't double-offset
+- [ ] Restart server — entities load correctly from shutdown save
+- [ ] Kill character, trigger chunk eviction mid-respawn-timer, return — timer resumes correctly
