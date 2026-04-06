@@ -5,6 +5,10 @@ use leafwing_input_manager::prelude::*;
 use lightyear::connection::client::Connected;
 use lightyear::prelude::server::ClientOf;
 use lightyear::prelude::*;
+use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
+use protocol::world_object::{
+    ActiveTransformation, DeathEffect, OnDeathEffects, WorldObjectDefRegistry, WorldObjectId,
+};
 use protocol::*;
 
 use crate::map::{load_startup_entities, ClientChunkVisibility};
@@ -27,6 +31,9 @@ impl Plugin for ServerGameplayPlugin {
         app.add_systems(
             FixedUpdate,
             (
+                on_death_effects
+                    .after(hit_detection::process_projectile_hits)
+                    .after(hit_detection::process_hitbox_hits),
                 start_respawn_timer
                     .after(hit_detection::process_projectile_hits)
                     .after(hit_detection::process_hitbox_hits),
@@ -133,17 +140,24 @@ fn validate_respawn_points(
 }
 
 /// Starts respawn timers for entities that just died (via DeathEvent).
+/// Skips entities with `OnDeathEffects` — those are handled by `on_death_effects`.
 fn start_respawn_timer(
     mut commands: Commands,
     timeline: Res<LocalTimeline>,
     mut events: MessageReader<DeathEvent>,
-    query: Query<Option<&RespawnTimerConfig>, (Without<RespawnTimer>, Without<RespawnPoint>)>,
+    query: Query<
+        (Option<&RespawnTimerConfig>, Has<OnDeathEffects>),
+        (Without<RespawnTimer>, Without<RespawnPoint>),
+    >,
 ) {
     let tick = timeline.tick();
     for event in events.read() {
-        let Ok(config) = query.get(event.entity) else {
+        let Ok((config, has_death_effects)) = query.get(event.entity) else {
             continue;
         };
+        if has_death_effects {
+            continue;
+        }
         let duration = config
             .map(|c| c.duration_ticks)
             .unwrap_or(DEFAULT_RESPAWN_TICKS);
@@ -154,6 +168,56 @@ fn start_respawn_timer(
             RigidBodyDisabled,
             ColliderDisabled,
         ));
+    }
+}
+
+/// Processes death effects for world objects that just died.
+fn on_death_effects(
+    mut commands: Commands,
+    mut events: MessageReader<DeathEvent>,
+    effect_query: Query<(&OnDeathEffects, &WorldObjectId)>,
+    defs: Res<WorldObjectDefRegistry>,
+    type_registry: Res<AppTypeRegistry>,
+    vox_registry: Res<VoxModelRegistry>,
+    vox_assets: Res<Assets<VoxModelAsset>>,
+    meshes: Res<Assets<Mesh>>,
+) {
+    for event in events.read() {
+        let Ok((effects, obj_id)) = effect_query.get(event.entity) else {
+            continue;
+        };
+        for effect in &effects.0 {
+            match effect {
+                DeathEffect::TransformInto {
+                    source,
+                    revert_after_ticks,
+                } => {
+                    let source_id = WorldObjectId(source.clone());
+                    let Some(source_def) = defs.get(&source_id) else {
+                        warn!("Unknown transformation source '{source}'");
+                        continue;
+                    };
+                    let Some(current_def) = defs.get(obj_id) else {
+                        warn!("Unknown current def '{}'", obj_id.0);
+                        continue;
+                    };
+                    crate::world_object::apply_transformation(
+                        &mut commands,
+                        event.entity,
+                        current_def,
+                        source_def,
+                        &type_registry,
+                        &vox_registry,
+                        &vox_assets,
+                        &meshes,
+                    );
+                    commands.entity(event.entity).insert(ActiveTransformation {
+                        source: source.clone(),
+                        ticks_remaining: *revert_after_ticks,
+                    });
+                }
+            }
+        }
     }
 }
 

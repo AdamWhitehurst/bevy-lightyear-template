@@ -6,7 +6,9 @@ use lightyear::prelude::{Controlled, Interpolated, Predicted, Replicated};
 use protocol::*;
 use render::CameraOrbitState;
 
-use crate::world_object::{init_default_vox_model_material, on_world_object_replicated};
+use crate::world_object::{
+    init_default_vox_model_material, on_visual_kind_changed, on_world_object_replicated,
+};
 
 pub struct ClientGameplayPlugin;
 
@@ -20,7 +22,10 @@ impl Plugin for ClientGameplayPlugin {
             FixedPreUpdate,
             sync_camera_yaw_to_input.before(InputSystems::BufferClientInputs),
         );
-        app.add_systems(Update, on_world_object_replicated.run_if(ready));
+        app.add_systems(
+            Update,
+            (on_world_object_replicated, on_visual_kind_changed).run_if(ready),
+        );
 
         app.add_observer(on_respawn_timer_added);
         app.add_observer(on_respawn_timer_removed);

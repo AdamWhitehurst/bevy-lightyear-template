@@ -155,6 +155,8 @@ impl Plugin for ProtocolPlugin {
 
         // World objects — static, no prediction needed
         app.register_component::<world_object::WorldObjectId>();
+        app.register_component::<world_object::VisualKind>();
+        app.register_component::<world_object::ActiveTransformation>();
 
         // Marker components
         app.register_component::<PlayerId>();

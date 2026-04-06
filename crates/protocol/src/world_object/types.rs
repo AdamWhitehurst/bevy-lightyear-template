@@ -46,6 +46,29 @@ pub enum VisualKind {
     None,
 }
 
+/// Describes effects triggered when this object dies. Defined in `.object.ron`.
+#[derive(Component, Reflect, Deserialize, Clone, Debug)]
+#[reflect(Component)]
+pub struct OnDeathEffects(pub Vec<DeathEffect>);
+
+/// A single effect applied on death.
+#[derive(Reflect, Deserialize, Clone, Debug)]
+pub enum DeathEffect {
+    /// Replace this entity's components with those from another object def.
+    TransformInto {
+        source: String,
+        revert_after_ticks: Option<u16>,
+    },
+}
+
+/// Tracks an active transformation on a world object. Persisted across chunk eviction.
+#[derive(Component, Reflect, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[reflect(Component)]
+pub struct ActiveTransformation {
+    pub source: String,
+    pub ticks_remaining: Option<u16>,
+}
+
 /// A loaded world object definition.
 ///
 /// All fields are stored as type-erased reflect components. They are inserted via

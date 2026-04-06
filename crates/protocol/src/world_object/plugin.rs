@@ -53,5 +53,8 @@ impl Plugin for WorldObjectPlugin {
         app.register_type::<VisualKind>();
         app.register_type::<ColliderConstructor>();
         app.register_type::<super::types::PlacementOffset>();
+        app.register_type::<super::types::OnDeathEffects>();
+        app.register_type::<super::types::DeathEffect>();
+        app.register_type::<super::types::ActiveTransformation>();
     }
 }

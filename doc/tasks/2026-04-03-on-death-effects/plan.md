@@ -658,7 +658,7 @@ Add:
 
 ### Verification
 #### Automated
-- [ ] `cargo check-all` passes
+- [x] `cargo check-all` passes
 
 #### Manual
 - [ ] `cargo server` + `cargo client` — damage tree to death

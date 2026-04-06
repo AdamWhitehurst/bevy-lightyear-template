@@ -135,6 +135,39 @@ fn attach_visual(
     }
 }
 
+/// Rebuilds visuals when VisualKind changes via replication (e.g. tree→stump transformation).
+pub fn on_visual_kind_changed(
+    mut commands: Commands,
+    query: Query<(Entity, &VisualKind), Changed<VisualKind>>,
+    vox_registry: Res<VoxModelRegistry>,
+    vox_assets: Res<Assets<VoxModelAsset>>,
+    default_material: Res<DefaultVoxModelMaterial>,
+    children_query: Query<&Children>,
+) {
+    for (entity, visual) in &query {
+        if let Ok(children) = children_query.get(entity) {
+            for child in children.iter() {
+                commands.entity(child).despawn();
+            }
+        }
+        match visual {
+            VisualKind::Vox(path) => {
+                attach_vox_mesh(
+                    &mut commands,
+                    entity,
+                    path,
+                    &vox_registry,
+                    &vox_assets,
+                    &default_material,
+                );
+            }
+            _ => {
+                trace!("Entity {entity:?} visual changed to non-Vox, no mesh to attach");
+            }
+        }
+    }
+}
+
 /// Attaches the LOD 0 (full-resolution) vox mesh as a child of the world object entity.
 fn attach_vox_mesh(
     commands: &mut Commands,
