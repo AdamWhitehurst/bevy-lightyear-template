@@ -34,6 +34,7 @@ pub fn spawn_world_object(
             Rotation::default(),
             map_id,
             Replicate::to_clients(NetworkTarget::All),
+            NetworkVisibility,
         ))
         .id();
 

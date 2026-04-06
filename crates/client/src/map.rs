@@ -5,6 +5,7 @@ use bevy::{prelude::*, window::PrimaryWindow};
 use leafwing_input_manager::prelude::*;
 use lightyear::prelude::{Controlled, DisableRollback, MessageReceiver, MessageSender, Predicted};
 use protocol::map::{MapChannel, MapTransitionEnd, MapTransitionReady, MapTransitionStart};
+use protocol::world_object::WorldObjectId;
 use protocol::{
     CharacterMarker, ChunkDataSync, MapInstanceId, MapRegistry, PendingTransition, PlayerActions,
     SectionBlocksUpdate, TransitionReadySent, UnloadColumn, VoxelChannel, VoxelEditAck,
@@ -396,6 +397,7 @@ pub fn handle_map_transition_start(
     mut receivers: Query<&mut MessageReceiver<MapTransitionStart>>,
     mut registry: ResMut<MapRegistry>,
     player_query: Query<Entity, (With<Predicted>, With<CharacterMarker>, With<Controlled>)>,
+    world_objects: Query<(Entity, &MapInstanceId), With<WorldObjectId>>,
 ) {
     for mut receiver in &mut receivers {
         for transition in receiver.receive() {
@@ -409,6 +411,7 @@ pub fn handle_map_transition_start(
             // the player's MapInstanceId because lightyear may replicate the new
             // value before this message arrives.
             despawn_all_maps_except(&mut commands, &mut *registry, &transition.target);
+            despawn_foreign_world_objects(&mut commands, &world_objects, &transition.target);
 
             commands.entity(player).insert((
                 RigidBodyDisabled,
@@ -436,6 +439,29 @@ pub fn handle_map_transition_start(
                 .entity(player)
                 .insert(ChunkTicket::map_transition(map_entity));
         }
+    }
+}
+
+/// Despawn replicated world objects that don't belong to the transition target map.
+///
+/// Lightyear's room-based visibility relies on `ReplicableRootEntities` to iterate
+/// entities for despawn processing. Due to Bevy's non-recursive command flush,
+/// most entities are not in this set when the buffer runs, so lightyear never
+/// sends despawn messages for them. This client-side cleanup handles the gap.
+fn despawn_foreign_world_objects(
+    commands: &mut Commands,
+    world_objects: &Query<(Entity, &MapInstanceId), With<WorldObjectId>>,
+    keep: &MapInstanceId,
+) {
+    let mut count = 0;
+    for (entity, map_id) in world_objects {
+        if map_id != keep {
+            commands.entity(entity).despawn();
+            count += 1;
+        }
+    }
+    if count > 0 {
+        trace!("Despawned {count} world objects from previous map");
     }
 }
 

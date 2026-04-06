@@ -68,6 +68,7 @@ fn spawn_dummy_target(mut commands: Commands, registry: Res<MapRegistry>) {
         Position(Vec3::new(10.0, 5.0, 0.0)),
         Rotation::default(),
         Replicate::to_clients(NetworkTarget::All),
+        NetworkVisibility,
         PredictionTarget::to_clients(NetworkTarget::All),
         CharacterPhysicsBundle::default(),
         ColorComponent(css::GRAY.into()),
@@ -271,6 +272,7 @@ fn handle_connected(
             Rotation::default(),
             ActionState::<PlayerActions>::default(),
             Replicate::to_clients(NetworkTarget::All),
+            NetworkVisibility,
             PredictionTarget::to_clients(NetworkTarget::All),
             ControlledBy {
                 owner: client_entity,
