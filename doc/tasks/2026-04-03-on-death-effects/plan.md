@@ -726,7 +726,7 @@ tick_active_transformations,
 
 ### Verification
 #### Automated
-- [ ] `cargo check-all` passes
+- [x] `cargo check-all` passes
 
 #### Manual
 - [ ] `cargo server` + `cargo client` — damage tree, observe stump

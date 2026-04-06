@@ -41,6 +41,10 @@ impl Plugin for ServerGameplayPlugin {
                 start_respawn_timer
                     .after(hit_detection::process_projectile_hits)
                     .after(hit_detection::process_hitbox_hits),
+                tick_active_transformations.run_if(
+                    resource_exists::<WorldObjectDefRegistry>
+                        .and(resource_exists::<VoxModelRegistry>),
+                ),
                 process_respawn_timers.after(start_respawn_timer),
                 expire_invulnerability,
             ),
@@ -222,6 +226,49 @@ fn on_death_effects(
                 }
             }
         }
+    }
+}
+
+/// Decrements active transformation timers. Triggers revert when countdown reaches zero.
+fn tick_active_transformations(
+    mut commands: Commands,
+    mut query: Query<(Entity, &mut ActiveTransformation, &WorldObjectId)>,
+    defs: Res<WorldObjectDefRegistry>,
+    type_registry: Res<AppTypeRegistry>,
+    vox_registry: Res<VoxModelRegistry>,
+    vox_assets: Res<Assets<VoxModelAsset>>,
+    meshes: Res<Assets<Mesh>>,
+) {
+    for (entity, mut transform, obj_id) in &mut query {
+        let Some(ref mut remaining) = transform.ticks_remaining else {
+            continue;
+        };
+        *remaining = remaining.saturating_sub(1);
+        if *remaining > 0 {
+            continue;
+        }
+
+        let source_id = WorldObjectId(transform.source.clone());
+        let Some(source_def) = defs.get(&source_id) else {
+            warn!("Cannot revert: unknown source def '{}'", transform.source);
+            continue;
+        };
+        let Some(original_def) = defs.get(obj_id) else {
+            warn!("Cannot revert: unknown original def '{}'", obj_id.0);
+            continue;
+        };
+
+        crate::world_object::apply_transformation(
+            &mut commands,
+            entity,
+            source_def,
+            original_def,
+            &type_registry,
+            &vox_registry,
+            &vox_assets,
+            &meshes,
+        );
+        commands.entity(entity).remove::<ActiveTransformation>();
     }
 }
 
