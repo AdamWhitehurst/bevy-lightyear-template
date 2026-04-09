@@ -1,6 +1,8 @@
 # TODO
-- Template:
+- 
+- bevy-lightyear-template:
   - built-in claude qrspi skills
+- abstract persistence systems that listen for data events
 - skills: component design, system design, networking, physics knowledge
 - dampen player stats by distance from spawn?
 - user will run `cargo server` and `cargo client` for validation
