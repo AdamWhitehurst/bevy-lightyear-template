@@ -842,6 +842,40 @@ fn add_server_map_systems(stepper: &mut CrossbeamTestStepper) {
     );
 }
 
+/// Build a minimal `TerrainDefRegistry` for tests that need map spawning to succeed.
+///
+/// Real assets aren't loaded in crossbeam tests, so we synthesize the defs inline
+/// with just a `MapDimensions` component — the rest of the terrain pipeline accepts
+/// missing optional components and falls back to `FlatGenerator`.
+fn insert_test_terrain_defs(app: &mut App) {
+    use std::collections::HashMap;
+    use voxel_map_engine::prelude::MapDimensions;
+    let mut terrains = HashMap::new();
+    terrains.insert(
+        "overworld".to_string(),
+        protocol::terrain::TerrainDef {
+            components: vec![Box::new(MapDimensions {
+                chunk_size: 16,
+                column_y_range: (-2, 2),
+                tree_height: 3,
+                bounds: None,
+            })],
+        },
+    );
+    terrains.insert(
+        "homebase".to_string(),
+        protocol::terrain::TerrainDef {
+            components: vec![Box::new(MapDimensions {
+                chunk_size: 16,
+                column_y_range: (-4, 4),
+                tree_height: 3,
+                bounds: Some(IVec3::new(4, 4, 4)),
+            })],
+        },
+    );
+    app.insert_resource(TerrainDefRegistry { terrains });
+}
+
 fn register_overworld_on_server(stepper: &mut CrossbeamTestStepper) -> Entity {
     let map = stepper
         .server_app
@@ -888,6 +922,7 @@ fn map_switch_request_triggers_transition_start() {
 
     // Add map systems and resources before plugin init completes
     add_server_map_systems(&mut stepper);
+    insert_test_terrain_defs(&mut stepper.server_app);
     stepper
         .client_app
         .init_resource::<MessageBuffer<MapTransitionStart>>();
@@ -1000,6 +1035,7 @@ fn duplicate_switch_request_ignored() {
     let mut stepper = CrossbeamTestStepper::new();
 
     add_server_map_systems(&mut stepper);
+    insert_test_terrain_defs(&mut stepper.server_app);
     stepper
         .client_app
         .init_resource::<MessageBuffer<MapTransitionStart>>();
@@ -1101,6 +1137,7 @@ fn server_and_client_spawn_matching_homebase_configs() {
         Update,
         (handle_map_switch_requests, handle_map_transition_ready),
     );
+    insert_test_terrain_defs(&mut server_app);
     server_app.finish();
     server_app.cleanup();
 
@@ -1115,6 +1152,7 @@ fn server_and_client_spawn_matching_homebase_configs() {
     client_app.add_sub_state::<MapTransitionState>();
     client_app.init_resource::<MapRegistry>();
     client_app.add_systems(Update, handle_map_transition_start);
+    insert_test_terrain_defs(&mut client_app);
     client_app.finish();
     client_app.cleanup();
 

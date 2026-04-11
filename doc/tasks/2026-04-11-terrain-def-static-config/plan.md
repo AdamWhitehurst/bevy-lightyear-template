@@ -552,9 +552,9 @@ fn spawn_map_instance(
 ### Verification
 
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test -p server` passes
-- [ ] `cargo test -p client` passes
+- [x] `cargo check-all` passes
+- [x] `cargo test -p server` passes
+- [x] `cargo test -p client` passes
 
 #### Manual
 - [ ] Player map-switches to homebase, homebase loads with `chunk_size=32` from def

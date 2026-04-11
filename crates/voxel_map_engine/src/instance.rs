@@ -207,7 +207,7 @@ impl VoxelMapInstance {
     }
 }
 
-fn bounds_to_spawning_distance(bounds: IVec3) -> u32 {
+pub fn bounds_to_spawning_distance(bounds: IVec3) -> u32 {
     bounds.max_element().max(1) as u32
 }
 

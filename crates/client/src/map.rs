@@ -14,8 +14,8 @@ use protocol::{
 use ui::MapTransitionState;
 use voxel_map_engine::prelude::{
     chunk_to_column, column_to_chunks, ChunkData, ChunkStatus, ChunkTicket, FlatGenerator,
-    RuntimeShape, VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld,
-    WorldVoxel,
+    MapDimensions, RuntimeShape, VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin,
+    VoxelWorld, WorldVoxel,
 };
 
 const RAYCAST_MAX_DISTANCE: f32 = 100.0;
@@ -428,9 +428,17 @@ pub fn handle_map_transition_start(
     mut commands: Commands,
     mut receivers: Query<&mut MessageReceiver<MapTransitionStart>>,
     mut registry: ResMut<MapRegistry>,
+    // Option<Res<_>> here so tests without a loaded terrain registry don't
+    // panic on param validation; the map-transition path expects the registry
+    // at runtime and asserts on it in the spawn block below.
+    terrain_registry: Option<Res<TerrainDefRegistry>>,
     player_query: Query<Entity, (With<Predicted>, With<CharacterMarker>, With<Controlled>)>,
     world_objects: Query<(Entity, &MapInstanceId), With<WorldObjectId>>,
 ) {
+    let Some(terrain_registry) = terrain_registry else {
+        trace!("handle_map_transition_start: TerrainDefRegistry not loaded yet, skipping");
+        return;
+    };
     for mut receiver in &mut receivers {
         for transition in receiver.receive() {
             trace!(
@@ -459,14 +467,19 @@ pub fn handle_map_transition_start(
             ));
 
             if !registry.0.contains_key(&transition.target) {
-                let generator = generator_for_map(&transition.target, transition.chunk_size);
+                let def_name = terrain_def_name(&transition.target);
+                let terrain_def = terrain_registry
+                    .get(def_name)
+                    .expect("terrain def must be loaded");
+                let dimensions = terrain_def
+                    .map_dimensions()
+                    .expect("terrain def must contain MapDimensions");
+                let generator = generator_for_map(&transition.target, &dimensions);
                 let map_entity = spawn_map_instance(
                     &mut commands,
                     &transition.target,
                     transition.seed,
-                    transition.bounds,
-                    transition.chunk_size,
-                    transition.column_y_range,
+                    &dimensions,
                     generator,
                 );
                 registry.insert(transition.target.clone(), map_entity);
@@ -477,6 +490,13 @@ pub fn handle_map_transition_start(
                 .entity(player)
                 .insert(ChunkTicket::map_transition(map_entity));
         }
+    }
+}
+
+fn terrain_def_name(map_id: &MapInstanceId) -> &'static str {
+    match map_id {
+        MapInstanceId::Overworld => "overworld",
+        MapInstanceId::Homebase { .. } => "homebase",
     }
 }
 
@@ -527,10 +547,10 @@ fn despawn_all_maps_except(
     }
 }
 
-fn generator_for_map(map_id: &MapInstanceId, chunk_size: u32) -> VoxelGenerator {
-    let padded = chunk_size + 2;
+fn generator_for_map(map_id: &MapInstanceId, dimensions: &MapDimensions) -> VoxelGenerator {
+    let padded = dimensions.padded_size();
     let flat = || FlatGenerator {
-        chunk_size,
+        chunk_size: dimensions.chunk_size,
         shape: RuntimeShape::<u32, 3>::new([padded, padded, padded]),
     };
     match map_id {
@@ -543,32 +563,30 @@ fn spawn_map_instance(
     commands: &mut Commands,
     map_id: &MapInstanceId,
     seed: u64,
-    bounds: Option<IVec3>,
-    chunk_size: u32,
-    column_y_range: (i32, i32),
+    dimensions: &MapDimensions,
     generator: VoxelGenerator,
 ) -> Entity {
-    let tree_height = match map_id {
-        MapInstanceId::Overworld => 5,
-        MapInstanceId::Homebase { .. } => 3,
-    };
-    let spawning_distance = bounds.map(|b| b.max_element().max(1) as u32).unwrap_or(10);
+    let spawning_distance = dimensions
+        .bounds
+        .map(|b| b.max_element().max(1) as u32)
+        .unwrap_or(10);
 
     let mut config = VoxelMapConfig::new(
         seed,
         0,
         spawning_distance,
-        bounds,
-        tree_height,
-        chunk_size,
-        column_y_range,
+        dimensions.bounds,
+        dimensions.tree_height,
+        dimensions.chunk_size,
+        dimensions.column_y_range,
     );
     config.generates_chunks = false;
 
     let entity = commands
         .spawn((
-            VoxelMapInstance::new(tree_height, chunk_size),
+            VoxelMapInstance::new(dimensions.tree_height, dimensions.chunk_size),
             config,
+            dimensions.clone(),
             generator,
             Transform::default(),
             map_id.clone(),
