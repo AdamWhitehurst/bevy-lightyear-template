@@ -370,8 +370,8 @@ pub fn extract_map_dimensions(def: &TerrainDef) -> Option<MapDimensions> {
 ### Verification
 
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test -p client` passes
+- [x] `cargo check-all` passes
+- [x] `cargo test -p client` passes
 
 #### Manual
 - [ ] `cargo client` launches and connects to server

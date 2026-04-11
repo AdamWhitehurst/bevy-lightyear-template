@@ -7,9 +7,9 @@ use lightyear::prelude::{Controlled, DisableRollback, MessageReceiver, MessageSe
 use protocol::map::{MapChannel, MapTransitionEnd, MapTransitionReady, MapTransitionStart};
 use protocol::world_object::WorldObjectId;
 use protocol::{
-    CharacterMarker, ChunkDataSync, MapInstanceId, MapRegistry, PendingTransition, PlayerActions,
-    SectionBlocksUpdate, TransitionReadySent, UnloadColumn, VoxelChannel, VoxelEditAck,
-    VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
+    AppState, CharacterMarker, ChunkDataSync, MapInstanceId, MapRegistry, PendingTransition,
+    PlayerActions, SectionBlocksUpdate, TerrainDefRegistry, TransitionReadySent, UnloadColumn,
+    VoxelChannel, VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
 };
 use ui::MapTransitionState;
 use voxel_map_engine::prelude::{
@@ -54,7 +54,7 @@ impl Plugin for ClientMapPlugin {
         app.add_plugins(VoxelPlugin)
             .init_resource::<MapRegistry>()
             .init_resource::<VoxelPredictionState>()
-            .add_systems(Startup, spawn_overworld)
+            .add_systems(OnEnter(AppState::Ready), spawn_overworld)
             // Transition handler must flush before chunk sync runs, otherwise
             // chunk sync sees the old ChunkTicket/map entity and applies
             // messages to the wrong (about-to-be-despawned) map.
@@ -95,17 +95,38 @@ impl Plugin for ClientMapPlugin {
 #[derive(Resource)]
 pub struct OverworldMap(pub Entity);
 
-fn spawn_overworld(mut commands: Commands, mut registry: ResMut<MapRegistry>) {
-    let mut config = VoxelMapConfig::new(0, 0, 2, None, 5, 64, (-2, 2));
+fn spawn_overworld(
+    mut commands: Commands,
+    mut registry: ResMut<MapRegistry>,
+    terrain_registry: Res<TerrainDefRegistry>,
+) {
+    let terrain_def = terrain_registry
+        .get("overworld")
+        .expect("overworld.terrain.ron must be loaded by AppState::Ready");
+    let dimensions = terrain_def
+        .map_dimensions()
+        .expect("overworld.terrain.ron must contain MapDimensions");
+
+    let mut config = VoxelMapConfig::new(
+        0,
+        0,
+        2,
+        dimensions.bounds,
+        dimensions.tree_height,
+        dimensions.chunk_size,
+        dimensions.column_y_range,
+    );
     config.generates_chunks = false;
 
+    let padded = dimensions.padded_size();
     let map = commands
         .spawn((
-            VoxelMapInstance::new(5, 64),
+            VoxelMapInstance::new(dimensions.tree_height, dimensions.chunk_size),
             config,
+            dimensions.clone(),
             VoxelGenerator(Arc::new(FlatGenerator {
-                chunk_size: 64,
-                shape: RuntimeShape::<u32, 3>::new([66, 66, 66]),
+                chunk_size: dimensions.chunk_size,
+                shape: RuntimeShape::<u32, 3>::new([padded, padded, padded]),
             })),
             Transform::default(),
             MapInstanceId::Overworld,
