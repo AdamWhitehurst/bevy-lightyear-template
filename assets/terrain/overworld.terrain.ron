@@ -1,4 +1,10 @@
 {
+    "voxel_map_engine::config::MapDimensions": (
+        chunk_size: 64,
+        column_y_range: (-2, 2),
+        tree_height: 5,
+        bounds: None,
+    ),
     "voxel_map_engine::terrain::HeightMap": (
         noise: (noise_type: Perlin, fractal: Fbm, seed_offset: 0,
                 octaves: 3, frequency: 0.003, lacunarity: 2.0, persistence: 0.35),

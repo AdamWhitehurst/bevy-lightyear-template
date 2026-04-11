@@ -75,6 +75,31 @@ impl SurfaceHeightMap {
 #[derive(Component, Clone)]
 pub struct VoxelGenerator(pub Arc<dyn VoxelGeneratorImpl>);
 
+/// Static per-map-type dimensional config, loaded from `.terrain.ron`.
+///
+/// Inserted onto map entities via the terrain def pipeline. Separate from
+/// `VoxelMapConfig` so systems that only need dimensional data can query
+/// this component without contending with runtime state.
+#[derive(Component, Reflect, Clone, Debug)]
+#[reflect(Component)]
+pub struct MapDimensions {
+    /// Edge length of a chunk in voxels. Power of two, >= 8.
+    pub chunk_size: u32,
+    /// Inclusive-exclusive Y chunk range for column expansion: `(y_min, y_max)`.
+    pub column_y_range: (i32, i32),
+    /// Octree tree_height for this map.
+    pub tree_height: u32,
+    /// Fixed map dimensions. `None` = infinite generation.
+    pub bounds: Option<IVec3>,
+}
+
+impl MapDimensions {
+    /// `chunk_size + 2`.
+    pub fn padded_size(&self) -> u32 {
+        self.chunk_size + 2
+    }
+}
+
 /// Configuration for a map instance.
 #[derive(Component)]
 pub struct VoxelMapConfig {

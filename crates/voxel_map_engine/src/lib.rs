@@ -29,6 +29,7 @@ pub struct VoxelPlugin;
 
 impl Plugin for VoxelPlugin {
     fn build(&self, app: &mut App) {
+        app.register_type::<config::MapDimensions>();
         app.register_type::<terrain::HeightMap>();
         app.register_type::<terrain::MoistureMap>();
         app.register_type::<terrain::BiomeRules>();
