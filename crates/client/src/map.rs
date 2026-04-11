@@ -15,7 +15,6 @@ use ui::MapTransitionState;
 use voxel_map_engine::prelude::{
     chunk_to_column, column_to_chunks, ChunkData, ChunkStatus, ChunkTicket, FlatGenerator,
     VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
-    DEFAULT_COLUMN_Y_MAX, DEFAULT_COLUMN_Y_MIN,
 };
 
 const RAYCAST_MAX_DISTANCE: f32 = 100.0;
@@ -174,18 +173,18 @@ fn handle_chunk_data_sync(
 fn handle_unload_column(
     mut receivers: Query<&mut MessageReceiver<UnloadColumn>>,
     registry: Res<MapRegistry>,
-    mut map_query: Query<&mut VoxelMapInstance>,
+    mut map_query: Query<(&mut VoxelMapInstance, &VoxelMapConfig)>,
 ) {
     for mut receiver in &mut receivers {
         for unload in receiver.receive() {
             let Some(&map_entity) = registry.0.get(&unload.map_id) else {
                 continue;
             };
-            let Ok(mut instance) = map_query.get_mut(map_entity) else {
+            let Ok((mut instance, config)) = map_query.get_mut(map_entity) else {
                 continue;
             };
             let col = unload.column;
-            for chunk_pos in column_to_chunks(col, DEFAULT_COLUMN_Y_MIN, DEFAULT_COLUMN_Y_MAX) {
+            for chunk_pos in column_to_chunks(col, config.column_y_range) {
                 instance.remove_chunk_data(chunk_pos);
             }
             instance.chunk_levels.remove(&col);

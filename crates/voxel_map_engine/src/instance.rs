@@ -1,11 +1,16 @@
 use bevy::prelude::*;
 use grid_tree::{NodeKey, OctreeI32, VisitCommand};
-use ndshape::{ConstShape, RuntimeShape};
+use ndshape::{RuntimeShape, Shape};
 use std::collections::{HashMap, HashSet};
 
 use crate::api::voxel_to_chunk_pos;
 use crate::config::VoxelMapConfig;
-use crate::types::{CHUNK_SIZE, ChunkData, PaddedChunkShape, WorldVoxel};
+use crate::types::{ChunkData, WorldVoxel};
+
+#[cfg(test)]
+use crate::types::PaddedChunkShape;
+#[cfg(test)]
+use ndshape::ConstShape;
 
 /// Marker: this map is the shared overworld.
 #[derive(Component)]
@@ -151,22 +156,20 @@ impl VoxelMapInstance {
     /// it for async remesh. Also updates neighbor chunk padding for boundary voxels.
     /// If the chunk is not loaded, the edit is silently dropped.
     pub fn set_voxel(&mut self, world_pos: IVec3, voxel: WorldVoxel) {
-        let chunk_pos = voxel_to_chunk_pos(world_pos);
-        let local = world_pos - chunk_pos * CHUNK_SIZE as i32;
+        let chunk_pos = voxel_to_chunk_pos(world_pos, self.chunk_size);
+        let local = world_pos - chunk_pos * self.chunk_size as i32;
+        let padded = [
+            (local.x + 1) as u32,
+            (local.y + 1) as u32,
+            (local.z + 1) as u32,
+        ];
+        let index = self.shape.linearize(padded) as usize;
 
-        {
-            let Some(chunk_data) = self.get_chunk_data_mut(chunk_pos) else {
-                trace!("set_voxel: chunk {chunk_pos} not loaded, edit at {world_pos} dropped");
-                return;
-            };
-            let padded = [
-                (local.x + 1) as u32,
-                (local.y + 1) as u32,
-                (local.z + 1) as u32,
-            ];
-            let index = PaddedChunkShape::linearize(padded) as usize;
-            chunk_data.voxels.set(index, voxel);
-        }
+        let Some(chunk_data) = self.get_chunk_data_mut(chunk_pos) else {
+            trace!("set_voxel: chunk {chunk_pos} not loaded, edit at {world_pos} dropped");
+            return;
+        };
+        chunk_data.voxels.set(index, voxel);
 
         self.dirty_chunks.insert(chunk_pos);
         self.chunks_needing_remesh.insert(chunk_pos);
@@ -176,28 +179,29 @@ impl VoxelMapInstance {
 
     /// Update padding voxels in neighboring chunks when a boundary voxel is modified.
     fn update_neighbor_padding(&mut self, chunk_pos: IVec3, local: IVec3, voxel: WorldVoxel) {
+        let chunk_size = self.chunk_size as i32;
         for axis in 0..3 {
             let l = local[axis];
             if l == 0 {
                 let mut neighbor = chunk_pos;
                 neighbor[axis] -= 1;
+                let mut pl = local;
+                pl[axis] = chunk_size;
+                let padded = [(pl.x + 1) as u32, (pl.y + 1) as u32, (pl.z + 1) as u32];
+                let idx = self.shape.linearize(padded) as usize;
                 if let Some(nd) = self.get_chunk_data_mut(neighbor) {
-                    let mut pl = local;
-                    pl[axis] = CHUNK_SIZE as i32;
-                    let padded = [(pl.x + 1) as u32, (pl.y + 1) as u32, (pl.z + 1) as u32];
-                    let idx = PaddedChunkShape::linearize(padded) as usize;
                     nd.voxels.set(idx, voxel);
                 }
                 self.chunks_needing_remesh.insert(neighbor);
             }
-            if l == CHUNK_SIZE as i32 - 1 {
+            if l == chunk_size - 1 {
                 let mut neighbor = chunk_pos;
                 neighbor[axis] += 1;
+                let mut pl = local;
+                pl[axis] = -1;
+                let padded = [(pl.x + 1) as u32, (pl.y + 1) as u32, (pl.z + 1) as u32];
+                let idx = self.shape.linearize(padded) as usize;
                 if let Some(nd) = self.get_chunk_data_mut(neighbor) {
-                    let mut pl = local;
-                    pl[axis] = -1;
-                    let padded = [(pl.x + 1) as u32, (pl.y + 1) as u32, (pl.z + 1) as u32];
-                    let idx = PaddedChunkShape::linearize(padded) as usize;
                     nd.voxels.set(idx, voxel);
                 }
                 self.chunks_needing_remesh.insert(neighbor);
@@ -372,14 +376,14 @@ mod tests {
         let world_pos = IVec3::new(5, 5, 5);
         instance.set_voxel(world_pos, WorldVoxel::Solid(42));
 
-        let data = instance.get_chunk_data(chunk_pos).unwrap();
-        let local = world_pos - chunk_pos * CHUNK_SIZE as i32;
+        let local = world_pos - chunk_pos * instance.chunk_size as i32;
         let padded = [
             (local.x + 1) as u32,
             (local.y + 1) as u32,
             (local.z + 1) as u32,
         ];
-        let index = PaddedChunkShape::linearize(padded) as usize;
+        let index = instance.shape.linearize(padded) as usize;
+        let data = instance.get_chunk_data(chunk_pos).unwrap();
         assert_eq!(data.voxels.get(index), WorldVoxel::Solid(42));
         assert!(instance.dirty_chunks.contains(&chunk_pos));
         assert!(instance.chunks_needing_remesh.contains(&chunk_pos));
@@ -433,13 +437,13 @@ mod tests {
         instance.set_voxel(world_pos, WorldVoxel::Solid(7));
 
         // Owning chunk should have the voxel at padded [16, 6, 6]
+        let idx_a = instance.shape.linearize([16, 6, 6]) as usize;
+        let idx_b = instance.shape.linearize([0, 6, 6]) as usize;
         let data_a = instance.get_chunk_data(chunk_a).unwrap();
-        let idx_a = PaddedChunkShape::linearize([16, 6, 6]) as usize;
         assert_eq!(data_a.voxels.get(idx_a), WorldVoxel::Solid(7));
 
         // Neighbor chunk_b should have padding updated at padded [0, 6, 6]
         let data_b = instance.get_chunk_data(chunk_b).unwrap();
-        let idx_b = PaddedChunkShape::linearize([0, 6, 6]) as usize;
         assert_eq!(
             data_b.voxels.get(idx_b),
             WorldVoxel::Solid(7),
@@ -469,13 +473,13 @@ mod tests {
         instance.set_voxel(world_pos, WorldVoxel::Solid(11));
 
         // Owning chunk should have the voxel at padded [1, 4, 4]
+        let idx_a = instance.shape.linearize([1, 4, 4]) as usize;
+        let idx_neg = instance.shape.linearize([17, 4, 4]) as usize;
         let data_a = instance.get_chunk_data(chunk_a).unwrap();
-        let idx_a = PaddedChunkShape::linearize([1, 4, 4]) as usize;
         assert_eq!(data_a.voxels.get(idx_a), WorldVoxel::Solid(11));
 
         // Neighbor chunk_neg should have padding updated at padded [17, 4, 4]
         let data_neg = instance.get_chunk_data(chunk_neg).unwrap();
-        let idx_neg = PaddedChunkShape::linearize([17, 4, 4]) as usize;
         assert_eq!(
             data_neg.voxels.get(idx_neg),
             WorldVoxel::Solid(11),

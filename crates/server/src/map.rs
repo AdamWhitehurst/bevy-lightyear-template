@@ -549,8 +549,12 @@ fn send_edit_ack(
 }
 
 /// Queues a voxel edit for batched broadcast.
-fn queue_edit_broadcast(edit: PendingVoxelEdit, pending: &mut PendingVoxelBroadcasts) {
-    let chunk_pos = voxel_map_engine::prelude::voxel_to_chunk_pos(edit.position);
+fn queue_edit_broadcast(
+    edit: PendingVoxelEdit,
+    chunk_size: u32,
+    pending: &mut PendingVoxelBroadcasts,
+) {
+    let chunk_pos = voxel_map_engine::prelude::voxel_to_chunk_pos(edit.position, chunk_size);
     pending.per_chunk.entry(chunk_pos).or_default().push(edit);
 }
 
@@ -592,6 +596,9 @@ pub fn handle_voxel_edit_requests(
                 &*time,
             );
             send_edit_ack(client_entity, request.sequence, &mut ack_senders);
+            let chunk_size = voxel_world
+                .chunk_size(map_entity)
+                .expect("map entity has VoxelMapInstance");
             queue_edit_broadcast(
                 PendingVoxelEdit {
                     position: request.position,
@@ -599,6 +606,7 @@ pub fn handle_voxel_edit_requests(
                     originator: client_entity,
                     map_id: player_map_id,
                 },
+                chunk_size,
                 &mut *pending_broadcasts,
             );
         }
@@ -699,7 +707,7 @@ pub fn push_chunks_to_clients(
         &Position,
         &mut ClientChunkVisibility,
     )>,
-    map_query: Query<(&VoxelMapInstance, &MapInstanceId)>,
+    map_query: Query<(&VoxelMapInstance, &VoxelMapConfig, &MapInstanceId)>,
     mut senders: Query<&mut MessageSender<ChunkDataSync>>,
     mut multi_sender: ServerMultiMessageSender,
 ) {
@@ -710,7 +718,7 @@ pub fn push_chunks_to_clients(
             visibility.tracked_map = Some(ticket.map_entity);
         }
 
-        let Ok((instance, map_id)) = map_query.get(ticket.map_entity) else {
+        let Ok((instance, config, map_id)) = map_query.get(ticket.map_entity) else {
             trace!(
                 "push_chunks_to_clients: map entity {:?} not found",
                 ticket.map_entity
@@ -718,7 +726,8 @@ pub fn push_chunks_to_clients(
             continue;
         };
 
-        let player_col = voxel_map_engine::lifecycle::world_to_column_pos(pos.0);
+        let player_col =
+            voxel_map_engine::lifecycle::world_to_column_pos(pos.0, instance.chunk_size);
         let current_columns = compute_loaded_columns(ticket, instance, player_col);
         let client_entity = controlled_by.owner;
 
@@ -726,6 +735,7 @@ pub fn push_chunks_to_clients(
             &current_columns,
             &mut visibility,
             instance,
+            config.column_y_range,
             map_id,
             player_col,
             client_entity,
@@ -736,6 +746,7 @@ pub fn push_chunks_to_clients(
         unload_stale_columns(
             &mut visibility,
             &current_columns,
+            config.column_y_range,
             map_id,
             client_entity,
             &mut multi_sender,
@@ -775,6 +786,7 @@ fn send_unsent_chunks(
     current_columns: &HashSet<IVec2>,
     visibility: &mut ClientChunkVisibility,
     instance: &VoxelMapInstance,
+    column_y_range: (i32, i32),
     map_id: &MapInstanceId,
     player_col: IVec2,
     client_entity: Entity,
@@ -785,11 +797,7 @@ fn send_unsent_chunks(
         let dist = (col.x - player_col.x)
             .abs()
             .max((col.y - player_col.y).abs()) as u32;
-        for chunk_pos in voxel_map_engine::prelude::column_to_chunks(
-            col,
-            voxel_map_engine::prelude::DEFAULT_COLUMN_Y_MIN,
-            voxel_map_engine::prelude::DEFAULT_COLUMN_Y_MAX,
-        ) {
+        for chunk_pos in voxel_map_engine::prelude::column_to_chunks(col, column_y_range) {
             if visibility.sent_chunks.contains(&chunk_pos) {
                 continue;
             }
@@ -827,6 +835,7 @@ fn send_unsent_chunks(
 fn unload_stale_columns(
     visibility: &mut ClientChunkVisibility,
     current_columns: &HashSet<IVec2>,
+    column_y_range: (i32, i32),
     map_id: &MapInstanceId,
     client_entity: Entity,
     multi_sender: &mut ServerMultiMessageSender,
@@ -848,11 +857,7 @@ fn unload_stale_columns(
                     &targets,
                 )
                 .ok();
-            for chunk_pos in voxel_map_engine::prelude::column_to_chunks(
-                col,
-                voxel_map_engine::prelude::DEFAULT_COLUMN_Y_MIN,
-                voxel_map_engine::prelude::DEFAULT_COLUMN_Y_MAX,
-            ) {
+            for chunk_pos in voxel_map_engine::prelude::column_to_chunks(col, column_y_range) {
                 visibility.sent_chunks.remove(&chunk_pos);
             }
         }

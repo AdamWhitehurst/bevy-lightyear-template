@@ -457,11 +457,11 @@ Remove `use crate::types::CHUNK_SIZE;`. Update in-file tests to pass `16`.
 ### Verification
 
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test -p voxel_map_engine` passes
-- [ ] `cargo test -p client` passes (chunk_sync test)
-- [ ] No remaining `DEFAULT_COLUMN_Y_MIN`/`DEFAULT_COLUMN_Y_MAX` references anywhere in the workspace (`Grep` check)
-- [ ] No `CHUNK_SIZE` references in `api.rs`, `instance.rs`, `lifecycle.rs`, `placement.rs`, `ticket.rs`
+- [x] `cargo check-all` passes
+- [x] `cargo test -p voxel_map_engine` passes
+- [x] `cargo test -p client` passes (chunk_sync test)
+- [x] No remaining `DEFAULT_COLUMN_Y_MIN`/`DEFAULT_COLUMN_Y_MAX` references anywhere in the workspace (`Grep` check)
+- [x] No `CHUNK_SIZE` references in `api.rs`, `instance.rs`, `lifecycle.rs`, `placement.rs`, `ticket.rs`
 
 #### Manual
 - [ ] `cargo server` + `cargo client` — overworld loads

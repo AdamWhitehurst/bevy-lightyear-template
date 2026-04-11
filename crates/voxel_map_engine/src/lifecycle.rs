@@ -17,11 +17,8 @@ use crate::generation::{
 use crate::instance::VoxelMapInstance;
 use crate::meshing::mesh_chunk_greedy;
 use crate::propagator::TicketLevelPropagator;
-use crate::ticket::{
-    ChunkTicket, DEFAULT_COLUMN_Y_MAX, DEFAULT_COLUMN_Y_MIN, TicketType, chunk_to_column,
-    column_to_chunks,
-};
-use crate::types::{CHUNK_SIZE, ChunkStatus, FillType};
+use crate::ticket::{ChunkTicket, TicketType, chunk_to_column, column_to_chunks};
+use crate::types::{ChunkStatus, FillType};
 
 /// Per-frame time budget for chunk pipeline work on a single map.
 /// Reset at the start of each frame by `update_chunks`.
@@ -198,8 +195,8 @@ pub(crate) struct CachedTicket {
 }
 
 /// Convert a world-space position to a 2D column position (drop Y).
-pub fn world_to_column_pos(translation: Vec3) -> IVec2 {
-    let chunk = world_to_chunk_pos(translation);
+pub fn world_to_column_pos(translation: Vec3, chunk_size: u32) -> IVec2 {
+    let chunk = world_to_chunk_pos(translation, chunk_size);
     IVec2::new(chunk.x, chunk.z)
 }
 
@@ -346,9 +343,6 @@ pub(crate) fn update_chunks(
 
     collect_tickets(&mut map_query, &ticket_query, &mut ticket_cache);
 
-    let y_min = DEFAULT_COLUMN_Y_MIN;
-    let y_max = DEFAULT_COLUMN_Y_MAX;
-
     for (
         _map_entity,
         mut instance,
@@ -363,6 +357,8 @@ pub(crate) fn update_chunks(
         mut tracker,
     ) in &mut map_query
     {
+        let (y_min, y_max) = config.column_y_range;
+
         let diff = {
             let _span = info_span!("propagate_ticket_levels").entered();
             propagator.propagate()
@@ -462,7 +458,7 @@ fn collect_tickets(
     for (ticket_entity, ticket, transform) in ticket_query.iter() {
         // Compute column from immutable access; borrow drops at end of block.
         let column = {
-            let Ok((_, _, _, _, _, _, map_transform, _, _, _, _)) =
+            let Ok((_, instance, _, _, _, _, map_transform, _, _, _, _)) =
                 map_query.get(ticket.map_entity)
             else {
                 trace!(
@@ -473,7 +469,7 @@ fn collect_tickets(
             };
             let map_inv = map_transform.affine().inverse();
             let local_pos = map_inv.transform_point3(transform.translation());
-            world_to_column_pos(local_pos)
+            world_to_column_pos(local_pos, instance.chunk_size)
         };
 
         let needs_update = match ticket_cache.get(&ticket_entity) {
@@ -531,7 +527,7 @@ fn remove_column_chunks(
     y_max: i32,
 ) {
     let _span = info_span!("remove_column_chunks").entered();
-    for chunk_pos in column_to_chunks(col, y_min, y_max) {
+    for chunk_pos in column_to_chunks(col, (y_min, y_max)) {
         if instance.dirty_chunks.remove(&chunk_pos) {
             if let Some(dir) = save_dir {
                 if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
@@ -611,7 +607,7 @@ fn enqueue_new_chunks(
     for &(col, level) in diff.loaded.iter().chain(diff.changed.iter()) {
         let distance = propagator.min_distance_to_source(col);
         let max_status = ChunkStatus::max_for_level(level);
-        for chunk_pos in column_to_chunks(col, y_min, y_max) {
+        for chunk_pos in column_to_chunks(col, (y_min, y_max)) {
             if !is_within_bounds(chunk_pos, bounds) {
                 continue;
             }
@@ -923,7 +919,7 @@ fn handle_completed_chunk(
     // Spawn mesh entity only when a mesh is present (Mesh stage or disk-loaded Full chunks)
     if let Some(mesh) = result.mesh {
         let mesh_handle = meshes.add(mesh);
-        let offset = chunk_world_offset(result.position);
+        let offset = chunk_world_offset(result.position, instance.chunk_size);
 
         let material = if instance.debug_colors {
             materials.add(StandardMaterial {
@@ -980,12 +976,12 @@ fn is_within_bounds(pos: IVec3, bounds: Option<IVec3>) -> bool {
     }
 }
 
-fn world_to_chunk_pos(translation: Vec3) -> IVec3 {
-    (translation / CHUNK_SIZE as f32).floor().as_ivec3()
+pub fn world_to_chunk_pos(translation: Vec3, chunk_size: u32) -> IVec3 {
+    (translation / chunk_size as f32).floor().as_ivec3()
 }
 
-fn chunk_world_offset(chunk_pos: IVec3) -> Vec3 {
-    chunk_pos.as_vec3() * CHUNK_SIZE as f32 - Vec3::ONE
+fn chunk_world_offset(chunk_pos: IVec3, chunk_size: u32) -> Vec3 {
+    chunk_pos.as_vec3() * chunk_size as f32 - Vec3::ONE
 }
 
 /// Despawn chunk entities whose column is no longer in the parent map's `chunk_levels`.
@@ -1161,7 +1157,7 @@ pub fn poll_remesh_tasks(
                 }
                 (Some(mesh), None) => {
                     let handle = meshes.add(mesh);
-                    let offset = chunk_world_offset(remesh.chunk_pos);
+                    let offset = chunk_world_offset(remesh.chunk_pos, instance.chunk_size);
                     let material = if instance.debug_colors {
                         materials.add(StandardMaterial {
                             base_color: color_from_chunk_pos(remesh.chunk_pos),
@@ -1207,25 +1203,25 @@ mod tests {
 
     #[test]
     fn world_to_chunk_pos_positive() {
-        let pos = world_to_chunk_pos(Vec3::new(20.0, 0.0, 5.0));
+        let pos = world_to_chunk_pos(Vec3::new(20.0, 0.0, 5.0), 16);
         assert_eq!(pos, IVec3::new(1, 0, 0));
     }
 
     #[test]
     fn world_to_chunk_pos_negative() {
-        let pos = world_to_chunk_pos(Vec3::new(-1.0, -17.0, 0.0));
+        let pos = world_to_chunk_pos(Vec3::new(-1.0, -17.0, 0.0), 16);
         assert_eq!(pos, IVec3::new(-1, -2, 0));
     }
 
     #[test]
     fn chunk_world_offset_calculation() {
-        let offset = chunk_world_offset(IVec3::new(1, 2, 3));
+        let offset = chunk_world_offset(IVec3::new(1, 2, 3), 16);
         assert_eq!(offset, Vec3::new(15.0, 31.0, 47.0));
     }
 
     #[test]
     fn world_to_column_pos_drops_y() {
-        let col = world_to_column_pos(Vec3::new(20.0, 99.0, 5.0));
+        let col = world_to_column_pos(Vec3::new(20.0, 99.0, 5.0), 16);
         assert_eq!(col, IVec2::new(1, 0));
     }
 }

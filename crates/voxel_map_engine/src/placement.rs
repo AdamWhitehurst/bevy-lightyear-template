@@ -1,7 +1,5 @@
 use bevy::prelude::*;
 
-use crate::types::CHUNK_SIZE;
-
 /// Deterministic jittered grid sampling with cross-chunk `min_spacing` enforcement.
 ///
 /// Divides world space into cells of size `min_spacing`. Each cell gets at most
@@ -12,6 +10,7 @@ use crate::types::CHUNK_SIZE;
 pub fn jittered_grid_sample(
     seed: u64,
     chunk_pos: IVec3,
+    chunk_size: u32,
     min_spacing: f64,
     density: f64,
 ) -> Vec<Vec2> {
@@ -19,15 +18,15 @@ pub fn jittered_grid_sample(
         return Vec::new();
     }
 
-    let chunk_size = CHUNK_SIZE as f64;
-    let chunk_world_x = chunk_pos.x as f64 * chunk_size;
-    let chunk_world_z = chunk_pos.z as f64 * chunk_size;
+    let chunk_size_f = chunk_size as f64;
+    let chunk_world_x = chunk_pos.x as f64 * chunk_size_f;
+    let chunk_world_z = chunk_pos.z as f64 * chunk_size_f;
 
     // Grid cells overlapping this chunk (no margin needed — we only emit points inside chunk)
     let cell_min_x = (chunk_world_x / min_spacing).floor() as i64;
-    let cell_max_x = ((chunk_world_x + chunk_size) / min_spacing).ceil() as i64;
+    let cell_max_x = ((chunk_world_x + chunk_size_f) / min_spacing).ceil() as i64;
     let cell_min_z = (chunk_world_z / min_spacing).floor() as i64;
-    let cell_max_z = ((chunk_world_z + chunk_size) / min_spacing).ceil() as i64;
+    let cell_max_z = ((chunk_world_z + chunk_size_f) / min_spacing).ceil() as i64;
 
     let spawn_prob = (density * min_spacing * min_spacing).min(1.0);
     let mut points = Vec::new();
@@ -48,9 +47,9 @@ pub fn jittered_grid_sample(
 
             // Only keep if inside this chunk
             if world_x >= chunk_world_x
-                && world_x < chunk_world_x + chunk_size
+                && world_x < chunk_world_x + chunk_size_f
                 && world_z >= chunk_world_z
-                && world_z < chunk_world_z + chunk_size
+                && world_z < chunk_world_z + chunk_size_f
             {
                 points.push(Vec2::new(world_x as f32, world_z as f32));
             }
@@ -89,9 +88,9 @@ mod tests {
 
     #[test]
     fn jittered_grid_points_within_chunk() {
-        let points = jittered_grid_sample(42, IVec3::ZERO, 3.0, 1.0);
+        let points = jittered_grid_sample(42, IVec3::ZERO, 16, 3.0, 1.0);
         let chunk_min = 0.0;
-        let chunk_max = CHUNK_SIZE as f32;
+        let chunk_max = 16.0_f32;
         for p in &points {
             assert!(
                 p.x >= chunk_min && p.x < chunk_max,
@@ -108,22 +107,22 @@ mod tests {
 
     #[test]
     fn jittered_grid_deterministic() {
-        let a = jittered_grid_sample(42, IVec3::new(1, 2, 3), 4.0, 0.5);
-        let b = jittered_grid_sample(42, IVec3::new(1, 2, 3), 4.0, 0.5);
+        let a = jittered_grid_sample(42, IVec3::new(1, 2, 3), 16, 4.0, 0.5);
+        let b = jittered_grid_sample(42, IVec3::new(1, 2, 3), 16, 4.0, 0.5);
         assert_eq!(a, b);
     }
 
     #[test]
     fn jittered_grid_different_chunks_differ() {
-        let a = jittered_grid_sample(42, IVec3::ZERO, 3.0, 1.0);
-        let b = jittered_grid_sample(42, IVec3::new(10, 0, 10), 3.0, 1.0);
+        let a = jittered_grid_sample(42, IVec3::ZERO, 16, 3.0, 1.0);
+        let b = jittered_grid_sample(42, IVec3::new(10, 0, 10), 16, 3.0, 1.0);
         assert_ne!(a, b);
     }
 
     #[test]
     fn jittered_grid_low_density_fewer_points() {
-        let high = jittered_grid_sample(42, IVec3::ZERO, 3.0, 1.0);
-        let low = jittered_grid_sample(42, IVec3::ZERO, 3.0, 0.1);
+        let high = jittered_grid_sample(42, IVec3::ZERO, 16, 3.0, 1.0);
+        let low = jittered_grid_sample(42, IVec3::ZERO, 16, 3.0, 0.1);
         assert!(
             low.len() <= high.len(),
             "low density ({}) should produce <= high density ({})",
@@ -134,20 +133,20 @@ mod tests {
 
     #[test]
     fn jittered_grid_zero_density_returns_empty() {
-        let points = jittered_grid_sample(42, IVec3::ZERO, 3.0, 0.0);
+        let points = jittered_grid_sample(42, IVec3::ZERO, 16, 3.0, 0.0);
         assert!(points.is_empty());
     }
 
     #[test]
     fn jittered_grid_zero_spacing_returns_empty() {
-        let points = jittered_grid_sample(42, IVec3::ZERO, 0.0, 1.0);
+        let points = jittered_grid_sample(42, IVec3::ZERO, 16, 0.0, 1.0);
         assert!(points.is_empty());
     }
 
     #[test]
     fn jittered_grid_large_spacing_few_points() {
         // min_spacing larger than chunk → at most 1 point per chunk
-        let points = jittered_grid_sample(42, IVec3::ZERO, 100.0, 1.0);
+        let points = jittered_grid_sample(42, IVec3::ZERO, 16, 100.0, 1.0);
         assert!(
             points.len() <= 1,
             "expected 0-1 points, got {}",

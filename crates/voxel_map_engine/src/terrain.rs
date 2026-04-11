@@ -374,8 +374,13 @@ impl VoxelGeneratorImpl for HeightmapGenerator {
         let mut spawns = Vec::new();
 
         for (_rule_idx, rule) in rules.0.iter().enumerate() {
-            let candidates =
-                jittered_grid_sample(self.seed, chunk_pos, rule.min_spacing, rule.density);
+            let candidates = jittered_grid_sample(
+                self.seed,
+                chunk_pos,
+                CHUNK_SIZE,
+                rule.min_spacing,
+                rule.density,
+            );
 
             for world_pos in candidates {
                 let local_x = (world_pos.x - chunk_pos.x as f32 * CHUNK_SIZE as f32).floor() as u32;

@@ -6,7 +6,7 @@ use protocol::{CharacterMarker, MapInstanceId, MapRegistry};
 use voxel_map_engine::prelude::{
     chunk_to_column, column_to_chunks, ChunkData, ChunkStatus, ChunkTicket, FillType,
     FlatGenerator, PalettedChunk, TicketType, VoxelChunk, VoxelGenerator, VoxelMapConfig,
-    VoxelMapInstance, VoxelPlugin, WorldVoxel, DEFAULT_COLUMN_Y_MAX, DEFAULT_COLUMN_Y_MIN,
+    VoxelMapInstance, VoxelPlugin, WorldVoxel,
 };
 
 fn test_app() -> App {
@@ -66,7 +66,7 @@ fn simulate_unload_column(app: &mut App, map: Entity, col: IVec2) {
         .world_mut()
         .get_mut::<VoxelMapInstance>(map)
         .expect("map must have VoxelMapInstance");
-    for chunk_pos in column_to_chunks(col, DEFAULT_COLUMN_Y_MIN, DEFAULT_COLUMN_Y_MAX) {
+    for chunk_pos in column_to_chunks(col, (-8, 8)) {
         instance.remove_chunk_data(chunk_pos);
     }
     instance.chunk_levels.remove(&col);
