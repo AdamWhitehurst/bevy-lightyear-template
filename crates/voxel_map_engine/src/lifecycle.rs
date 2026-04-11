@@ -715,6 +715,7 @@ fn drain_gen_queue(
                         std::mem::take(&mut terrain_batch),
                         generator,
                         config.save_dir.clone(),
+                        instance.shape.clone(),
                     );
                     terrain_batch = Vec::with_capacity(GEN_BATCH_SIZE);
                 }
@@ -755,7 +756,7 @@ fn drain_gen_queue(
                     .voxels
                     .to_voxels();
                 tracker.generating.insert(work.position);
-                spawn_mesh_task(pending, work.position, voxels);
+                spawn_mesh_task(pending, work.position, voxels, instance.shape.clone());
                 spawned += 1;
             }
             ChunkStatus::Full => {
@@ -770,7 +771,13 @@ fn drain_gen_queue(
 
     // Flush remaining terrain batch
     if !terrain_batch.is_empty() {
-        spawn_terrain_batch(pending, terrain_batch, generator, config.save_dir.clone());
+        spawn_terrain_batch(
+            pending,
+            terrain_batch,
+            generator,
+            config.save_dir.clone(),
+            instance.shape.clone(),
+        );
     }
 
     let stop_reason = if pending.tasks.len() >= MAX_PENDING_GEN_TASKS {
@@ -1083,7 +1090,8 @@ pub fn spawn_remesh_tasks(
                 let _span = info_span!("expand_palette").entered();
                 chunk_data.voxels.to_voxels()
             };
-            let task = pool.spawn(async move { mesh_chunk_greedy(&voxels) });
+            let shape = instance.shape.clone();
+            let task = pool.spawn(async move { mesh_chunk_greedy(&voxels, &shape) });
             pending.tasks.push(RemeshTask {
                 chunk_pos: work.position,
                 task,

@@ -315,9 +315,9 @@ pub fn flat_terrain_voxels<S: Shape<3, Coord = u32>>(
 ### Verification
 
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test -p voxel_map_engine` passes
-- [ ] No `PaddedChunkShape` references remain in `meshing.rs`
+- [x] `cargo check-all` passes
+- [x] `cargo test -p voxel_map_engine` passes
+- [x] No `PaddedChunkShape` references remain in `meshing.rs`
 
 #### Manual
 - [ ] `cargo server` + `cargo client` — overworld meshes render

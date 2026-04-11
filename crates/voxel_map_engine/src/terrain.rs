@@ -462,7 +462,9 @@ pub struct FlatGenerator;
 
 impl VoxelGeneratorImpl for FlatGenerator {
     fn generate_terrain(&self, chunk_pos: IVec3) -> Vec<WorldVoxel> {
-        flat_terrain_voxels(chunk_pos)
+        // Transitional: Phase 4 threads chunk_size/shape onto FlatGenerator.
+        let shape = ndshape::RuntimeShape::<u32, 3>::new([18, 18, 18]);
+        flat_terrain_voxels(chunk_pos, 16, &shape)
     }
 }
 

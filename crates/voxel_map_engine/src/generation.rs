@@ -4,6 +4,7 @@ use std::sync::Arc;
 use bevy::log::info_span;
 use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
+use ndshape::RuntimeShape;
 
 use crate::config::{SurfaceHeightMap, VoxelGenerator, VoxelGeneratorImpl, WorldObjectSpawn};
 use crate::meshing::mesh_chunk_greedy;
@@ -44,6 +45,7 @@ pub fn spawn_terrain_batch(
     positions: Vec<IVec3>,
     generator: &VoxelGenerator,
     save_dir: Option<PathBuf>,
+    shape: RuntimeShape<u32, 3>,
 ) {
     let generator = Arc::clone(&generator.0);
     let pool = AsyncComputeTaskPool::get();
@@ -64,7 +66,7 @@ pub fn spawn_terrain_batch(
                                     chunk_data.voxels.to_voxels()
                                 };
                                 let _span = info_span!("mesh_chunk").entered();
-                                mesh_chunk_greedy(&voxels)
+                                mesh_chunk_greedy(&voxels, &shape)
                             };
                             let entity_spawns = if let Some(ref dir) = save_dir {
                                 match crate::persistence::load_chunk_entities(dir, pos) {
@@ -145,14 +147,19 @@ pub fn spawn_features_task(
 /// Spawn an async task that meshes a chunk from its voxel data.
 ///
 /// Returns a result with `ChunkData` at `ChunkStatus::Mesh`.
-pub fn spawn_mesh_task(pending: &mut PendingChunks, position: IVec3, voxels: Vec<WorldVoxel>) {
+pub fn spawn_mesh_task(
+    pending: &mut PendingChunks,
+    position: IVec3,
+    voxels: Vec<WorldVoxel>,
+    shape: RuntimeShape<u32, 3>,
+) {
     let pool = AsyncComputeTaskPool::get();
 
     let task = pool.spawn(async move {
         let _span = info_span!("mesh_stage", ?position).entered();
         let mesh = {
             let _span = info_span!("mesh_chunk").entered();
-            mesh_chunk_greedy(&voxels)
+            mesh_chunk_greedy(&voxels, &shape)
         };
         let chunk_data = {
             let _span = info_span!("palettize_chunk").entered();
@@ -225,10 +232,15 @@ mod tests {
     use crate::meshing::flat_terrain_voxels;
     use crate::types::CHUNK_SIZE;
 
+    fn padded_shape() -> RuntimeShape<u32, 3> {
+        RuntimeShape::<u32, 3>::new([18, 18, 18])
+    }
+
     #[test]
     fn surface_height_map_flat_terrain_at_origin() {
+        let shape = padded_shape();
         let chunk_pos = IVec3::ZERO;
-        let voxels = flat_terrain_voxels(chunk_pos);
+        let voxels = flat_terrain_voxels(chunk_pos, 16, &shape);
         let palette = PalettedChunk::from_voxels(&voxels);
         let map = build_surface_height_map(chunk_pos, &palette);
 
@@ -244,8 +256,9 @@ mod tests {
 
     #[test]
     fn surface_height_map_all_air_chunk() {
+        let shape = padded_shape();
         let chunk_pos = IVec3::new(0, 100, 0);
-        let voxels = flat_terrain_voxels(chunk_pos);
+        let voxels = flat_terrain_voxels(chunk_pos, 16, &shape);
         let palette = PalettedChunk::from_voxels(&voxels);
         let map = build_surface_height_map(chunk_pos, &palette);
 
@@ -263,8 +276,9 @@ mod tests {
 
     #[test]
     fn surface_height_map_consistent_height_across_columns() {
+        let shape = padded_shape();
         let chunk_pos = IVec3::ZERO;
-        let voxels = flat_terrain_voxels(chunk_pos);
+        let voxels = flat_terrain_voxels(chunk_pos, 16, &shape);
         let palette = PalettedChunk::from_voxels(&voxels);
         let map = build_surface_height_map(chunk_pos, &palette);
 

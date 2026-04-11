@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bevy::prelude::*;
-use ndshape::ConstShape;
+use ndshape::{RuntimeShape, Shape};
 use voxel_map_engine::prelude::*;
 
 #[derive(Resource)]
@@ -97,9 +97,10 @@ struct RaisedGenerator;
 
 impl VoxelGeneratorImpl for RaisedGenerator {
     fn generate_terrain(&self, chunk_pos: IVec3) -> Vec<WorldVoxel> {
-        let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
-        for i in 0..PaddedChunkShape::SIZE {
-            let [_x, y, _z] = PaddedChunkShape::delinearize(i);
+        let shape = RuntimeShape::<u32, 3>::new([18, 18, 18]);
+        let mut voxels = vec![WorldVoxel::Air; shape.usize()];
+        for i in 0..shape.size() {
+            let [_x, y, _z] = shape.delinearize(i);
             let world_y = chunk_pos.y * CHUNK_SIZE as i32 + y as i32 - 1;
             if world_y < 4 {
                 voxels[i as usize] = WorldVoxel::Solid(0);
@@ -113,9 +114,10 @@ struct BowlGenerator;
 
 impl VoxelGeneratorImpl for BowlGenerator {
     fn generate_terrain(&self, chunk_pos: IVec3) -> Vec<WorldVoxel> {
-        let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
-        for i in 0..PaddedChunkShape::SIZE {
-            let [x, y, z] = PaddedChunkShape::delinearize(i);
+        let shape = RuntimeShape::<u32, 3>::new([18, 18, 18]);
+        let mut voxels = vec![WorldVoxel::Air; shape.usize()];
+        for i in 0..shape.size() {
+            let [x, y, z] = shape.delinearize(i);
             let world_x = (chunk_pos.x * CHUNK_SIZE as i32 + x as i32 - 1) as f32;
             let world_y = (chunk_pos.y * CHUNK_SIZE as i32 + y as i32 - 1) as f32;
             let world_z = (chunk_pos.z * CHUNK_SIZE as i32 + z as i32 - 1) as f32;

@@ -198,8 +198,10 @@ mod tests {
     #[test]
     fn lookup_voxel_in_chunk_roundtrip() {
         use crate::meshing::flat_terrain_voxels;
+        use ndshape::RuntimeShape;
         let chunk_pos = IVec3::ZERO;
-        let voxels = flat_terrain_voxels(chunk_pos);
+        let shape = RuntimeShape::<u32, 3>::new([18, 18, 18]);
+        let voxels = flat_terrain_voxels(chunk_pos, 16, &shape);
 
         let voxel = lookup_voxel_in_chunk(&voxels, IVec3::new(0, -1, 0), chunk_pos);
         assert_eq!(voxel, WorldVoxel::Solid(0));
