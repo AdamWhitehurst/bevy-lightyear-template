@@ -1,5 +1,6 @@
 use crate::hit_detection::character_collision_layers;
 use crate::map::MapSaveTarget;
+use crate::world_object::ReflectPersist;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use lightyear::prelude::{PeerId, Tick};
@@ -39,7 +40,7 @@ pub struct RespawnPoint;
 
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Default)]
 #[type_path = "protocol"]
-#[reflect(Component, Default)]
+#[reflect(Component, Default, Persist)]
 pub struct Health {
     pub current: f32,
     pub max: f32,
@@ -50,8 +51,11 @@ impl Health {
         Self { current: max, max }
     }
 
-    pub fn apply_damage(&mut self, damage: f32) {
+    /// Applies damage, clamping to zero. Returns `true` if this caused the alive→dead transition.
+    pub fn apply_damage(&mut self, damage: f32) -> bool {
+        let was_alive = self.current > 0.0;
         self.current = (self.current - damage).max(0.0);
+        was_alive && self.current <= 0.0
     }
 
     pub fn is_dead(&self) -> bool {
@@ -61,6 +65,12 @@ impl Health {
     pub fn restore_full(&mut self) {
         self.current = self.max;
     }
+}
+
+/// Emitted when an entity's health transitions from alive to dead.
+#[derive(bevy::ecs::message::Message)]
+pub struct DeathEvent {
+    pub entity: Entity,
 }
 
 /// Post-respawn invulnerability. Prevents damage while present.

@@ -1,4 +1,7 @@
+use std::collections::HashSet;
+
 use avian3d::prelude::*;
+use bevy::ecs::reflect::ReflectComponent;
 use bevy::prelude::*;
 use lightyear::prelude::*;
 use protocol::map::MapInstanceId;
@@ -51,11 +54,84 @@ pub fn spawn_world_object(
     entity
 }
 
+/// Transforms an entity from its current def to a source def by diffing components.
+///
+/// Removes components present in `current_def` but absent from `source_def`.
+/// Inserts/overwrites components from `source_def`.
+/// Handles vox collider swap: builds trimesh from source if it has a Vox visual.
+pub fn apply_transformation(
+    commands: &mut Commands,
+    entity: Entity,
+    current_def: &WorldObjectDef,
+    source_def: &WorldObjectDef,
+    type_registry: &AppTypeRegistry,
+    vox_registry: &VoxModelRegistry,
+    vox_assets: &Assets<VoxModelAsset>,
+    meshes: &Assets<Mesh>,
+) {
+    let source_type_paths: HashSet<&str> = source_def
+        .components
+        .iter()
+        .map(|c| c.reflect_type_path())
+        .collect();
+
+    remove_absent_components(
+        commands,
+        entity,
+        current_def,
+        &source_type_paths,
+        type_registry,
+    );
+
+    // Always remove the old collider — it may have been built from a vox trimesh
+    // (not present in the def's component list) and won't be caught by
+    // remove_absent_components.
+    commands.entity(entity).remove::<Collider>();
+
+    let vox_collider = vox_trimesh_collider(source_def, vox_registry, vox_assets, meshes);
+    let use_vox_collider = vox_collider.is_some();
+    let components = clone_def_components(source_def, use_vox_collider);
+    apply_object_components(commands, entity, components, type_registry.0.clone());
+
+    if let Some(collider) = vox_collider {
+        commands.entity(entity).insert(collider);
+    }
+}
+
+/// Removes reflected components from `entity` that are in `current_def` but not in `keep_paths`.
+fn remove_absent_components(
+    commands: &mut Commands,
+    entity: Entity,
+    current_def: &WorldObjectDef,
+    keep_paths: &HashSet<&str>,
+    type_registry: &AppTypeRegistry,
+) {
+    let registry = type_registry.read();
+    for component in &current_def.components {
+        let path = component.reflect_type_path();
+        if keep_paths.contains(path) {
+            continue;
+        }
+        let Some(registration) = registry.get_with_type_path(path) else {
+            continue;
+        };
+        let Some(reflect_component) = registration.data::<ReflectComponent>() else {
+            continue;
+        };
+        let reflect_component = reflect_component.clone();
+        commands.queue(move |world: &mut World| {
+            if let Ok(mut entity_mut) = world.get_entity_mut(entity) {
+                reflect_component.remove(&mut entity_mut);
+            }
+        });
+    }
+}
+
 /// Clones the definition's reflected components for insertion.
 ///
 /// When `filter_collider_constructor` is true, `ColliderConstructor` is excluded
 /// because a vox trimesh collider takes priority.
-fn clone_def_components(
+pub(crate) fn clone_def_components(
     def: &WorldObjectDef,
     filter_collider_constructor: bool,
 ) -> Vec<Box<dyn bevy::reflect::PartialReflect>> {

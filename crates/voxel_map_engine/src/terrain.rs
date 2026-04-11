@@ -422,6 +422,7 @@ impl VoxelGeneratorImpl for HeightmapGenerator {
                 spawns.push(WorldObjectSpawn {
                     object_id: rule.object_id.clone(),
                     position: Vec3::new(world_pos.x, height as f32, world_pos.y),
+                    persisted_components: Vec::new(),
                 });
             }
         }

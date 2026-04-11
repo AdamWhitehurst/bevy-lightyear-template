@@ -338,7 +338,7 @@ Delete the line:
 
 ### Verification
 #### Automated
-- [ ] `cargo check-all` passes
+- [x] `cargo check-all` passes
 
 #### Manual
 - [ ] `cargo server` + `cargo client` — damage a character to death
@@ -658,7 +658,7 @@ Add:
 
 ### Verification
 #### Automated
-- [ ] `cargo check-all` passes
+- [x] `cargo check-all` passes
 
 #### Manual
 - [ ] `cargo server` + `cargo client` — damage tree to death
@@ -726,7 +726,7 @@ tick_active_transformations,
 
 ### Verification
 #### Automated
-- [ ] `cargo check-all` passes
+- [x] `cargo check-all` passes
 
 #### Manual
 - [ ] `cargo server` + `cargo client` — damage tree, observe stump
@@ -1124,7 +1124,7 @@ Key difference from `evict_chunk_entities`: saves all entities (not just evictab
 
 ### Verification
 #### Automated
-- [ ] `cargo check-all` passes
+- [x] `cargo check-all` passes
 
 #### Manual
 - [ ] `cargo server` + `cargo client` — damage tree, observe stump

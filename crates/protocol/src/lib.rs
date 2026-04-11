@@ -30,8 +30,8 @@ pub use ability::{
 pub use app_state::{AppState, AppStatePlugin, TrackedAssets};
 pub use character::{apply_movement, update_facing};
 pub use character::{
-    CharacterMarker, CharacterPhysicsBundle, CharacterType, ColorComponent, DummyTarget, Health,
-    Invulnerable, PlayerId, RespawnPoint, RespawnTimer, RespawnTimerConfig,
+    CharacterMarker, CharacterPhysicsBundle, CharacterType, ColorComponent, DeathEvent,
+    DummyTarget, Health, Invulnerable, PlayerId, RespawnPoint, RespawnTimer, RespawnTimerConfig,
     CHARACTER_CAPSULE_HEIGHT, CHARACTER_CAPSULE_RADIUS, DEFAULT_RESPAWN_TICKS,
 };
 pub use hit_detection::{
@@ -155,6 +155,8 @@ impl Plugin for ProtocolPlugin {
 
         // World objects — static, no prediction needed
         app.register_component::<world_object::WorldObjectId>();
+        app.register_component::<world_object::VisualKind>();
+        app.register_component::<world_object::ActiveTransformation>();
 
         // Marker components
         app.register_component::<PlayerId>();

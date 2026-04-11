@@ -73,6 +73,8 @@ impl Plugin for AbilityPlugin {
             ),
         );
 
+        app.add_message::<crate::DeathEvent>();
+
         let ready = in_state(crate::app_state::AppState::Ready);
 
         app.add_systems(

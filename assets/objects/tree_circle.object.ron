@@ -15,4 +15,10 @@
         memberships: (32),
         filters: (14),
     ),
+    "protocol::world_object::types::OnDeathEffects": ([
+        TransformInto(
+            source: "stump_circle",
+            revert_after_ticks: Some(1000),
+        ),
+    ]),
 }

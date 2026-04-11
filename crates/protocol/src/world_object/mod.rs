@@ -11,6 +11,7 @@ pub use plugin::WorldObjectPlugin;
 pub use registry::{WorldObjectDefRegistry, WorldObjectManifest};
 pub use spawn::apply_object_components;
 pub use types::{
-    ObjectCategory, PlacementOffset, VisualKind, WorldObjectDef, WorldObjectId,
+    ActiveTransformation, DeathEffect, ObjectCategory, OnDeathEffects, PlacementOffset,
+    ReflectPersist, ReflectSpawnOnly, VisualKind, WorldObjectDef, WorldObjectId,
     WorldObjectLoadError,
 };

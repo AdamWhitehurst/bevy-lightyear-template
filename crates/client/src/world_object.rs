@@ -135,6 +135,57 @@ fn attach_visual(
     }
 }
 
+/// Rebuilds visuals and collider when VisualKind changes via replication (e.g. tree→stump).
+pub fn on_visual_kind_changed(
+    mut commands: Commands,
+    query: Query<(Entity, &VisualKind), Changed<VisualKind>>,
+    vox_registry: Res<VoxModelRegistry>,
+    vox_assets: Res<Assets<VoxModelAsset>>,
+    meshes: Res<Assets<Mesh>>,
+    default_material: Res<DefaultVoxModelMaterial>,
+    children_query: Query<&Children>,
+) {
+    for (entity, visual) in &query {
+        // Despawn old visual children
+        if let Ok(children) = children_query.get(entity) {
+            for child in children.iter() {
+                commands.entity(child).despawn();
+            }
+        }
+
+        // Remove old collider and rebuild from new visual
+        commands.entity(entity).remove::<Collider>();
+        if let VisualKind::Vox(path) = visual {
+            if let Some(collider) =
+                vox_trimesh_collider_from_path(path, &vox_registry, &vox_assets, &meshes)
+            {
+                commands.entity(entity).insert(collider);
+            }
+            attach_vox_mesh(
+                &mut commands,
+                entity,
+                path,
+                &vox_registry,
+                &vox_assets,
+                &default_material,
+            );
+        } else {
+            trace!("Entity {entity:?} visual changed to non-Vox, no mesh to attach");
+        }
+    }
+}
+
+/// Builds a trimesh collider from a vox model path.
+fn vox_trimesh_collider_from_path(
+    vox_path: &str,
+    vox_registry: &VoxModelRegistry,
+    vox_assets: &Assets<VoxModelAsset>,
+    meshes: &Assets<Mesh>,
+) -> Option<Collider> {
+    let mesh = vox_registry.get_lod0_mesh(vox_path, vox_assets, meshes)?;
+    Collider::trimesh_from_mesh(mesh)
+}
+
 /// Attaches the LOD 0 (full-resolution) vox mesh as a child of the world object entity.
 fn attach_vox_mesh(
     commands: &mut Commands,

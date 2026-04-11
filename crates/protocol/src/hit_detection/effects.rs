@@ -1,4 +1,5 @@
 use avian3d::prelude::*;
+use bevy::ecs::message::MessageWriter;
 use bevy::prelude::*;
 use bevy::reflect::TypeRegistryArc;
 use lightyear::prelude::{ControlledBy, Tick};
@@ -7,7 +8,7 @@ use crate::ability::{
     spawn_sub_ability, AbilityAsset, AbilityDefs, AbilityEffect, ActiveBuffs, ActiveShield,
     EffectTarget, ForceFrame, OnHitEffects,
 };
-use crate::{Health, Invulnerable, PlayerId};
+use crate::{DeathEvent, Health, Invulnerable, PlayerId};
 
 fn resolve_on_hit_target(target: &EffectTarget, victim: Entity, on_hit: &OnHitEffects) -> Entity {
     match target {
@@ -78,6 +79,7 @@ pub(crate) fn apply_on_hit_effects(
     shield_query: &mut Query<&mut ActiveShield>,
     buff_query: &Query<&ActiveBuffs>,
     rotation_query: &Query<&Rotation>,
+    death_events: &mut MessageWriter<DeathEvent>,
 ) {
     for effect in &on_hit.effects {
         match effect {
@@ -96,8 +98,8 @@ pub(crate) fn apply_on_hit_effects(
                 }
 
                 if let Ok((_, _, mut health, invulnerable)) = target_query.get_mut(entity) {
-                    if invulnerable.is_none() {
-                        health.apply_damage(remaining_damage);
+                    if invulnerable.is_none() && health.apply_damage(remaining_damage) {
+                        death_events.write(DeathEvent { entity });
                     }
                 } else {
                     warn!("Damage target {:?} not found", entity);
