@@ -60,10 +60,11 @@ impl VoxelMapInstance {
     /// Bundle for an unbounded overworld map.
     pub fn overworld(seed: u64) -> (Self, VoxelMapConfig, Overworld) {
         let tree_height = 5;
-        let chunk_size = 16;
+        let chunk_size = 64;
+        let column_y_range = (-2, 2);
         (
             Self::new(tree_height, chunk_size),
-            VoxelMapConfig::new(seed, 0, 10, None, tree_height, chunk_size, (-8, 8)),
+            VoxelMapConfig::new(seed, 0, 10, None, tree_height, chunk_size, column_y_range),
             Overworld,
         )
     }

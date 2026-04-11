@@ -106,12 +106,12 @@ pub fn spawn_overworld(
         _ => (DEFAULT_OVERWORLD_SEED, GENERATION_VERSION),
     };
 
-    let mut config = VoxelMapConfig::new(seed, generation_version, 2, None, 5, 16, (-8, 8));
+    let mut config = VoxelMapConfig::new(seed, generation_version, 2, None, 5, 64, (-2, 2));
     config.save_dir = Some(map_dir);
 
     let map = commands
         .spawn((
-            VoxelMapInstance::new(5, 16),
+            VoxelMapInstance::new(5, 64),
             config,
             Transform::default(),
             MapInstanceId::Overworld,

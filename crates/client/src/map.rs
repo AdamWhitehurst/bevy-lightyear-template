@@ -96,16 +96,16 @@ impl Plugin for ClientMapPlugin {
 pub struct OverworldMap(pub Entity);
 
 fn spawn_overworld(mut commands: Commands, mut registry: ResMut<MapRegistry>) {
-    let mut config = VoxelMapConfig::new(0, 0, 2, None, 5, 16, (-8, 8));
+    let mut config = VoxelMapConfig::new(0, 0, 2, None, 5, 64, (-2, 2));
     config.generates_chunks = false;
 
     let map = commands
         .spawn((
-            VoxelMapInstance::new(5, 16),
+            VoxelMapInstance::new(5, 64),
             config,
             VoxelGenerator(Arc::new(FlatGenerator {
-                chunk_size: 16,
-                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+                chunk_size: 64,
+                shape: RuntimeShape::<u32, 3>::new([66, 66, 66]),
             })),
             Transform::default(),
             MapInstanceId::Overworld,

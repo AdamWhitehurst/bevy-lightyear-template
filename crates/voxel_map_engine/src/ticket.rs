@@ -24,7 +24,7 @@ impl TicketType {
     /// The default Chebyshev radius for this ticket type.
     pub fn default_radius(self) -> u32 {
         match self {
-            TicketType::Player => 200,
+            TicketType::Player => 4,
             TicketType::Npc => 1,
             TicketType::MapTransition => 4,
         }
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn ticket_type_default_radii() {
-        assert_eq!(TicketType::Player.default_radius(), 200);
+        assert_eq!(TicketType::Player.default_radius(), 4);
         assert_eq!(TicketType::Npc.default_radius(), 1);
         assert_eq!(TicketType::MapTransition.default_radius(), 4);
     }
@@ -199,7 +199,7 @@ mod tests {
         let e = test_entity();
         let p = ChunkTicket::player(e);
         assert_eq!(p.ticket_type, TicketType::Player);
-        assert_eq!(p.radius, 200);
+        assert_eq!(p.radius, 4);
         let n = ChunkTicket::npc(e);
         assert_eq!(n.ticket_type, TicketType::Npc);
         assert_eq!(n.radius, 1);
