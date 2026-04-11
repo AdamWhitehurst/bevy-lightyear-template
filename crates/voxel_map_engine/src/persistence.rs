@@ -219,14 +219,16 @@ pub fn load_chunk_entities(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{ChunkStatus, PaddedChunkShape, WorldVoxel};
-    use ndshape::ConstShape;
+    use crate::types::{ChunkStatus, WorldVoxel};
+
+    /// Padded chunk volume for the default `chunk_size=16`, used by tests.
+    const PADDED_VOLUME_16: usize = 18 * 18 * 18;
 
     #[test]
     fn save_load_chunk_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         let pos = IVec3::new(1, -2, 3);
-        let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         voxels[100] = WorldVoxel::Solid(5);
         let chunk = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
 
@@ -247,7 +249,7 @@ mod tests {
     fn save_chunk_creates_directories() {
         let dir = tempfile::tempdir().unwrap();
         let map_dir = dir.path().join("deep/nested/map");
-        let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+        let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         save_chunk(
             &map_dir,
             IVec3::ZERO,
@@ -305,7 +307,7 @@ mod tests {
     #[test]
     fn list_saved_chunks_with_files() {
         let dir = tempfile::tempdir().unwrap();
-        let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+        let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         let chunk = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
         let positions = [IVec3::new(0, 0, 0), IVec3::new(1, -1, 2)];
         for &pos in &positions {
@@ -321,7 +323,7 @@ mod tests {
     #[test]
     fn delete_chunk_removes_file() {
         let dir = tempfile::tempdir().unwrap();
-        let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+        let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         save_chunk(
             dir.path(),
             IVec3::ZERO,
@@ -346,7 +348,7 @@ mod tests {
         // Use a mixed chunk so the palettized representation is large enough
         // for compression to actually reduce size (uniform chunks serialize
         // to only ~24 bytes, smaller than zstd framing overhead).
-        let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         for i in 0..100 {
             voxels[i] = WorldVoxel::Solid((i % 5) as u8);
         }

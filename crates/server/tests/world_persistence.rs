@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use ndshape::ConstShape;
 use server::map::save_dirty_chunks_sync;
 use server::persistence::{
     load_entities, load_map_meta, map_save_dir, save_entities, save_map_meta, MapMeta,
@@ -10,6 +9,9 @@ use voxel_map_engine::prelude::*;
 use protocol::map::{SavedEntity, SavedEntityKind};
 use protocol::MapInstanceId;
 
+/// Padded chunk volume for the default `chunk_size=16`, used by tests.
+const PADDED_VOLUME_16: usize = 18 * 18 * 18;
+
 #[test]
 fn terrain_persists_across_server_restart() {
     let tmp = tempfile::tempdir().unwrap();
@@ -17,7 +19,7 @@ fn terrain_persists_across_server_restart() {
 
     // First run: save chunk data and metadata
     {
-        let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         voxels[100] = WorldVoxel::Solid(42);
         let chunk_data = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
         let chunk_pos = IVec3::new(0, 0, 0);
@@ -65,7 +67,7 @@ fn multiple_chunks_persist_independently() {
 
     // Save three chunks with distinct data
     for (i, &pos) in positions.iter().enumerate() {
-        let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         voxels[i + 10] = WorldVoxel::Solid(i as u8 + 1);
         let chunk_data = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
         chunk_persist::save_chunk(&map_dir, pos, 16, &chunk_data).unwrap();
@@ -109,7 +111,7 @@ fn dirty_instance_save_then_reload() {
     // Create instance, make edits, save dirty chunks
     let mut instance = VoxelMapInstance::new(5, 16);
     let chunk_pos = IVec3::ZERO;
-    let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+    let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
     instance.insert_chunk_data(
         chunk_pos,
         ChunkData::from_voxels(&voxels, ChunkStatus::Full),
@@ -134,7 +136,7 @@ fn dirty_instance_save_then_reload() {
         (local.y + 1) as u32,
         (local.z + 1) as u32,
     ];
-    let index = <PaddedChunkShape as ConstShape<3>>::linearize(padded) as usize;
+    let index = RuntimeShape::<u32, 3>::new([18, 18, 18]).linearize(padded) as usize;
     assert_eq!(loaded.voxels.get(index), WorldVoxel::Solid(99));
 }
 
@@ -153,7 +155,7 @@ fn meta_and_chunks_coexist_in_map_directory() {
     save_map_meta(&map_dir, &meta).unwrap();
 
     // Save a chunk
-    let voxels = vec![WorldVoxel::Solid(1); PaddedChunkShape::USIZE];
+    let voxels = vec![WorldVoxel::Solid(1); PADDED_VOLUME_16];
     chunk_persist::save_chunk(
         &map_dir,
         IVec3::ZERO,
@@ -181,7 +183,7 @@ fn multiple_maps_save_independently() {
     let ow_dir = map_save_dir(tmp.path(), &MapInstanceId::Overworld);
     let hb_dir = map_save_dir(tmp.path(), &MapInstanceId::Homebase { owner: 42 });
 
-    let mut ow_voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+    let mut ow_voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
     ow_voxels[0] = WorldVoxel::Solid(1);
     chunk_persist::save_chunk(
         &ow_dir,
@@ -191,7 +193,7 @@ fn multiple_maps_save_independently() {
     )
     .unwrap();
 
-    let mut hb_voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+    let mut hb_voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
     hb_voxels[0] = WorldVoxel::Solid(99);
     chunk_persist::save_chunk(
         &hb_dir,
@@ -340,7 +342,7 @@ fn entities_and_chunks_coexist_in_map_directory() {
     save_entities(&map_dir, &entities).unwrap();
 
     // Save a chunk
-    let voxels = vec![WorldVoxel::Solid(1); PaddedChunkShape::USIZE];
+    let voxels = vec![WorldVoxel::Solid(1); PADDED_VOLUME_16];
     chunk_persist::save_chunk(
         &map_dir,
         IVec3::ZERO,

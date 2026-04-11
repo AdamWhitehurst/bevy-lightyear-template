@@ -1006,10 +1006,10 @@ fn generator_for_map(map_id: &MapInstanceId, chunk_size: u32) -> VoxelGenerator 
 ### Verification
 
 #### Automated
-- [ ] `cargo check-all` passes with **zero** `CHUNK_SIZE`, `PaddedChunkShape`, `PADDED_CHUNK_SIZE`, `PADDED_VOLUME`, `DEFAULT_COLUMN_Y_MIN`, `DEFAULT_COLUMN_Y_MAX` references in `crates/` (grep check)
-- [ ] `cargo test -p voxel_map_engine` passes
-- [ ] `cargo test -p server` passes
-- [ ] `cargo test -p client` passes
+- [x] `cargo check-all` passes with **zero** `CHUNK_SIZE`, `PaddedChunkShape`, `PADDED_CHUNK_SIZE`, `PADDED_VOLUME`, `DEFAULT_COLUMN_Y_MIN`, `DEFAULT_COLUMN_Y_MAX` references in `crates/` (grep check)
+- [x] `cargo test -p voxel_map_engine` passes
+- [x] `cargo test -p server` passes
+- [x] `cargo test -p client` passes
 
 #### Manual
 - [ ] Delete `assets/sprites/humanoid/worlds/` fresh state

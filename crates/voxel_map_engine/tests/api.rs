@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
-use ndshape::ConstShape;
 use voxel_map_engine::prelude::*;
 
 fn test_app() -> App {
@@ -337,7 +336,7 @@ struct AllAirGenerator;
 
 impl VoxelGeneratorImpl for AllAirGenerator {
     fn generate_terrain(&self, _chunk_pos: IVec3) -> Vec<WorldVoxel> {
-        vec![WorldVoxel::Air; PaddedChunkShape::USIZE]
+        vec![WorldVoxel::Air; 18 * 18 * 18]
     }
 }
 

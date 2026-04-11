@@ -9,6 +9,9 @@ use voxel_map_engine::prelude::{
     VoxelMapConfig, VoxelMapInstance, VoxelPlugin, WorldVoxel,
 };
 
+/// Padded chunk volume for the default `chunk_size=16`, used by tests.
+const PADDED_VOLUME_16: usize = 18 * 18 * 18;
+
 fn test_app() -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
@@ -82,7 +85,10 @@ fn chunk_data_stored_after_sync() {
     app.update();
 
     let chunk_pos = IVec3::ZERO;
-    let voxels = PalettedChunk::SingleValue(WorldVoxel::Solid(42));
+    let voxels = PalettedChunk::SingleValue {
+        voxel: WorldVoxel::Solid(42),
+        len: PADDED_VOLUME_16,
+    };
     simulate_chunk_sync(&mut app, map, chunk_pos, voxels.clone());
 
     let instance = app.world().get::<VoxelMapInstance>(map).unwrap();
@@ -117,13 +123,19 @@ fn chunk_levels_not_overwritten_by_second_sync_in_same_column() {
         &mut app,
         map,
         pos_a,
-        PalettedChunk::SingleValue(WorldVoxel::Solid(1)),
+        PalettedChunk::SingleValue {
+            voxel: WorldVoxel::Solid(1),
+            len: PADDED_VOLUME_16,
+        },
     );
     simulate_chunk_sync(
         &mut app,
         map,
         pos_b,
-        PalettedChunk::SingleValue(WorldVoxel::Solid(2)),
+        PalettedChunk::SingleValue {
+            voxel: WorldVoxel::Solid(2),
+            len: PADDED_VOLUME_16,
+        },
     );
 
     let instance = app.world().get::<VoxelMapInstance>(map).unwrap();
@@ -156,13 +168,19 @@ fn unload_column_removes_data_and_levels() {
         &mut app,
         map,
         pos_a,
-        PalettedChunk::SingleValue(WorldVoxel::Solid(1)),
+        PalettedChunk::SingleValue {
+            voxel: WorldVoxel::Solid(1),
+            len: PADDED_VOLUME_16,
+        },
     );
     simulate_chunk_sync(
         &mut app,
         map,
         pos_b,
-        PalettedChunk::SingleValue(WorldVoxel::Solid(2)),
+        PalettedChunk::SingleValue {
+            voxel: WorldVoxel::Solid(2),
+            len: PADDED_VOLUME_16,
+        },
     );
 
     simulate_unload_column(&mut app, map, col);
@@ -193,7 +211,10 @@ fn despawn_out_of_range_removes_mesh_entities_after_unload() {
         &mut app,
         map,
         chunk_pos,
-        PalettedChunk::SingleValue(WorldVoxel::Solid(1)),
+        PalettedChunk::SingleValue {
+            voxel: WorldVoxel::Solid(1),
+            len: PADDED_VOLUME_16,
+        },
     );
 
     // Spawn a mesh entity as child of the map, simulating what handle_chunk_data_sync does
@@ -254,7 +275,10 @@ fn client_propagator_does_not_remove_server_pushed_data() {
         &mut app,
         map,
         far_pos,
-        PalettedChunk::SingleValue(WorldVoxel::Solid(1)),
+        PalettedChunk::SingleValue {
+            voxel: WorldVoxel::Solid(1),
+            len: PADDED_VOLUME_16,
+        },
     );
 
     // Run several frames

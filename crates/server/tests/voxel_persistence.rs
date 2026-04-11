@@ -1,9 +1,11 @@
 use bevy::prelude::*;
-use ndshape::ConstShape;
 use server::map::save_dirty_chunks_sync;
 use server::persistence::{load_map_meta, save_map_meta, MapMeta};
 use voxel_map_engine::persistence as chunk_persist;
 use voxel_map_engine::prelude::*;
+
+/// Padded chunk volume for the default `chunk_size=16`, used by tests.
+const PADDED_VOLUME_16: usize = 18 * 18 * 18;
 
 #[test]
 fn dirty_chunks_saved_on_debounce() {
@@ -12,7 +14,7 @@ fn dirty_chunks_saved_on_debounce() {
 
     let mut instance = VoxelMapInstance::new(5, 16);
     let chunk_pos = IVec3::new(1, 0, 0);
-    let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+    let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
     instance.insert_chunk_data(
         chunk_pos,
         ChunkData::from_voxels(&voxels, ChunkStatus::Full),
@@ -33,7 +35,7 @@ fn clean_chunks_not_saved() {
 
     let mut instance = VoxelMapInstance::new(5, 16);
     let chunk_pos = IVec3::ZERO;
-    let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+    let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
     instance.insert_chunk_data(
         chunk_pos,
         ChunkData::from_voxels(&voxels, ChunkStatus::Full),
@@ -53,7 +55,7 @@ fn terrain_persists_across_save_load() {
 
     // Save a chunk with a specific voxel edit
     {
-        let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         voxels[100] = WorldVoxel::Solid(42);
         let chunk_data = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
         chunk_persist::save_chunk(&map_dir, IVec3::ZERO, 16, &chunk_data).unwrap();
@@ -90,7 +92,7 @@ fn evicted_dirty_chunk_saved_before_removal() {
     // Set up an instance with a dirty chunk
     let mut instance = VoxelMapInstance::new(5, 16);
     let chunk_pos = IVec3::new(3, 0, 0);
-    let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+    let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
     voxels[50] = WorldVoxel::Solid(7);
     instance.insert_chunk_data(
         chunk_pos,
@@ -125,7 +127,7 @@ fn evicted_dirty_chunk_saved_before_removal() {
 fn load_chunk_with_mismatched_chunk_size_errors() {
     let dir = tempfile::tempdir().unwrap();
     let map_dir = dir.path().join("overworld");
-    let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+    let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
     let chunk = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
 
     chunk_persist::save_chunk(&map_dir, IVec3::ZERO, 16, &chunk).unwrap();

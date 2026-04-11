@@ -1336,7 +1336,10 @@ fn test_voxel_edit_ack_received() {
     instance.insert_chunk_data(
         chunk_pos,
         ChunkData {
-            voxels: PalettedChunk::SingleValue(WorldVoxel::Solid(1)),
+            voxels: PalettedChunk::SingleValue {
+                voxel: WorldVoxel::Solid(1),
+                len: 18 * 18 * 18,
+            },
             fill_type: FillType::Uniform(WorldVoxel::Solid(1)),
             hash: 0,
             status: ChunkStatus::Full,
@@ -1462,7 +1465,10 @@ fn test_server_pushes_chunks_without_request() {
 
     // Spawn overworld map with a chunk at IVec3::ZERO
     let chunk_pos = IVec3::ZERO;
-    let chunk_voxels = PalettedChunk::SingleValue(WorldVoxel::Solid(1));
+    let chunk_voxels = PalettedChunk::SingleValue {
+        voxel: WorldVoxel::Solid(1),
+        len: 18 * 18 * 18,
+    };
     let mut instance = VoxelMapInstance::new(3, 16);
     instance.insert_chunk_data(
         chunk_pos,
@@ -1584,7 +1590,10 @@ fn test_server_sends_unload_column_when_out_of_range() {
     instance.insert_chunk_data(
         chunk_pos,
         ChunkData {
-            voxels: PalettedChunk::SingleValue(WorldVoxel::Solid(1)),
+            voxels: PalettedChunk::SingleValue {
+                voxel: WorldVoxel::Solid(1),
+                len: 18 * 18 * 18,
+            },
             fill_type: FillType::Uniform(WorldVoxel::Solid(1)),
             hash: 0,
             status: ChunkStatus::Full,

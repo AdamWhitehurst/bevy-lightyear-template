@@ -3,8 +3,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::WorldVoxel;
 
-const PADDED_VOLUME: usize = 18 * 18 * 18;
-
 /// Minimum bits to represent `count` distinct values.
 ///
 /// Returns 0 for count <= 1 (single-value case needs no index bits).
@@ -18,12 +16,18 @@ fn bits_needed(count: usize) -> u8 {
 
 /// Palette-based chunk storage with two strategies.
 ///
-/// Compresses a fixed-size voxel array (18^3 = 5832 entries) by deduplicating
-/// voxel types into a palette and storing small indices instead of full values.
+/// Compresses a voxel array by deduplicating voxel types into a palette and
+/// storing small indices instead of full values. Chunk volume is runtime-sized
+/// via the `len` field on each variant.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
 pub enum PalettedChunk {
     /// All voxels are the same value. Near-zero overhead.
-    SingleValue(WorldVoxel),
+    SingleValue {
+        /// The shared voxel value.
+        voxel: WorldVoxel,
+        /// Number of logical entries (voxel count).
+        len: usize,
+    },
 
     /// 2-256 distinct voxel types. Palette array + packed bit indices.
     Indirect {
@@ -44,15 +48,12 @@ impl PalettedChunk {
     ///
     /// Uses `SingleValue` when all voxels are identical, `Indirect` otherwise.
     pub fn from_voxels(voxels: &[WorldVoxel]) -> Self {
-        assert_eq!(
-            voxels.len(),
-            PADDED_VOLUME,
-            "expected {PADDED_VOLUME} voxels"
-        );
-
         let palette = build_palette(voxels);
         if palette.len() <= 1 {
-            return Self::SingleValue(voxels[0]);
+            return Self::SingleValue {
+                voxel: voxels[0],
+                len: voxels.len(),
+            };
         }
 
         let bits = bits_needed(palette.len());
@@ -66,10 +67,23 @@ impl PalettedChunk {
         }
     }
 
+    /// Number of logical voxel entries in this chunk.
+    pub fn len(&self) -> usize {
+        match self {
+            Self::SingleValue { len, .. } => *len,
+            Self::Indirect { len, .. } => *len,
+        }
+    }
+
+    /// True if the chunk holds zero voxel entries.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
     /// Expand back to a flat voxel array.
     pub fn to_voxels(&self) -> Vec<WorldVoxel> {
         match self {
-            Self::SingleValue(v) => vec![*v; PADDED_VOLUME],
+            Self::SingleValue { voxel, len } => vec![*voxel; *len],
             Self::Indirect {
                 palette,
                 data,
@@ -94,9 +108,9 @@ impl PalettedChunk {
     /// O(1) indexed voxel access.
     pub fn get(&self, index: usize) -> WorldVoxel {
         match self {
-            Self::SingleValue(v) => {
-                debug_assert!(index < PADDED_VOLUME, "index {index} out of bounds");
-                *v
+            Self::SingleValue { voxel, len } => {
+                debug_assert!(index < *len, "index {index} out of bounds (len {len})");
+                *voxel
             }
             Self::Indirect {
                 palette,
@@ -122,11 +136,11 @@ impl PalettedChunk {
     /// to its existing value.
     pub fn set(&mut self, index: usize, voxel: WorldVoxel) {
         match self {
-            Self::SingleValue(v) => {
+            Self::SingleValue { voxel: v, len } => {
                 if *v == voxel {
                     return;
                 }
-                let mut expanded = vec![*v; PADDED_VOLUME];
+                let mut expanded = vec![*v; *len];
                 expanded[index] = voxel;
                 *self = Self::from_voxels(&expanded);
             }
@@ -154,13 +168,13 @@ impl PalettedChunk {
 
     /// True if every voxel in the chunk is the same value.
     pub fn is_uniform(&self) -> bool {
-        matches!(self, Self::SingleValue(_))
+        matches!(self, Self::SingleValue { .. })
     }
 
     /// Number of distinct voxel types in the palette.
     pub fn palette_size(&self) -> usize {
         match self {
-            Self::SingleValue(_) => 1,
+            Self::SingleValue { .. } => 1,
             Self::Indirect { palette, .. } => palette.len(),
         }
     }
@@ -168,7 +182,7 @@ impl PalettedChunk {
     /// Approximate heap memory usage in bytes (excludes the enum itself).
     pub fn memory_usage(&self) -> usize {
         match self {
-            Self::SingleValue(_) => 0,
+            Self::SingleValue { .. } => 0,
             Self::Indirect {
                 palette,
                 data,
@@ -213,6 +227,9 @@ fn pack_indices(voxels: &[WorldVoxel], palette: &[WorldVoxel], bits: u8) -> Vec<
 mod tests {
     use super::*;
 
+    /// Padded chunk volume for the default `chunk_size=16`, used by tests.
+    const PADDED_VOLUME_16: usize = 18 * 18 * 18;
+
     #[test]
     fn bits_needed_values() {
         assert_eq!(bits_needed(1), 0);
@@ -227,18 +244,18 @@ mod tests {
 
     #[test]
     fn single_value_air() {
-        let voxels = vec![WorldVoxel::Air; PADDED_VOLUME];
+        let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         let chunk = PalettedChunk::from_voxels(&voxels);
         assert!(chunk.is_uniform());
         assert_eq!(chunk.palette_size(), 1);
         assert_eq!(chunk.get(0), WorldVoxel::Air);
-        assert_eq!(chunk.get(PADDED_VOLUME - 1), WorldVoxel::Air);
+        assert_eq!(chunk.get(PADDED_VOLUME_16 - 1), WorldVoxel::Air);
         assert_eq!(chunk.to_voxels(), voxels);
     }
 
     #[test]
     fn single_value_solid() {
-        let voxels = vec![WorldVoxel::Solid(7); PADDED_VOLUME];
+        let voxels = vec![WorldVoxel::Solid(7); PADDED_VOLUME_16];
         let chunk = PalettedChunk::from_voxels(&voxels);
         assert!(chunk.is_uniform());
         assert_eq!(chunk.get(100), WorldVoxel::Solid(7));
@@ -246,8 +263,8 @@ mod tests {
 
     #[test]
     fn two_voxel_types_roundtrip() {
-        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME];
-        for i in (0..PADDED_VOLUME).step_by(2) {
+        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
+        for i in (0..PADDED_VOLUME_16).step_by(2) {
             voxels[i] = WorldVoxel::Solid(1);
         }
         let chunk = PalettedChunk::from_voxels(&voxels);
@@ -258,7 +275,7 @@ mod tests {
 
     #[test]
     fn many_voxel_types_roundtrip() {
-        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME];
+        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         for i in 0..200 {
             voxels[i] = WorldVoxel::Solid(i as u8);
         }
@@ -269,7 +286,7 @@ mod tests {
 
     #[test]
     fn get_single_voxel_indexed_access() {
-        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME];
+        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         voxels[42] = WorldVoxel::Solid(99);
         let chunk = PalettedChunk::from_voxels(&voxels);
         assert_eq!(chunk.get(0), WorldVoxel::Air);
@@ -279,7 +296,7 @@ mod tests {
 
     #[test]
     fn set_within_existing_palette() {
-        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME];
+        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         voxels[0] = WorldVoxel::Solid(1);
         let mut chunk = PalettedChunk::from_voxels(&voxels);
         let old_palette_size = chunk.palette_size();
@@ -292,7 +309,7 @@ mod tests {
 
     #[test]
     fn set_expands_palette() {
-        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME];
+        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         voxels[0] = WorldVoxel::Solid(1);
         let mut chunk = PalettedChunk::from_voxels(&voxels);
         assert_eq!(chunk.palette_size(), 2);
@@ -305,7 +322,10 @@ mod tests {
 
     #[test]
     fn set_transitions_from_single_value() {
-        let mut chunk = PalettedChunk::SingleValue(WorldVoxel::Air);
+        let mut chunk = PalettedChunk::SingleValue {
+            voxel: WorldVoxel::Air,
+            len: PADDED_VOLUME_16,
+        };
         chunk.set(0, WorldVoxel::Solid(5));
         assert!(!chunk.is_uniform());
         assert_eq!(chunk.get(0), WorldVoxel::Solid(5));
@@ -314,23 +334,29 @@ mod tests {
 
     #[test]
     fn set_noop_on_single_value() {
-        let mut chunk = PalettedChunk::SingleValue(WorldVoxel::Air);
+        let mut chunk = PalettedChunk::SingleValue {
+            voxel: WorldVoxel::Air,
+            len: PADDED_VOLUME_16,
+        };
         chunk.set(0, WorldVoxel::Air);
         assert!(chunk.is_uniform());
     }
 
     #[test]
     fn memory_usage_single_value_minimal() {
-        let chunk = PalettedChunk::SingleValue(WorldVoxel::Air);
+        let chunk = PalettedChunk::SingleValue {
+            voxel: WorldVoxel::Air,
+            len: PADDED_VOLUME_16,
+        };
         assert!(chunk.memory_usage() < 16);
     }
 
     #[test]
     fn memory_usage_indirect_less_than_flat() {
-        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME];
+        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         voxels[0] = WorldVoxel::Solid(1);
         let chunk = PalettedChunk::from_voxels(&voxels);
-        let flat_size = PADDED_VOLUME * size_of::<WorldVoxel>();
+        let flat_size = PADDED_VOLUME_16 * size_of::<WorldVoxel>();
         assert!(
             chunk.memory_usage() < flat_size / 4,
             "indirect {} should be < flat/4 {}",
@@ -341,7 +367,7 @@ mod tests {
 
     #[test]
     fn serde_roundtrip() {
-        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME];
+        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         for i in 0..50 {
             voxels[i * 10] = WorldVoxel::Solid(i as u8);
         }
@@ -353,7 +379,10 @@ mod tests {
 
     #[test]
     fn serde_single_value_roundtrip() {
-        let chunk = PalettedChunk::SingleValue(WorldVoxel::Solid(3));
+        let chunk = PalettedChunk::SingleValue {
+            voxel: WorldVoxel::Solid(3),
+            len: PADDED_VOLUME_16,
+        };
         let bytes = bincode::serialize(&chunk).expect("serialize");
         let restored: PalettedChunk = bincode::deserialize(&bytes).expect("deserialize");
         assert!(restored.is_uniform());

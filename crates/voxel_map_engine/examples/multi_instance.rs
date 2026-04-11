@@ -104,7 +104,7 @@ impl VoxelGeneratorImpl for RaisedGenerator {
         let mut voxels = vec![WorldVoxel::Air; shape.usize()];
         for i in 0..shape.size() {
             let [_x, y, _z] = shape.delinearize(i);
-            let world_y = chunk_pos.y * CHUNK_SIZE as i32 + y as i32 - 1;
+            let world_y = chunk_pos.y * 16 + y as i32 - 1;
             if world_y < 4 {
                 voxels[i as usize] = WorldVoxel::Solid(0);
             }
@@ -121,9 +121,9 @@ impl VoxelGeneratorImpl for BowlGenerator {
         let mut voxels = vec![WorldVoxel::Air; shape.usize()];
         for i in 0..shape.size() {
             let [x, y, z] = shape.delinearize(i);
-            let world_x = (chunk_pos.x * CHUNK_SIZE as i32 + x as i32 - 1) as f32;
-            let world_y = (chunk_pos.y * CHUNK_SIZE as i32 + y as i32 - 1) as f32;
-            let world_z = (chunk_pos.z * CHUNK_SIZE as i32 + z as i32 - 1) as f32;
+            let world_x = (chunk_pos.x * 16 + x as i32 - 1) as f32;
+            let world_y = (chunk_pos.y * 16 + y as i32 - 1) as f32;
+            let world_z = (chunk_pos.z * 16 + z as i32 - 1) as f32;
             let dist = (world_x * world_x + world_z * world_z).sqrt();
             let surface_y = -2.0 + dist * 0.15;
             if world_y < surface_y {

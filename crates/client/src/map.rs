@@ -438,7 +438,7 @@ pub fn handle_map_transition_start(
             ));
 
             if !registry.0.contains_key(&transition.target) {
-                let generator = generator_for_map(&transition.target);
+                let generator = generator_for_map(&transition.target, transition.chunk_size);
                 let map_entity = spawn_map_instance(
                     &mut commands,
                     &transition.target,
@@ -506,10 +506,11 @@ fn despawn_all_maps_except(
     }
 }
 
-fn generator_for_map(map_id: &MapInstanceId) -> VoxelGenerator {
+fn generator_for_map(map_id: &MapInstanceId, chunk_size: u32) -> VoxelGenerator {
+    let padded = chunk_size + 2;
     let flat = || FlatGenerator {
-        chunk_size: 16,
-        shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+        chunk_size,
+        shape: RuntimeShape::<u32, 3>::new([padded, padded, padded]),
     };
     match map_id {
         MapInstanceId::Overworld => VoxelGenerator(Arc::new(flat())),
