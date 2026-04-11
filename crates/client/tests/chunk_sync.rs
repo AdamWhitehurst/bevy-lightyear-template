@@ -5,8 +5,8 @@ use lightyear::prelude::{Controlled, Predicted};
 use protocol::{CharacterMarker, MapInstanceId, MapRegistry};
 use voxel_map_engine::prelude::{
     chunk_to_column, column_to_chunks, ChunkData, ChunkStatus, ChunkTicket, FillType,
-    FlatGenerator, PalettedChunk, TicketType, VoxelChunk, VoxelGenerator, VoxelMapConfig,
-    VoxelMapInstance, VoxelPlugin, WorldVoxel,
+    FlatGenerator, PalettedChunk, RuntimeShape, TicketType, VoxelChunk, VoxelGenerator,
+    VoxelMapConfig, VoxelMapInstance, VoxelPlugin, WorldVoxel,
 };
 
 fn test_app() -> App {
@@ -28,7 +28,10 @@ fn spawn_client_map(app: &mut App) -> Entity {
         .spawn((
             VoxelMapInstance::new(3, 16),
             config,
-            VoxelGenerator(Arc::new(FlatGenerator)),
+            VoxelGenerator(Arc::new(FlatGenerator {
+                chunk_size: 16,
+                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+            })),
             Transform::default(),
             MapInstanceId::Overworld,
         ))

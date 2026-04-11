@@ -55,7 +55,10 @@ fn spawn_overworld(commands: &mut Commands) -> Entity {
         .spawn((
             instance,
             config,
-            VoxelGenerator(Arc::new(FlatGenerator)),
+            VoxelGenerator(Arc::new(FlatGenerator {
+                chunk_size: 16,
+                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+            })),
             marker,
             PendingChunks::default(),
             Transform::default(),

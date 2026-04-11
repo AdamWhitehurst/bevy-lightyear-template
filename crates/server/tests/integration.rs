@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use ui::{ClientState, MapTransitionState};
 use voxel_map_engine::prelude::{
-    FlatGenerator, VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin,
+    FlatGenerator, RuntimeShape, VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin,
 };
 
 /// Simplified test stepper for crossbeam transport testing
@@ -849,7 +849,10 @@ fn register_overworld_on_server(stepper: &mut CrossbeamTestStepper) -> Entity {
         .spawn((
             VoxelMapInstance::new(3, 16),
             VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8)),
-            VoxelGenerator(Arc::new(FlatGenerator)),
+            VoxelGenerator(Arc::new(FlatGenerator {
+                chunk_size: 16,
+                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+            })),
             Transform::default(),
             MapInstanceId::Overworld,
         ))
@@ -1196,7 +1199,10 @@ fn server_and_client_spawn_matching_homebase_configs() {
         .spawn((
             VoxelMapInstance::new(3, 16),
             VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8)),
-            VoxelGenerator(Arc::new(FlatGenerator)),
+            VoxelGenerator(Arc::new(FlatGenerator {
+                chunk_size: 16,
+                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+            })),
             Transform::default(),
             MapInstanceId::Overworld,
         ))
@@ -1346,7 +1352,10 @@ fn test_voxel_edit_ack_received() {
         .spawn((
             instance,
             VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8)),
-            VoxelGenerator(Arc::new(FlatGenerator)),
+            VoxelGenerator(Arc::new(FlatGenerator {
+                chunk_size: 16,
+                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+            })),
             Transform::default(),
             MapInstanceId::Overworld,
         ))
@@ -1472,7 +1481,10 @@ fn test_server_pushes_chunks_without_request() {
         .spawn((
             instance,
             VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8)),
-            VoxelGenerator(Arc::new(FlatGenerator)),
+            VoxelGenerator(Arc::new(FlatGenerator {
+                chunk_size: 16,
+                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+            })),
             Transform::default(),
             MapInstanceId::Overworld,
         ))
@@ -1586,7 +1598,10 @@ fn test_server_sends_unload_column_when_out_of_range() {
         .spawn((
             instance,
             VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8)),
-            VoxelGenerator(Arc::new(FlatGenerator)),
+            VoxelGenerator(Arc::new(FlatGenerator {
+                chunk_size: 16,
+                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+            })),
             Transform::default(),
             MapInstanceId::Overworld,
         ))

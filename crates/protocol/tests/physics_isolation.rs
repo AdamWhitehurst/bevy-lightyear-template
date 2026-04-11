@@ -5,8 +5,8 @@ use bevy::prelude::*;
 use protocol::map::{attach_chunk_colliders, MapInstanceId, MapRegistry, VoxelChunk};
 use protocol::physics::MapCollisionHooks;
 use voxel_map_engine::prelude::{
-    ChunkTicket, FlatGenerator, TicketType, VoxelGenerator, VoxelMapConfig, VoxelMapInstance,
-    VoxelPlugin,
+    ChunkTicket, FlatGenerator, RuntimeShape, TicketType, VoxelGenerator, VoxelMapConfig,
+    VoxelMapInstance, VoxelPlugin,
 };
 
 fn test_app() -> App {
@@ -136,7 +136,10 @@ fn chunk_target_derived_from_map_registry() {
     app.insert_resource(voxel_map_engine::ChunkGenerationEnabled);
     app.init_resource::<MapRegistry>();
 
-    let generator = VoxelGenerator(Arc::new(FlatGenerator));
+    let generator = VoxelGenerator(Arc::new(FlatGenerator {
+        chunk_size: 16,
+        shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+    }));
     let map_a = app
         .world_mut()
         .spawn((
@@ -245,7 +248,10 @@ fn chunk_colliders_inherit_map_instance_id() {
         .spawn((
             VoxelMapInstance::new(5, 16),
             VoxelMapConfig::new(0, 0, 1, None, 5, 16, (-8, 8)),
-            VoxelGenerator(Arc::new(FlatGenerator)),
+            VoxelGenerator(Arc::new(FlatGenerator {
+                chunk_size: 16,
+                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+            })),
             Transform::default(),
             MapInstanceId::Overworld,
         ))

@@ -17,7 +17,10 @@ fn spawn_map(app: &mut App, spawning_distance: u32) -> Entity {
         .spawn((
             VoxelMapInstance::new(5, 16),
             VoxelMapConfig::new(0, 0, spawning_distance, None, 5, 16, (-8, 8)),
-            VoxelGenerator(std::sync::Arc::new(FlatGenerator)),
+            VoxelGenerator(std::sync::Arc::new(FlatGenerator {
+                chunk_size: 16,
+                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+            })),
             Transform::default(),
         ))
         .id()
@@ -119,7 +122,10 @@ fn bounded_map_respects_bounds() {
         .spawn((
             VoxelMapInstance::new(5, 16),
             VoxelMapConfig::new(0, 0, 5, Some(IVec3::new(2, 2, 2)), 5, 16, (-8, 8)),
-            VoxelGenerator(std::sync::Arc::new(FlatGenerator)),
+            VoxelGenerator(std::sync::Arc::new(FlatGenerator {
+                chunk_size: 16,
+                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+            })),
             Transform::default(),
         ))
         .id();

@@ -220,8 +220,11 @@ mod tests {
         use crate::terrain::FlatGenerator;
         use ndshape::RuntimeShape;
         use std::sync::Arc;
-        let generator = VoxelGenerator(Arc::new(FlatGenerator));
         let shape = RuntimeShape::<u32, 3>::new([18, 18, 18]);
+        let generator = VoxelGenerator(Arc::new(FlatGenerator {
+            chunk_size: 16,
+            shape: shape.clone(),
+        }));
 
         let voxel = evaluate_voxel_at(IVec3::new(0, -1, 0), &generator, 16, &shape);
         assert_eq!(voxel, WorldVoxel::Solid(0));

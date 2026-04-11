@@ -734,7 +734,13 @@ fn drain_gen_queue(
                     });
                     continue;
                 }
-                let height_map = build_surface_height_map(work.position, &chunk_data.voxels);
+                let height_map = build_surface_height_map(
+                    work.position,
+                    &chunk_data.voxels,
+                    instance.chunk_size,
+                    instance.padded_size,
+                    &instance.shape,
+                );
                 tracker.generating.insert(work.position);
                 spawn_features_task(
                     pending,

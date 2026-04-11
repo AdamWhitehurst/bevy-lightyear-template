@@ -14,7 +14,8 @@ use protocol::{
 use ui::MapTransitionState;
 use voxel_map_engine::prelude::{
     chunk_to_column, column_to_chunks, ChunkData, ChunkStatus, ChunkTicket, FlatGenerator,
-    VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
+    RuntimeShape, VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld,
+    WorldVoxel,
 };
 
 const RAYCAST_MAX_DISTANCE: f32 = 100.0;
@@ -102,7 +103,10 @@ fn spawn_overworld(mut commands: Commands, mut registry: ResMut<MapRegistry>) {
         .spawn((
             VoxelMapInstance::new(5, 16),
             config,
-            VoxelGenerator(Arc::new(FlatGenerator)),
+            VoxelGenerator(Arc::new(FlatGenerator {
+                chunk_size: 16,
+                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+            })),
             Transform::default(),
             MapInstanceId::Overworld,
         ))
@@ -500,9 +504,13 @@ fn despawn_all_maps_except(
 }
 
 fn generator_for_map(map_id: &MapInstanceId) -> VoxelGenerator {
+    let flat = || FlatGenerator {
+        chunk_size: 16,
+        shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+    };
     match map_id {
-        MapInstanceId::Overworld => VoxelGenerator(Arc::new(FlatGenerator)),
-        MapInstanceId::Homebase { .. } => VoxelGenerator(Arc::new(FlatGenerator)),
+        MapInstanceId::Overworld => VoxelGenerator(Arc::new(flat())),
+        MapInstanceId::Homebase { .. } => VoxelGenerator(Arc::new(flat())),
     }
 }
 

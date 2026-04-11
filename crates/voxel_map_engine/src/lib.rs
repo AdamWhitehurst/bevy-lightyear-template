@@ -15,6 +15,8 @@ pub mod terrain;
 pub mod ticket;
 pub mod types;
 
+pub use ndshape::{RuntimeShape, Shape};
+
 use bevy::prelude::*;
 
 /// Insert this resource to enable chunk generation systems (propagator,
@@ -72,5 +74,5 @@ pub mod prelude {
     pub use crate::terrain::*;
     pub use crate::ticket::*;
     pub use crate::types::*;
-    pub use crate::{ChunkGenerationEnabled, VoxelPlugin};
+    pub use crate::{ChunkGenerationEnabled, RuntimeShape, Shape, VoxelPlugin};
 }

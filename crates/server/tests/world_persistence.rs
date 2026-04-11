@@ -134,7 +134,7 @@ fn dirty_instance_save_then_reload() {
         (local.y + 1) as u32,
         (local.z + 1) as u32,
     ];
-    let index = PaddedChunkShape::linearize(padded) as usize;
+    let index = <PaddedChunkShape as ConstShape<3>>::linearize(padded) as usize;
     assert_eq!(loaded.voxels.get(index), WorldVoxel::Solid(99));
 }
 

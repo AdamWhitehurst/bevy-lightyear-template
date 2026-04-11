@@ -20,7 +20,10 @@ fn spawn_map(app: &mut App, spawning_distance: u32) -> Entity {
     spawn_map_with(
         app,
         spawning_distance,
-        VoxelGenerator(Arc::new(FlatGenerator)),
+        VoxelGenerator(Arc::new(FlatGenerator {
+            chunk_size: 16,
+            shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+        })),
     )
 }
 

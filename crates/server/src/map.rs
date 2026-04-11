@@ -21,8 +21,8 @@ use protocol::{
 use tracy_client::plot;
 use voxel_map_engine::lifecycle::{self, PendingSaves};
 use voxel_map_engine::prelude::{
-    build_generator, seed_from_id, ChunkTicket, VoxelGenerator, VoxelMapConfig, VoxelMapInstance,
-    VoxelPlugin, VoxelWorld, WorldVoxel,
+    build_generator, seed_from_id, ChunkTicket, RuntimeShape, VoxelGenerator, VoxelMapConfig,
+    VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
 };
 
 use crate::persistence::{
@@ -177,19 +177,30 @@ fn clone_terrain_components(
 /// Exclusive system: needs `&mut World` to pass `EntityRef` to `build_generator`,
 /// keeping that function extensible to new terrain components without signature changes.
 fn build_terrain_generators(world: &mut World) {
-    let mut query = world.query_filtered::<(Entity, &VoxelMapConfig), (
-        With<VoxelMapInstance>,
+    let mut query = world.query_filtered::<(
+        Entity,
+        &VoxelMapConfig,
+        &VoxelMapInstance,
+    ), (
         With<TerrainDefApplied>,
         Without<VoxelGenerator>,
     )>();
-    let entities: Vec<(Entity, u64)> = query
+    let entities: Vec<(Entity, u64, u32, u32, RuntimeShape<u32, 3>)> = query
         .iter(world)
-        .map(|(e, config)| (e, config.seed))
+        .map(|(e, config, instance)| {
+            (
+                e,
+                config.seed,
+                config.chunk_size,
+                config.padded_size,
+                instance.shape.clone(),
+            )
+        })
         .collect();
 
-    for (entity, seed) in entities {
+    for (entity, seed, chunk_size, padded_size, shape) in entities {
         let entity_ref = world.entity(entity);
-        let generator = build_generator(entity_ref, seed);
+        let generator = build_generator(entity_ref, seed, chunk_size, padded_size, shape);
         world.entity_mut(entity).insert(generator);
         trace!("Built terrain generator for map entity {entity:?}");
     }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use bevy::log::info_span;
 use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
-use ndshape::RuntimeShape;
+use ndshape::{RuntimeShape, Shape};
 
 use crate::config::{SurfaceHeightMap, VoxelGenerator, VoxelGeneratorImpl, WorldObjectSpawn};
 use crate::meshing::mesh_chunk_greedy;
@@ -177,34 +177,36 @@ pub fn spawn_mesh_task(
     pending.tasks.push(task);
 }
 
-/// Build a 16x16 surface height map from palettized chunk data.
+/// Build a padded surface height map from palettized chunk data.
 ///
 /// Expands the palette to a full voxel array, then scans each XZ column
-/// top-down for the highest solid voxel. Called on the main thread before
-/// dispatching the Features async task.
-pub fn build_surface_height_map(chunk_pos: IVec3, palette: &PalettedChunk) -> SurfaceHeightMap {
-    use crate::types::{CHUNK_SIZE, PaddedChunkShape};
-    use ndshape::ConstShape;
-
+/// top-down for the highest solid voxel. Iterates the full padded
+/// `0..padded_size` XZ footprint so the 1-voxel border is populated for
+/// chunk-edge slope checks. Called on the main thread before dispatching
+/// the Features async task.
+pub fn build_surface_height_map<S: Shape<3, Coord = u32>>(
+    chunk_pos: IVec3,
+    palette: &PalettedChunk,
+    chunk_size: u32,
+    padded_size: u32,
+    shape: &S,
+) -> SurfaceHeightMap {
     let voxels = palette.to_voxels();
-    let mut heights = [None; 256];
+    let mut map = SurfaceHeightMap::new(chunk_pos, padded_size);
 
-    for x in 0..CHUNK_SIZE {
-        for z in 0..CHUNK_SIZE {
-            let px = x + 1;
-            let pz = z + 1;
-            for py in (1..=CHUNK_SIZE).rev() {
-                let idx = PaddedChunkShape::linearize([px, py, pz]) as usize;
+    for px in 0..padded_size {
+        for pz in 0..padded_size {
+            for py in (1..=chunk_size).rev() {
+                let idx = shape.linearize([px, py, pz]) as usize;
                 if matches!(voxels[idx], WorldVoxel::Solid(_)) {
-                    let world_y = chunk_pos.y as f64 * CHUNK_SIZE as f64 + (py - 1) as f64 + 1.0;
-                    heights[(x * CHUNK_SIZE + z) as usize] = Some(world_y);
+                    let world_y = chunk_pos.y as f64 * chunk_size as f64 + (py - 1) as f64 + 1.0;
+                    map.set(px, pz, Some(world_y));
                     break;
                 }
             }
         }
     }
-
-    SurfaceHeightMap { chunk_pos, heights }
+    map
 }
 
 /// Generate terrain-only for a single chunk position.
@@ -230,7 +232,6 @@ fn generate_terrain(position: IVec3, generator: &dyn VoxelGeneratorImpl) -> Chun
 mod tests {
     use super::*;
     use crate::meshing::flat_terrain_voxels;
-    use crate::types::CHUNK_SIZE;
 
     fn padded_shape() -> RuntimeShape<u32, 3> {
         RuntimeShape::<u32, 3>::new([18, 18, 18])
@@ -242,13 +243,13 @@ mod tests {
         let chunk_pos = IVec3::ZERO;
         let voxels = flat_terrain_voxels(chunk_pos, 16, &shape);
         let palette = PalettedChunk::from_voxels(&voxels);
-        let map = build_surface_height_map(chunk_pos, &palette);
+        let map = build_surface_height_map(chunk_pos, &palette, 16, 18, &shape);
 
         assert_eq!(map.chunk_pos, chunk_pos);
         // flat_terrain_voxels places surface at y=0, so all columns should have height
-        for x in 0..CHUNK_SIZE {
-            for z in 0..CHUNK_SIZE {
-                let h = map.heights[(x * CHUNK_SIZE + z) as usize];
+        for x in 0..16u32 {
+            for z in 0..16u32 {
+                let h = map.at(x + 1, z + 1);
                 assert!(h.is_some(), "expected surface at ({x}, {z})");
             }
         }
@@ -260,12 +261,12 @@ mod tests {
         let chunk_pos = IVec3::new(0, 100, 0);
         let voxels = flat_terrain_voxels(chunk_pos, 16, &shape);
         let palette = PalettedChunk::from_voxels(&voxels);
-        let map = build_surface_height_map(chunk_pos, &palette);
+        let map = build_surface_height_map(chunk_pos, &palette, 16, 18, &shape);
 
         // chunk_pos.y=100 → world_y ~1600..1616, well above flat terrain surface
-        for x in 0..CHUNK_SIZE {
-            for z in 0..CHUNK_SIZE {
-                let h = map.heights[(x * CHUNK_SIZE + z) as usize];
+        for x in 0..16u32 {
+            for z in 0..16u32 {
+                let h = map.at(x + 1, z + 1);
                 assert!(
                     h.is_none(),
                     "expected no surface at ({x}, {z}) for sky chunk"
@@ -280,13 +281,13 @@ mod tests {
         let chunk_pos = IVec3::ZERO;
         let voxels = flat_terrain_voxels(chunk_pos, 16, &shape);
         let palette = PalettedChunk::from_voxels(&voxels);
-        let map = build_surface_height_map(chunk_pos, &palette);
+        let map = build_surface_height_map(chunk_pos, &palette, 16, 18, &shape);
 
         // All columns on flat terrain should have the same height
-        let first = map.heights[0].unwrap();
-        for x in 0..CHUNK_SIZE {
-            for z in 0..CHUNK_SIZE {
-                let h = map.heights[(x * CHUNK_SIZE + z) as usize].unwrap();
+        let first = map.at(1, 1).unwrap();
+        for x in 0..16u32 {
+            for z in 0..16u32 {
+                let h = map.at(x + 1, z + 1).unwrap();
                 assert_eq!(h, first, "height mismatch at ({x}, {z})");
             }
         }

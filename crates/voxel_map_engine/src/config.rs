@@ -11,11 +11,11 @@ use crate::types::WorldVoxel;
 /// Implementors produce terrain voxels and optionally place entity-based features.
 /// Each method corresponds to a pipeline stage.
 pub trait VoxelGeneratorImpl: Send + Sync {
-    /// Stage 1: Base terrain shape. Returns 18³ padded voxel array.
+    /// Stage 1: Base terrain shape. Returns a padded voxel array sized `padded_size³`.
     fn generate_terrain(&self, chunk_pos: IVec3) -> Vec<WorldVoxel>;
 
     /// Stage 2: Entity placement on terrain surface.
-    /// Receives a 16×16 surface height map (not raw voxels). Default: no features.
+    /// Receives a padded surface height map (not raw voxels). Default: no features.
     fn place_features(
         &self,
         _chunk_pos: IVec3,
@@ -36,11 +36,36 @@ pub struct WorldObjectSpawn {
     pub position: Vec3,
 }
 
-/// `CHUNK_SIZE` × `CHUNK_SIZE` surface height map built from PalettedChunk on the main thread.
-/// `heights[x * CHUNK_SIZE + z]` = world Y of highest solid voxel, or `None` if all air.
+/// Padded surface height map built from `PalettedChunk` on the main thread.
+///
+/// Indexed in padded space `[0, padded_size)²` — the 1-voxel border is populated
+/// so slope checks at chunk edges can read neighbor heights without clipping.
 pub struct SurfaceHeightMap {
     pub chunk_pos: IVec3,
-    pub heights: [Option<f64>; 256],
+    pub padded_size: u32,
+    pub heights: Box<[Option<f64>]>,
+}
+
+impl SurfaceHeightMap {
+    pub fn new(chunk_pos: IVec3, padded_size: u32) -> Self {
+        let len = (padded_size as usize) * (padded_size as usize);
+        Self {
+            chunk_pos,
+            padded_size,
+            heights: vec![None; len].into_boxed_slice(),
+        }
+    }
+
+    /// Look up height by padded XZ coordinate. `px`/`pz` must be in `0..padded_size`.
+    pub fn at(&self, px: u32, pz: u32) -> Option<f64> {
+        debug_assert!(px < self.padded_size && pz < self.padded_size);
+        self.heights[(px * self.padded_size + pz) as usize]
+    }
+
+    pub fn set(&mut self, px: u32, pz: u32, h: Option<f64>) {
+        debug_assert!(px < self.padded_size && pz < self.padded_size);
+        self.heights[(px * self.padded_size + pz) as usize] = h;
+    }
 }
 
 /// The chunk generation implementation for a map instance.

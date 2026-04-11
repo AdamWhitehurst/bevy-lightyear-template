@@ -712,10 +712,10 @@ for (entity, seed, chunk_size, padded_size, shape) in entities {
 ### Verification
 
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test -p voxel_map_engine` passes
-- [ ] No `CHUNK_SIZE` references in `terrain.rs`, `generation.rs`, `config.rs`
-- [ ] No `PaddedChunkShape` references in `terrain.rs`, `generation.rs`
+- [x] `cargo check-all` passes
+- [x] `cargo test -p voxel_map_engine` passes
+- [x] No `CHUNK_SIZE` references in `terrain.rs`, `generation.rs`, `config.rs`
+- [x] No `PaddedChunkShape` references in `terrain.rs`, `generation.rs`
 
 #### Manual
 - [ ] `cargo server` + `cargo client` — overworld generates terrain with baseline-like topology
