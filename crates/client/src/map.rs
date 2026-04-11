@@ -96,12 +96,12 @@ impl Plugin for ClientMapPlugin {
 pub struct OverworldMap(pub Entity);
 
 fn spawn_overworld(mut commands: Commands, mut registry: ResMut<MapRegistry>) {
-    let mut config = VoxelMapConfig::new(0, 0, 2, None, 5);
+    let mut config = VoxelMapConfig::new(0, 0, 2, None, 5, 16, (-8, 8));
     config.generates_chunks = false;
 
     let map = commands
         .spawn((
-            VoxelMapInstance::new(5),
+            VoxelMapInstance::new(5, 16),
             config,
             VoxelGenerator(Arc::new(FlatGenerator)),
             Transform::default(),
@@ -145,6 +145,11 @@ fn handle_chunk_data_sync(
     }
 
     for sync in incoming {
+        trace!(
+            "recv ChunkDataSync map={:?} chunk_size={}",
+            sync.map_id,
+            sync.chunk_size
+        );
         let Some(&map_entity) = registry.0.get(&sync.map_id) else {
             continue;
         };
@@ -401,7 +406,11 @@ pub fn handle_map_transition_start(
 ) {
     for mut receiver in &mut receivers {
         for transition in receiver.receive() {
-            trace!("Received MapTransitionStart for {:?}", transition.target);
+            trace!(
+                "recv MapTransitionStart target={:?} chunk_size={}",
+                transition.target,
+                transition.chunk_size
+            );
 
             let player = player_query
                 .single()
@@ -429,6 +438,8 @@ pub fn handle_map_transition_start(
                     &transition.target,
                     transition.seed,
                     transition.bounds,
+                    transition.chunk_size,
+                    transition.column_y_range,
                     generator,
                 );
                 registry.insert(transition.target.clone(), map_entity);
@@ -501,6 +512,8 @@ fn spawn_map_instance(
     map_id: &MapInstanceId,
     seed: u64,
     bounds: Option<IVec3>,
+    chunk_size: u32,
+    column_y_range: (i32, i32),
     generator: VoxelGenerator,
 ) -> Entity {
     let tree_height = match map_id {
@@ -509,12 +522,20 @@ fn spawn_map_instance(
     };
     let spawning_distance = bounds.map(|b| b.max_element().max(1) as u32).unwrap_or(10);
 
-    let mut config = VoxelMapConfig::new(seed, 0, spawning_distance, bounds, tree_height);
+    let mut config = VoxelMapConfig::new(
+        seed,
+        0,
+        spawning_distance,
+        bounds,
+        tree_height,
+        chunk_size,
+        column_y_range,
+    );
     config.generates_chunks = false;
 
     let entity = commands
         .spawn((
-            VoxelMapInstance::new(tree_height),
+            VoxelMapInstance::new(tree_height, chunk_size),
             config,
             generator,
             Transform::default(),

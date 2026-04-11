@@ -140,8 +140,8 @@ fn chunk_target_derived_from_map_registry() {
     let map_a = app
         .world_mut()
         .spawn((
-            VoxelMapInstance::new(5),
-            VoxelMapConfig::new(0, 0, 1, None, 5),
+            VoxelMapInstance::new(5, 16),
+            VoxelMapConfig::new(0, 0, 1, None, 5, 16, (-8, 8)),
             generator.clone(),
             Transform::default(),
         ))
@@ -149,8 +149,8 @@ fn chunk_target_derived_from_map_registry() {
     let map_b = app
         .world_mut()
         .spawn((
-            VoxelMapInstance::new(5),
-            VoxelMapConfig::new(1, 0, 1, None, 5),
+            VoxelMapInstance::new(5, 16),
+            VoxelMapConfig::new(1, 0, 1, None, 5, 16, (-8, 8)),
             generator,
             Transform::default(),
         ))
@@ -243,8 +243,8 @@ fn chunk_colliders_inherit_map_instance_id() {
     let map = app
         .world_mut()
         .spawn((
-            VoxelMapInstance::new(5),
-            VoxelMapConfig::new(0, 0, 1, None, 5),
+            VoxelMapInstance::new(5, 16),
+            VoxelMapConfig::new(0, 0, 1, None, 5, 16, (-8, 8)),
             VoxelGenerator(Arc::new(FlatGenerator)),
             Transform::default(),
             MapInstanceId::Overworld,

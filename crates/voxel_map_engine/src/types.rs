@@ -3,11 +3,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::palette::PalettedChunk;
 
-/// 16^3 voxel chunks with 1-voxel padding on each side -> 18^3 padded array
+/// Transitional: compile-time padded chunk shape (18^3) used by call sites not
+/// yet migrated to `VoxelMapInstance::shape`. Removed in Phase 6.
 pub type PaddedChunkShape = ndshape::ConstShape3u32<18, 18, 18>;
 
+/// Transitional baseline chunk edge length. Removed in Phase 6.
 pub const CHUNK_SIZE: u32 = 16;
-pub const PADDED_CHUNK_SIZE: u32 = 18;
 
 /// Voxel data stored per position
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect)]

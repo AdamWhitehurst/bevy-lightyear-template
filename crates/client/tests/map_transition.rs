@@ -31,8 +31,8 @@ fn spawn_map(app: &mut App) -> Entity {
     let map = app
         .world_mut()
         .spawn((
-            VoxelMapInstance::new(3),
-            VoxelMapConfig::new(0, 0, 1, None, 3),
+            VoxelMapInstance::new(3, 16),
+            VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8)),
             VoxelGenerator(Arc::new(FlatGenerator)),
             Transform::default(),
             MapInstanceId::Overworld,

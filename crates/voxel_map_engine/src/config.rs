@@ -64,6 +64,12 @@ pub struct VoxelMapConfig {
     /// Whether this map generates chunks locally. Server sets `true`, client sets `false`
     /// when chunks are streamed from the server.
     pub generates_chunks: bool,
+    /// Edge length of a chunk in voxels. Power of two, >= 8.
+    pub chunk_size: u32,
+    /// `chunk_size + 2` — precomputed so consumers don't re-derive.
+    pub padded_size: u32,
+    /// Inclusive-exclusive Y chunk range for column expansion: `(y_min, y_max)`.
+    pub column_y_range: (i32, i32),
 }
 
 impl VoxelMapConfig {
@@ -73,11 +79,21 @@ impl VoxelMapConfig {
         spawning_distance: u32,
         bounds: Option<IVec3>,
         tree_height: u32,
+        chunk_size: u32,
+        column_y_range: (i32, i32),
     ) -> Self {
         debug_assert!(tree_height > 0, "VoxelMapConfig: tree_height must be > 0");
         debug_assert!(
             spawning_distance > 0,
             "VoxelMapConfig: spawning_distance must be > 0"
+        );
+        debug_assert!(
+            chunk_size.is_power_of_two() && chunk_size >= 8,
+            "VoxelMapConfig: chunk_size must be a power of two >= 8, got {chunk_size}"
+        );
+        debug_assert!(
+            column_y_range.0 < column_y_range.1,
+            "VoxelMapConfig: column_y_range y_min must be < y_max"
         );
         if let Some(b) = bounds {
             debug_assert!(
@@ -93,6 +109,9 @@ impl VoxelMapConfig {
             tree_height,
             save_dir: None,
             generates_chunks: true,
+            chunk_size,
+            padded_size: chunk_size + 2,
+            column_y_range,
         }
     }
 }

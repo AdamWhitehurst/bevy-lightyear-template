@@ -21,12 +21,12 @@ fn test_app() -> App {
 }
 
 fn spawn_client_map(app: &mut App) -> Entity {
-    let mut config = VoxelMapConfig::new(0, 0, 1, None, 3);
+    let mut config = VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8));
     config.generates_chunks = false;
     let map = app
         .world_mut()
         .spawn((
-            VoxelMapInstance::new(3),
+            VoxelMapInstance::new(3, 16),
             config,
             VoxelGenerator(Arc::new(FlatGenerator)),
             Transform::default(),

@@ -106,12 +106,12 @@ pub fn spawn_overworld(
         _ => (DEFAULT_OVERWORLD_SEED, GENERATION_VERSION),
     };
 
-    let mut config = VoxelMapConfig::new(seed, generation_version, 2, None, 5);
+    let mut config = VoxelMapConfig::new(seed, generation_version, 2, None, 5, 16, (-8, 8));
     config.save_dir = Some(map_dir);
 
     let map = commands
         .spawn((
-            VoxelMapInstance::new(5),
+            VoxelMapInstance::new(5, 16),
             config,
             Transform::default(),
             MapInstanceId::Overworld,
@@ -813,6 +813,7 @@ fn send_unsent_chunks(
             sender.send::<ChunkChannel>(ChunkDataSync {
                 map_id: map_id.clone(),
                 chunk_pos,
+                chunk_size: instance.chunk_size,
                 data: chunk_data.voxels.clone(),
             });
         }
@@ -927,6 +928,8 @@ struct MapTransitionParams {
     seed: u64,
     generation_version: u32,
     bounds: Option<IVec3>,
+    chunk_size: u32,
+    column_y_range: (i32, i32),
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -994,6 +997,8 @@ fn execute_server_transition(
         generation_version: params.generation_version,
         bounds: params.bounds,
         spawn_position,
+        chunk_size: params.chunk_size,
+        column_y_range: params.column_y_range,
     });
 }
 
@@ -1015,6 +1020,8 @@ fn ensure_map_exists(
             seed: config.seed,
             generation_version: config.generation_version,
             bounds: config.bounds,
+            chunk_size: config.chunk_size,
+            column_y_range: config.column_y_range,
         };
         return (entity, params);
     }
@@ -1051,6 +1058,8 @@ fn spawn_homebase(
         seed: config.seed,
         generation_version: config.generation_version,
         bounds: config.bounds,
+        chunk_size: config.chunk_size,
+        column_y_range: config.column_y_range,
     };
     // No VoxelGenerator here — build_terrain_generators will add it next frame.
     let entity = commands

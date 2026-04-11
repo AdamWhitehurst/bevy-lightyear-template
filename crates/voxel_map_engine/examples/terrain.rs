@@ -14,13 +14,13 @@ fn main() {
 }
 
 fn setup(mut commands: Commands) {
-    let mut instance = VoxelMapInstance::new(5);
+    let mut instance = VoxelMapInstance::new(5, 16);
     instance.debug_colors = true;
 
     let map_entity = commands
         .spawn((
             instance,
-            VoxelMapConfig::new(0, 0, 5, None, 5),
+            VoxelMapConfig::new(0, 0, 5, None, 5, 16, (-8, 8)),
             VoxelGenerator(Arc::new(FlatGenerator)),
             PendingChunks::default(),
             Transform::default(),

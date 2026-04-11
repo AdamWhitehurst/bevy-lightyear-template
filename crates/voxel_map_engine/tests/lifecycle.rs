@@ -15,8 +15,8 @@ fn test_app() -> App {
 fn spawn_map(app: &mut App, spawning_distance: u32) -> Entity {
     app.world_mut()
         .spawn((
-            VoxelMapInstance::new(5),
-            VoxelMapConfig::new(0, 0, spawning_distance, None, 5),
+            VoxelMapInstance::new(5, 16),
+            VoxelMapConfig::new(0, 0, spawning_distance, None, 5, 16, (-8, 8)),
             VoxelGenerator(std::sync::Arc::new(FlatGenerator)),
             Transform::default(),
         ))
@@ -117,8 +117,8 @@ fn bounded_map_respects_bounds() {
     let map = app
         .world_mut()
         .spawn((
-            VoxelMapInstance::new(5),
-            VoxelMapConfig::new(0, 0, 5, Some(IVec3::new(2, 2, 2)), 5),
+            VoxelMapInstance::new(5, 16),
+            VoxelMapConfig::new(0, 0, 5, Some(IVec3::new(2, 2, 2)), 5, 16, (-8, 8)),
             VoxelGenerator(std::sync::Arc::new(FlatGenerator)),
             Transform::default(),
         ))

@@ -10,7 +10,7 @@ fn dirty_chunks_saved_on_debounce() {
     let dir = tempfile::tempdir().unwrap();
     let map_dir = dir.path().join("overworld");
 
-    let mut instance = VoxelMapInstance::new(5);
+    let mut instance = VoxelMapInstance::new(5, 16);
     let chunk_pos = IVec3::new(1, 0, 0);
     let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
     instance.insert_chunk_data(
@@ -31,7 +31,7 @@ fn clean_chunks_not_saved() {
     let dir = tempfile::tempdir().unwrap();
     let map_dir = dir.path().join("overworld");
 
-    let mut instance = VoxelMapInstance::new(5);
+    let mut instance = VoxelMapInstance::new(5, 16);
     let chunk_pos = IVec3::ZERO;
     let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
     instance.insert_chunk_data(
@@ -88,7 +88,7 @@ fn evicted_dirty_chunk_saved_before_removal() {
     let map_dir = dir.path().join("overworld");
 
     // Set up an instance with a dirty chunk
-    let mut instance = VoxelMapInstance::new(5);
+    let mut instance = VoxelMapInstance::new(5, 16);
     let chunk_pos = IVec3::new(3, 0, 0);
     let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
     voxels[50] = WorldVoxel::Solid(7);

@@ -27,8 +27,8 @@ fn spawn_map(app: &mut App, spawning_distance: u32) -> Entity {
 fn spawn_map_with(app: &mut App, spawning_distance: u32, generator: VoxelGenerator) -> Entity {
     app.world_mut()
         .spawn((
-            VoxelMapInstance::new(5),
-            VoxelMapConfig::new(0, 0, spawning_distance, None, 5),
+            VoxelMapInstance::new(5, 16),
+            VoxelMapConfig::new(0, 0, spawning_distance, None, 5, 16, (-8, 8)),
             generator,
             Transform::default(),
         ))

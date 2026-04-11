@@ -847,8 +847,8 @@ fn register_overworld_on_server(stepper: &mut CrossbeamTestStepper) -> Entity {
         .server_app
         .world_mut()
         .spawn((
-            VoxelMapInstance::new(3),
-            VoxelMapConfig::new(0, 0, 1, None, 3),
+            VoxelMapInstance::new(3, 16),
+            VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8)),
             VoxelGenerator(Arc::new(FlatGenerator)),
             Transform::default(),
             MapInstanceId::Overworld,
@@ -1194,8 +1194,8 @@ fn server_and_client_spawn_matching_homebase_configs() {
     let overworld = server_app
         .world_mut()
         .spawn((
-            VoxelMapInstance::new(3),
-            VoxelMapConfig::new(0, 0, 1, None, 3),
+            VoxelMapInstance::new(3, 16),
+            VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8)),
             VoxelGenerator(Arc::new(FlatGenerator)),
             Transform::default(),
             MapInstanceId::Overworld,
@@ -1326,7 +1326,7 @@ fn test_voxel_edit_ack_received() {
 
     // Spawn overworld with a loaded chunk at origin so the edit succeeds
     let chunk_pos = IVec3::ZERO;
-    let mut instance = VoxelMapInstance::new(3);
+    let mut instance = VoxelMapInstance::new(3, 16);
     instance.insert_chunk_data(
         chunk_pos,
         ChunkData {
@@ -1345,7 +1345,7 @@ fn test_voxel_edit_ack_received() {
         .world_mut()
         .spawn((
             instance,
-            VoxelMapConfig::new(0, 0, 1, None, 3),
+            VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8)),
             VoxelGenerator(Arc::new(FlatGenerator)),
             Transform::default(),
             MapInstanceId::Overworld,
@@ -1454,7 +1454,7 @@ fn test_server_pushes_chunks_without_request() {
     // Spawn overworld map with a chunk at IVec3::ZERO
     let chunk_pos = IVec3::ZERO;
     let chunk_voxels = PalettedChunk::SingleValue(WorldVoxel::Solid(1));
-    let mut instance = VoxelMapInstance::new(3);
+    let mut instance = VoxelMapInstance::new(3, 16);
     instance.insert_chunk_data(
         chunk_pos,
         ChunkData {
@@ -1471,7 +1471,7 @@ fn test_server_pushes_chunks_without_request() {
         .world_mut()
         .spawn((
             instance,
-            VoxelMapConfig::new(0, 0, 1, None, 3),
+            VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8)),
             VoxelGenerator(Arc::new(FlatGenerator)),
             Transform::default(),
             MapInstanceId::Overworld,
@@ -1568,7 +1568,7 @@ fn test_server_sends_unload_column_when_out_of_range() {
 
     // Spawn overworld with chunk at origin
     let chunk_pos = IVec3::ZERO;
-    let mut instance = VoxelMapInstance::new(3);
+    let mut instance = VoxelMapInstance::new(3, 16);
     instance.insert_chunk_data(
         chunk_pos,
         ChunkData {
@@ -1585,7 +1585,7 @@ fn test_server_sends_unload_column_when_out_of_range() {
         .world_mut()
         .spawn((
             instance,
-            VoxelMapConfig::new(0, 0, 1, None, 3),
+            VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8)),
             VoxelGenerator(Arc::new(FlatGenerator)),
             Transform::default(),
             MapInstanceId::Overworld,

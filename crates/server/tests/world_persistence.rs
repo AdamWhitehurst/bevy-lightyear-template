@@ -107,7 +107,7 @@ fn dirty_instance_save_then_reload() {
     let map_dir = tmp.path().join("overworld");
 
     // Create instance, make edits, save dirty chunks
-    let mut instance = VoxelMapInstance::new(5);
+    let mut instance = VoxelMapInstance::new(5, 16);
     let chunk_pos = IVec3::ZERO;
     let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
     instance.insert_chunk_data(
