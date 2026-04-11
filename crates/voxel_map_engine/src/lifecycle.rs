@@ -148,15 +148,23 @@ pub struct PendingSaves {
 /// A single chunk save request waiting in the queue.
 struct PendingSave {
     position: IVec3,
+    chunk_size: u32,
     data: crate::types::ChunkData,
     save_dir: PathBuf,
 }
 
 impl PendingSaves {
     /// Enqueue a chunk for async saving.
-    pub fn enqueue(&mut self, position: IVec3, data: crate::types::ChunkData, save_dir: PathBuf) {
+    pub fn enqueue(
+        &mut self,
+        position: IVec3,
+        chunk_size: u32,
+        data: crate::types::ChunkData,
+        save_dir: PathBuf,
+    ) {
         self.queue.push_back(PendingSave {
             position,
+            chunk_size,
             data,
             save_dir,
         });
@@ -533,6 +541,7 @@ fn remove_column_chunks(
                 if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
                     pending_saves.queue.push_back(PendingSave {
                         position: chunk_pos,
+                        chunk_size: instance.chunk_size,
                         data: chunk_data.clone(),
                         save_dir: dir.to_path_buf(),
                     });
@@ -564,9 +573,12 @@ pub fn drain_pending_saves(mut map_query: Query<&mut PendingSaves>) {
         {
             let save = pending.queue.pop_front().unwrap();
             let task = pool.spawn(async move {
-                if let Err(e) =
-                    crate::persistence::save_chunk(&save.save_dir, save.position, &save.data)
-                {
+                if let Err(e) = crate::persistence::save_chunk(
+                    &save.save_dir,
+                    save.position,
+                    save.chunk_size,
+                    &save.data,
+                ) {
                     error!("Failed to save chunk at {:?}: {e}", save.position);
                 }
             });
@@ -711,6 +723,7 @@ fn drain_gen_queue(
                         std::mem::take(&mut terrain_batch),
                         generator,
                         config.save_dir.clone(),
+                        instance.chunk_size,
                         instance.shape.clone(),
                     );
                     terrain_batch = Vec::with_capacity(GEN_BATCH_SIZE);
@@ -778,6 +791,7 @@ fn drain_gen_queue(
             terrain_batch,
             generator,
             config.save_dir.clone(),
+            instance.chunk_size,
             instance.shape.clone(),
         );
     }

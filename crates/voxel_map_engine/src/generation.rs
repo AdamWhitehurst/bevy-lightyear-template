@@ -45,6 +45,7 @@ pub fn spawn_terrain_batch(
     positions: Vec<IVec3>,
     generator: &VoxelGenerator,
     save_dir: Option<PathBuf>,
+    chunk_size: u32,
     shape: RuntimeShape<u32, 3>,
 ) {
     let generator = Arc::clone(&generator.0);
@@ -56,7 +57,7 @@ pub fn spawn_terrain_batch(
             .into_iter()
             .map(|pos| {
                 if let Some(ref dir) = save_dir {
-                    match crate::persistence::load_chunk(dir, pos) {
+                    match crate::persistence::load_chunk(dir, pos, chunk_size) {
                         Ok(Some(chunk_data)) => {
                             let mesh = if chunk_data.fill_type == FillType::Empty {
                                 None

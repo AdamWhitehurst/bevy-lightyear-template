@@ -846,9 +846,9 @@ fn load_chunk_with_mismatched_chunk_size_errors() {
 ### Verification
 
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test -p voxel_map_engine` passes
-- [ ] `cargo test -p server` passes (including the new mismatch test)
+- [x] `cargo check-all` passes
+- [x] `cargo test -p voxel_map_engine` passes
+- [x] `cargo test -p server` passes (including the new mismatch test)
 
 #### Manual
 - [ ] Delete `assets/sprites/humanoid/worlds/overworld/terrain/`

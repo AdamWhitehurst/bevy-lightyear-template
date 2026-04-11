@@ -8,13 +8,17 @@ use serde::{Deserialize, Serialize};
 use crate::config::WorldObjectSpawn;
 use crate::types::ChunkData;
 
-const CHUNK_SAVE_VERSION: u32 = 3;
+const CHUNK_SAVE_VERSION: u32 = 4;
 const ZSTD_COMPRESSION_LEVEL: i32 = 3;
 
 /// Versioned envelope wrapping chunk data on disk.
+///
+/// `chunk_size` records the map's edge length at save time so load-time
+/// validation can reject data authored under a different configuration.
 #[derive(Serialize, Deserialize)]
 struct ChunkFileEnvelope {
     version: u32,
+    chunk_size: u32,
     data: ChunkData,
 }
 
@@ -27,13 +31,19 @@ pub fn chunk_file_path(map_dir: &Path, chunk_pos: IVec3) -> PathBuf {
 }
 
 /// Save chunk data to a compressed file. Uses atomic write via tmp+rename.
-pub fn save_chunk(map_dir: &Path, chunk_pos: IVec3, data: &ChunkData) -> Result<(), String> {
+pub fn save_chunk(
+    map_dir: &Path,
+    chunk_pos: IVec3,
+    chunk_size: u32,
+    data: &ChunkData,
+) -> Result<(), String> {
     let path = chunk_file_path(map_dir, chunk_pos);
     fs::create_dir_all(path.parent().expect("chunk path has parent"))
         .map_err(|e| format!("mkdir terrain: {e}"))?;
 
     let envelope = ChunkFileEnvelope {
         version: CHUNK_SAVE_VERSION,
+        chunk_size,
         data: data.clone(),
     };
     let bytes = bincode::serialize(&envelope).map_err(|e| format!("serialize chunk: {e}"))?;
@@ -51,8 +61,13 @@ pub fn save_chunk(map_dir: &Path, chunk_pos: IVec3, data: &ChunkData) -> Result<
     Ok(())
 }
 
-/// Load chunk data from disk. Returns `None` if the file does not exist.
-pub fn load_chunk(map_dir: &Path, chunk_pos: IVec3) -> Result<Option<ChunkData>, String> {
+/// Load chunk data from disk, validating the envelope's `chunk_size` against
+/// the caller's expected value. Returns `None` if the file does not exist.
+pub fn load_chunk(
+    map_dir: &Path,
+    chunk_pos: IVec3,
+    expected_chunk_size: u32,
+) -> Result<Option<ChunkData>, String> {
     let path = chunk_file_path(map_dir, chunk_pos);
     if !path.exists() {
         return Ok(None);
@@ -72,6 +87,13 @@ pub fn load_chunk(map_dir: &Path, chunk_pos: IVec3) -> Result<Option<ChunkData>,
         return Err(format!(
             "chunk version mismatch: expected {CHUNK_SAVE_VERSION}, got {}",
             envelope.version
+        ));
+    }
+
+    if envelope.chunk_size != expected_chunk_size {
+        return Err(format!(
+            "chunk_size mismatch at {chunk_pos:?}: expected {expected_chunk_size}, got {}",
+            envelope.chunk_size
         ));
     }
 
@@ -208,8 +230,8 @@ mod tests {
         voxels[100] = WorldVoxel::Solid(5);
         let chunk = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
 
-        save_chunk(dir.path(), pos, &chunk).unwrap();
-        let loaded = load_chunk(dir.path(), pos)
+        save_chunk(dir.path(), pos, 16, &chunk).unwrap();
+        let loaded = load_chunk(dir.path(), pos, 16)
             .unwrap()
             .expect("chunk should exist");
         assert_eq!(loaded.voxels.to_voxels(), chunk.voxels.to_voxels());
@@ -218,7 +240,7 @@ mod tests {
     #[test]
     fn load_nonexistent_chunk_returns_none() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(load_chunk(dir.path(), IVec3::ZERO).unwrap().is_none());
+        assert!(load_chunk(dir.path(), IVec3::ZERO, 16).unwrap().is_none());
     }
 
     #[test]
@@ -229,6 +251,7 @@ mod tests {
         save_chunk(
             &map_dir,
             IVec3::ZERO,
+            16,
             &ChunkData::from_voxels(&voxels, ChunkStatus::Full),
         )
         .unwrap();
@@ -241,7 +264,7 @@ mod tests {
         let path = chunk_file_path(dir.path(), IVec3::ZERO);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, b"not valid data").unwrap();
-        assert!(load_chunk(dir.path(), IVec3::ZERO).is_err());
+        assert!(load_chunk(dir.path(), IVec3::ZERO, 16).is_err());
     }
 
     #[test]
@@ -286,7 +309,7 @@ mod tests {
         let chunk = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
         let positions = [IVec3::new(0, 0, 0), IVec3::new(1, -1, 2)];
         for &pos in &positions {
-            save_chunk(dir.path(), pos, &chunk).unwrap();
+            save_chunk(dir.path(), pos, 16, &chunk).unwrap();
         }
         let mut found = list_saved_chunks(dir.path()).unwrap();
         found.sort_by_key(|p| (p.x, p.y, p.z));
@@ -302,6 +325,7 @@ mod tests {
         save_chunk(
             dir.path(),
             IVec3::ZERO,
+            16,
             &ChunkData::from_voxels(&voxels, ChunkStatus::Full),
         )
         .unwrap();
@@ -327,12 +351,13 @@ mod tests {
             voxels[i] = WorldVoxel::Solid((i % 5) as u8);
         }
         let chunk = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
-        save_chunk(dir.path(), IVec3::ZERO, &chunk).unwrap();
+        save_chunk(dir.path(), IVec3::ZERO, 16, &chunk).unwrap();
 
         let path = chunk_file_path(dir.path(), IVec3::ZERO);
         let compressed_size = fs::metadata(&path).unwrap().len();
         let raw_size = bincode::serialize(&ChunkFileEnvelope {
             version: CHUNK_SAVE_VERSION,
+            chunk_size: 16,
             data: chunk,
         })
         .unwrap()

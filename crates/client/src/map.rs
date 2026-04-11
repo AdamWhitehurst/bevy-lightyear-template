@@ -148,17 +148,20 @@ fn handle_chunk_data_sync(
     }
 
     for sync in incoming {
-        trace!(
-            "recv ChunkDataSync map={:?} chunk_size={}",
-            sync.map_id,
-            sync.chunk_size
-        );
         let Some(&map_entity) = registry.0.get(&sync.map_id) else {
             continue;
         };
         let Ok(mut instance) = map_query.get_mut(map_entity) else {
             continue;
         };
+
+        if sync.chunk_size != instance.chunk_size {
+            error!(
+                "ChunkDataSync chunk_size mismatch for {:?}: server={}, client={}",
+                sync.map_id, sync.chunk_size, instance.chunk_size
+            );
+            continue;
+        }
 
         let chunk_data = ChunkData::from_voxels(&sync.data.to_voxels(), ChunkStatus::Full);
 

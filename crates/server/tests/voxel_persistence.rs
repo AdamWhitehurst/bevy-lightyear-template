@@ -56,7 +56,7 @@ fn terrain_persists_across_save_load() {
         let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
         voxels[100] = WorldVoxel::Solid(42);
         let chunk_data = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
-        chunk_persist::save_chunk(&map_dir, IVec3::ZERO, &chunk_data).unwrap();
+        chunk_persist::save_chunk(&map_dir, IVec3::ZERO, 16, &chunk_data).unwrap();
 
         let meta = MapMeta {
             version: 1,
@@ -69,7 +69,7 @@ fn terrain_persists_across_save_load() {
 
     // Load and verify
     {
-        let loaded = chunk_persist::load_chunk(&map_dir, IVec3::ZERO)
+        let loaded = chunk_persist::load_chunk(&map_dir, IVec3::ZERO, 16)
             .unwrap()
             .expect("chunk should exist");
         let loaded_voxels = loaded.voxels.to_voxels();
@@ -107,7 +107,7 @@ fn evicted_dirty_chunk_saved_before_removal() {
     instance.remove_chunk_data(chunk_pos);
 
     // Verify chunk was persisted before removal
-    let loaded = chunk_persist::load_chunk(&map_dir, chunk_pos)
+    let loaded = chunk_persist::load_chunk(&map_dir, chunk_pos, 16)
         .unwrap()
         .expect("evicted dirty chunk should have been saved");
     let loaded_voxels = loaded.voxels.to_voxels();
@@ -119,4 +119,22 @@ fn evicted_dirty_chunk_saved_before_removal() {
         .contains_key(&chunk_to_column(chunk_pos)));
     assert!(instance.get_chunk_data(chunk_pos).is_none());
     assert!(instance.dirty_chunks.is_empty());
+}
+
+#[test]
+fn load_chunk_with_mismatched_chunk_size_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let map_dir = dir.path().join("overworld");
+    let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+    let chunk = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
+
+    chunk_persist::save_chunk(&map_dir, IVec3::ZERO, 16, &chunk).unwrap();
+
+    let err = chunk_persist::load_chunk(&map_dir, IVec3::ZERO, 32)
+        .err()
+        .expect("load with wrong chunk_size must error");
+    assert!(
+        err.contains("chunk_size mismatch"),
+        "expected chunk_size mismatch error, got {err}"
+    );
 }

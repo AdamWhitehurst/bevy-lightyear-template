@@ -22,7 +22,7 @@ fn terrain_persists_across_server_restart() {
         let chunk_data = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
         let chunk_pos = IVec3::new(0, 0, 0);
 
-        chunk_persist::save_chunk(&map_dir, chunk_pos, &chunk_data).expect("save chunk");
+        chunk_persist::save_chunk(&map_dir, chunk_pos, 16, &chunk_data).expect("save chunk");
 
         let meta = MapMeta {
             version: 1,
@@ -36,7 +36,7 @@ fn terrain_persists_across_server_restart() {
     // Second run: verify data loads correctly
     {
         let chunk_pos = IVec3::new(0, 0, 0);
-        let loaded = chunk_persist::load_chunk(&map_dir, chunk_pos)
+        let loaded = chunk_persist::load_chunk(&map_dir, chunk_pos, 16)
             .expect("load chunk")
             .expect("chunk should exist");
 
@@ -68,12 +68,12 @@ fn multiple_chunks_persist_independently() {
         let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
         voxels[i + 10] = WorldVoxel::Solid(i as u8 + 1);
         let chunk_data = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
-        chunk_persist::save_chunk(&map_dir, pos, &chunk_data).unwrap();
+        chunk_persist::save_chunk(&map_dir, pos, 16, &chunk_data).unwrap();
     }
 
     // Verify each loads independently with correct data
     for (i, &pos) in positions.iter().enumerate() {
-        let loaded = chunk_persist::load_chunk(&map_dir, pos)
+        let loaded = chunk_persist::load_chunk(&map_dir, pos, 16)
             .unwrap()
             .expect("chunk should exist");
         let voxels = loaded.voxels.to_voxels();
@@ -125,7 +125,7 @@ fn dirty_instance_save_then_reload() {
     assert!(instance.dirty_chunks.is_empty());
 
     // Reload from disk and verify the edit persisted
-    let loaded = chunk_persist::load_chunk(&map_dir, chunk_pos)
+    let loaded = chunk_persist::load_chunk(&map_dir, chunk_pos, 16)
         .unwrap()
         .expect("chunk should exist on disk");
     let local = IVec3::new(5, 5, 5);
@@ -157,6 +157,7 @@ fn meta_and_chunks_coexist_in_map_directory() {
     chunk_persist::save_chunk(
         &map_dir,
         IVec3::ZERO,
+        16,
         &ChunkData::from_voxels(&voxels, ChunkStatus::Full),
     )
     .unwrap();
@@ -168,7 +169,7 @@ fn meta_and_chunks_coexist_in_map_directory() {
     let loaded_meta = load_map_meta(&map_dir).unwrap().expect("meta exists");
     assert_eq!(loaded_meta.seed, 42);
 
-    let loaded_chunk = chunk_persist::load_chunk(&map_dir, IVec3::ZERO)
+    let loaded_chunk = chunk_persist::load_chunk(&map_dir, IVec3::ZERO, 16)
         .unwrap()
         .expect("chunk exists");
     assert_eq!(loaded_chunk.voxels.get(0), WorldVoxel::Solid(1));
@@ -185,6 +186,7 @@ fn multiple_maps_save_independently() {
     chunk_persist::save_chunk(
         &ow_dir,
         IVec3::ZERO,
+        16,
         &ChunkData::from_voxels(&ow_voxels, ChunkStatus::Full),
     )
     .unwrap();
@@ -194,14 +196,15 @@ fn multiple_maps_save_independently() {
     chunk_persist::save_chunk(
         &hb_dir,
         IVec3::ZERO,
+        16,
         &ChunkData::from_voxels(&hb_voxels, ChunkStatus::Full),
     )
     .unwrap();
 
-    let ow_loaded = chunk_persist::load_chunk(&ow_dir, IVec3::ZERO)
+    let ow_loaded = chunk_persist::load_chunk(&ow_dir, IVec3::ZERO, 16)
         .unwrap()
         .unwrap();
-    let hb_loaded = chunk_persist::load_chunk(&hb_dir, IVec3::ZERO)
+    let hb_loaded = chunk_persist::load_chunk(&hb_dir, IVec3::ZERO, 16)
         .unwrap()
         .unwrap();
     assert_eq!(ow_loaded.voxels.get(0), WorldVoxel::Solid(1));
@@ -341,6 +344,7 @@ fn entities_and_chunks_coexist_in_map_directory() {
     chunk_persist::save_chunk(
         &map_dir,
         IVec3::ZERO,
+        16,
         &ChunkData::from_voxels(&voxels, ChunkStatus::Full),
     )
     .unwrap();
@@ -365,7 +369,7 @@ fn entities_and_chunks_coexist_in_map_directory() {
     let loaded_meta = load_map_meta(&map_dir).unwrap().expect("meta exists");
     assert_eq!(loaded_meta.seed, 42);
 
-    let loaded_chunk = chunk_persist::load_chunk(&map_dir, IVec3::ZERO)
+    let loaded_chunk = chunk_persist::load_chunk(&map_dir, IVec3::ZERO, 16)
         .unwrap()
         .expect("chunk exists");
     assert_eq!(loaded_chunk.voxels.get(0), WorldVoxel::Solid(1));

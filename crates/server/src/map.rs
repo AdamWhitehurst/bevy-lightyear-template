@@ -275,10 +275,16 @@ pub fn enqueue_dirty_chunks(
     pending_saves: &mut PendingSaves,
     map_dir: &Path,
 ) {
+    let chunk_size = instance.chunk_size;
     let dirty: Vec<IVec3> = instance.dirty_chunks.drain().collect();
     for chunk_pos in dirty {
         if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
-            pending_saves.enqueue(chunk_pos, chunk_data.clone(), map_dir.to_path_buf());
+            pending_saves.enqueue(
+                chunk_pos,
+                chunk_size,
+                chunk_data.clone(),
+                map_dir.to_path_buf(),
+            );
         }
     }
 }
@@ -286,10 +292,11 @@ pub fn enqueue_dirty_chunks(
 /// Synchronously flush all dirty chunks to disk. Used only during shutdown
 /// where we must guarantee persistence before the process exits.
 pub fn save_dirty_chunks_sync(instance: &mut VoxelMapInstance, map_dir: &Path) {
+    let chunk_size = instance.chunk_size;
     let dirty: Vec<IVec3> = instance.dirty_chunks.drain().collect();
     for chunk_pos in dirty {
         if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
-            if let Err(e) = chunk_persist::save_chunk(map_dir, chunk_pos, chunk_data) {
+            if let Err(e) = chunk_persist::save_chunk(map_dir, chunk_pos, chunk_size, chunk_data) {
                 error!("Failed to save chunk at {chunk_pos}: {e}");
                 instance.dirty_chunks.insert(chunk_pos);
             }
