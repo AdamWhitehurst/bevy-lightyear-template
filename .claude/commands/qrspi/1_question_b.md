@@ -6,7 +6,7 @@ argument-hint: "<ticket file, issue URL, or task description>"
 
 # Question -- Decompose the Task
 
-Transform a task description into 3-12 specific, neutral research questions. These questions drive the next phase (Research) which runs in a **separate context with no knowledge of what is being built**.
+Transform a task description into around 3-15 specific, neutral research questions. These questions drive the next phase (Research) which runs in a **separate context with no knowledge of what is being built**.
 
 ## Input
 
@@ -21,7 +21,7 @@ The user provides a task description, ticket file path, or issue reference.
 
 3. **Light Web Research**: Spawn a **web-search-researcher** agent to find possible packages, patterns, best practices, prior art, and/or expert experience to help the user with task.
 
-4. **Decompose into 3-12 research questions**:
+4. **Decompose into around 3-15 research questions**:
    - Each question should cause a researcher to explore a different relevant area of the codebase
    - Questions must be **neutral** — they ask what exists and how it works, never how to build something
    - Prefer "trace the flow" questions that reveal architecture over yes/no questions
@@ -56,6 +56,7 @@ The user provides a task description, ticket file path, or issue reference.
    ```
 
 9. **Present questions to the user** and wait for approval or edits before finalizing.
+  - While reviewing questions with user, try to rephrase questions with additional details rather than add more, similar questions
 
 ## Output
 
@@ -70,3 +71,5 @@ The user provides a task description, ticket file path, or issue reference.
 - The researcher who reads these questions should have no idea what feature is being built
 - Each question should target a different area or concern
 - If the task is too simple for 3 questions, tell the user — QRSPI is for complex tasks
+- Try to keep the question count low by rephrasing questions with added details instead of tacking on additional questions
+- Aim for 3-15 questions but 15 is not a hard-cap
