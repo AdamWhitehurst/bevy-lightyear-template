@@ -523,7 +523,33 @@ pub fn build_generator(
     let moisture = entity.get::<MoistureMap>().cloned();
     let biomes = entity.get::<BiomeRules>().cloned();
     let placement = entity.get::<PlacementRules>().cloned();
+    build_generator_from_components(
+        seed,
+        chunk_size,
+        padded_size,
+        shape,
+        height,
+        moisture,
+        biomes,
+        placement,
+    )
+}
 
+/// Build a [`VoxelGenerator`] from terrain components passed directly.
+///
+/// Used by spawn functions that read the def before components have been
+/// inserted onto the entity (inline construction during map spawn).
+/// If no `HeightMap` is present, falls back to [`FlatGenerator`].
+pub fn build_generator_from_components(
+    seed: u64,
+    chunk_size: u32,
+    padded_size: u32,
+    shape: RuntimeShape<u32, 3>,
+    height: Option<HeightMap>,
+    moisture: Option<MoistureMap>,
+    biomes: Option<BiomeRules>,
+    placement: Option<PlacementRules>,
+) -> VoxelGenerator {
     debug_assert!(
         moisture.is_none() || height.is_some(),
         "MoistureMap without HeightMap is meaningless"

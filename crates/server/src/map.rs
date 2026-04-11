@@ -21,8 +21,9 @@ use protocol::{
 use tracy_client::plot;
 use voxel_map_engine::lifecycle::{self, PendingSaves};
 use voxel_map_engine::prelude::{
-    build_generator, seed_from_id, ChunkTicket, RuntimeShape, VoxelGenerator, VoxelMapConfig,
-    VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
+    build_generator, build_generator_from_components, seed_from_id, BiomeRules, ChunkTicket,
+    HeightMap, MapDimensions, MoistureMap, PlacementRules, RuntimeShape, VoxelGenerator,
+    VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
 };
 
 use crate::persistence::{
@@ -30,9 +31,10 @@ use crate::persistence::{
     WorldSavePath,
 };
 use protocol::map::{MapSaveTarget, SavedEntity, SavedEntityKind};
+use protocol::terrain::TerrainDef;
 use protocol::vox_model::VoxModelRegistry;
 use protocol::world_object::{apply_object_components, WorldObjectDefRegistry};
-use protocol::{RespawnPoint, TerrainDefRegistry};
+use protocol::{AppState, RespawnPoint, TerrainDefRegistry};
 use voxel_map_engine::persistence as chunk_persist;
 
 /// Plugin managing server-side voxel map functionality.
@@ -98,6 +100,8 @@ pub fn spawn_overworld(
     mut commands: Commands,
     mut registry: ResMut<MapRegistry>,
     save_path: Res<WorldSavePath>,
+    terrain_registry: Res<TerrainDefRegistry>,
+    type_registry: Res<AppTypeRegistry>,
 ) {
     let map_dir = map_save_dir(&save_path.0, &MapInstanceId::Overworld);
 
@@ -106,23 +110,109 @@ pub fn spawn_overworld(
         _ => (DEFAULT_OVERWORLD_SEED, GENERATION_VERSION),
     };
 
-    let mut config = VoxelMapConfig::new(seed, generation_version, 2, None, 5, 64, (-2, 2));
+    let terrain_def = terrain_registry
+        .get("overworld")
+        .expect("overworld.terrain.ron must be loaded by AppState::Ready");
+    let dimensions = terrain_def
+        .map_dimensions()
+        .expect("overworld.terrain.ron must contain MapDimensions");
+
+    let mut config = VoxelMapConfig::new(
+        seed,
+        generation_version,
+        2,
+        dimensions.bounds,
+        dimensions.tree_height,
+        dimensions.chunk_size,
+        dimensions.column_y_range,
+    );
     config.save_dir = Some(map_dir);
+
+    let instance = VoxelMapInstance::new(dimensions.tree_height, dimensions.chunk_size);
+    let shape = instance.shape.clone();
 
     let map = commands
         .spawn((
-            VoxelMapInstance::new(5, 64),
+            instance,
             config,
+            dimensions.clone(),
             Transform::default(),
             MapInstanceId::Overworld,
+            TerrainDefApplied,
         ))
         .id();
 
-    // Terrain components applied later by apply_terrain_defs (when TerrainDefRegistry is loaded).
-    // VoxelGenerator is then built by build_terrain_generators.
+    let components = clone_terrain_components_excluding_dimensions(terrain_def);
+    apply_object_components(&mut commands, map, components, type_registry.0.clone());
+
+    let generator = build_generator_from_def(
+        terrain_def,
+        seed,
+        dimensions.chunk_size,
+        dimensions.padded_size(),
+        shape,
+    );
+    commands.entity(map).insert(generator);
 
     commands.insert_resource(OverworldMap(map));
     registry.insert(MapInstanceId::Overworld, map);
+}
+
+/// Clone terrain definition components via `reflect_clone`, excluding `MapDimensions`.
+///
+/// `MapDimensions` is inserted directly on the map entity at spawn time;
+/// skipping it here avoids double-insertion via `apply_object_components`.
+fn clone_terrain_components_excluding_dimensions(
+    def: &TerrainDef,
+) -> Vec<Box<dyn bevy::reflect::PartialReflect>> {
+    def.components
+        .iter()
+        .filter(|c| c.try_downcast_ref::<MapDimensions>().is_none())
+        .map(|c| {
+            c.reflect_clone()
+                .expect("terrain component must be cloneable")
+                .into_partial_reflect()
+        })
+        .collect()
+}
+
+/// Build a [`VoxelGenerator`] directly from a [`TerrainDef`].
+///
+/// Reads terrain components from the def rather than an `EntityRef`, so this
+/// works during inline spawn (before components have been flushed onto the entity).
+fn build_generator_from_def(
+    def: &TerrainDef,
+    seed: u64,
+    chunk_size: u32,
+    padded_size: u32,
+    shape: RuntimeShape<u32, 3>,
+) -> VoxelGenerator {
+    let height = def
+        .components
+        .iter()
+        .find_map(|c| c.try_downcast_ref::<HeightMap>().cloned());
+    let moisture = def
+        .components
+        .iter()
+        .find_map(|c| c.try_downcast_ref::<MoistureMap>().cloned());
+    let biomes = def
+        .components
+        .iter()
+        .find_map(|c| c.try_downcast_ref::<BiomeRules>().cloned());
+    let placement = def
+        .components
+        .iter()
+        .find_map(|c| c.try_downcast_ref::<PlacementRules>().cloned());
+    build_generator_from_components(
+        seed,
+        chunk_size,
+        padded_size,
+        shape,
+        height,
+        moisture,
+        biomes,
+        placement,
+    )
 }
 
 /// Marker indicating terrain definition components have been applied to this map entity.
@@ -457,7 +547,10 @@ impl Plugin for ServerMapPlugin {
             .init_resource::<WorldDirtyState>()
             .init_resource::<PendingVoxelBroadcasts>()
             .init_resource::<WorldSavePath>()
-            .add_systems(Startup, (spawn_overworld, load_startup_entities).chain())
+            .add_systems(
+                OnEnter(AppState::Ready),
+                (spawn_overworld, load_startup_entities).chain(),
+            )
             .add_systems(
                 Update,
                 (

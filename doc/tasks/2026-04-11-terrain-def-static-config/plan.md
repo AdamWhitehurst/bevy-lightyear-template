@@ -288,8 +288,8 @@ Keep `VoxelMapInstance::overworld`/`homebase`/`arena` convenience constructors f
 ### Verification
 
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test -p server` passes (integration tests may need adjustment — see Phase 6)
+- [x] `cargo check-all` passes
+- [x] `cargo test -p server` passes (integration tests may need adjustment — see Phase 6)
 
 #### Manual
 - [ ] `cargo server` launches, overworld spawns after asset load (check trace logs for `"Applied terrain def 'overworld'"` or equivalent)
