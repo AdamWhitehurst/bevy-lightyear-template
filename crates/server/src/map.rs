@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use avian3d::prelude::{ColliderDisabled, Position, RigidBodyDisabled};
 use bevy::app::AppExit;
@@ -26,10 +27,11 @@ use voxel_map_engine::prelude::{
     VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
 };
 
+use crate::persistence::fs_map_meta::FsMapMetaStore;
 use crate::persistence::{
-    load_entities, load_map_meta, map_save_dir, save_entities, save_map_meta, MapMeta,
-    WorldSavePath,
+    load_entities, load_map_meta, map_save_dir, save_entities, MapMeta, WorldSavePath,
 };
+use persistence::{PendingStoreOps, StoreBackend};
 use protocol::map::{MapSaveTarget, SavedEntity, SavedEntityKind};
 use protocol::terrain::TerrainDef;
 use protocol::vox_model::VoxModelRegistry;
@@ -96,20 +98,117 @@ pub struct PendingVoxelBroadcasts {
     pub per_chunk: HashMap<IVec3, Vec<PendingVoxelEdit>>,
 }
 
-pub fn spawn_overworld(
+/// Tracks a map entity's load lifecycle.
+#[derive(Component, PartialEq, Eq)]
+pub enum MapLoadState {
+    AwaitingMeta,
+    AwaitingEntities,
+    Ready,
+}
+
+/// Spawn the overworld map entity with store components and begin async meta load.
+fn init_overworld_entity(
     mut commands: Commands,
     mut registry: ResMut<MapRegistry>,
     save_path: Res<WorldSavePath>,
+) {
+    let map_dir = Arc::new(map_save_dir(&save_path.0, &MapInstanceId::Overworld));
+
+    let map = commands
+        .spawn((
+            MapInstanceId::Overworld,
+            MapLoadState::AwaitingMeta,
+            Transform::default(),
+            StoreBackend::new(FsMapMetaStore {
+                map_dir: map_dir.clone(),
+            }),
+            PendingStoreOps::<(), MapMeta>::default(),
+        ))
+        .id();
+
+    commands.insert_resource(OverworldMap(map));
+    registry.insert(MapInstanceId::Overworld, map);
+}
+
+/// Poll async meta loads, configure map entities when meta arrives.
+fn poll_map_meta(
+    mut commands: Commands,
+    mut query: Query<(
+        Entity,
+        &mut PendingStoreOps<(), MapMeta>,
+        &StoreBackend<(), MapMeta, FsMapMetaStore>,
+        &mut MapLoadState,
+    )>,
     terrain_registry: Res<TerrainDefRegistry>,
     type_registry: Res<AppTypeRegistry>,
 ) {
-    let map_dir = map_save_dir(&save_path.0, &MapInstanceId::Overworld);
+    for (entity, mut ops, store, mut state) in &mut query {
+        if *state != MapLoadState::AwaitingMeta {
+            continue;
+        }
 
-    let (seed, generation_version) = match load_map_meta(&map_dir) {
-        Ok(Some(meta)) => (meta.seed, meta.generation_version),
-        _ => (DEFAULT_OVERWORLD_SEED, GENERATION_VERSION),
-    };
+        // First frame: kick off the load
+        if ops.completed_loads.is_empty() && !ops.has_pending() && ops.load_errors.is_empty() {
+            ops.spawn_load(&store.0, ());
+            return;
+        }
 
+        ops.poll();
+
+        if let Some((_, meta_opt)) = ops.completed_loads.pop() {
+            let (seed, gen_version) = match meta_opt {
+                Some(meta) => {
+                    info!(
+                        "Loaded map meta: seed={}, gen_version={}",
+                        meta.seed, meta.generation_version
+                    );
+                    (meta.seed, meta.generation_version)
+                }
+                None => {
+                    info!("No saved meta found, using defaults: seed={DEFAULT_OVERWORLD_SEED}");
+                    (DEFAULT_OVERWORLD_SEED, GENERATION_VERSION)
+                }
+            };
+
+            configure_map_from_meta(
+                &mut commands,
+                entity,
+                seed,
+                gen_version,
+                &store.0.map_dir,
+                &terrain_registry,
+                &type_registry,
+            );
+
+            *state = MapLoadState::AwaitingEntities;
+        }
+
+        for (_, e) in ops.load_errors.drain(..) {
+            warn!("Failed to load map meta: {e}, using defaults");
+            configure_map_from_meta(
+                &mut commands,
+                entity,
+                DEFAULT_OVERWORLD_SEED,
+                GENERATION_VERSION,
+                &store.0.map_dir,
+                &terrain_registry,
+                &type_registry,
+            );
+            *state = MapLoadState::AwaitingEntities;
+        }
+    }
+}
+
+/// Apply map configuration components after meta is resolved.
+fn configure_map_from_meta(
+    commands: &mut Commands,
+    entity: Entity,
+    seed: u64,
+    generation_version: u32,
+    map_dir: &PathBuf,
+    terrain_registry: &TerrainDefRegistry,
+    type_registry: &AppTypeRegistry,
+) {
     let terrain_def = terrain_registry
         .get("overworld")
         .expect("overworld.terrain.ron must be loaded by AppState::Ready");
@@ -118,23 +217,17 @@ pub fn spawn_overworld(
         .expect("overworld.terrain.ron must contain MapDimensions");
 
     let mut config = VoxelMapConfig::new(seed, generation_version, 2, true);
-    config.save_dir = Some(map_dir);
+    config.save_dir = Some(map_dir.clone());
 
     let instance = VoxelMapInstance::new(dimensions.tree_height, dimensions.chunk_size);
     let shape = instance.shape.clone();
 
-    let map = commands
-        .spawn((
-            instance,
-            config,
-            dimensions.clone(),
-            Transform::default(),
-            MapInstanceId::Overworld,
-        ))
-        .id();
+    commands
+        .entity(entity)
+        .insert((instance, config, dimensions.clone()));
 
     let components = clone_terrain_components_excluding_dimensions(terrain_def);
-    apply_object_components(&mut commands, map, components, type_registry.0.clone());
+    apply_object_components(commands, entity, components, type_registry.0.clone());
 
     let generator = build_generator_from_def(
         terrain_def,
@@ -143,10 +236,7 @@ pub fn spawn_overworld(
         dimensions.padded_size(),
         shape,
     );
-    commands.entity(map).insert(generator);
-
-    commands.insert_resource(OverworldMap(map));
-    registry.insert(MapInstanceId::Overworld, map);
+    commands.entity(entity).insert(generator);
 }
 
 /// Clone terrain definition components via `reflect_clone`, excluding `MapDimensions`.
@@ -215,6 +305,8 @@ fn save_dirty_chunks_debounced(
         &VoxelMapConfig,
         &MapInstanceId,
         &mut PendingSaves,
+        &StoreBackend<(), MapMeta, FsMapMetaStore>,
+        &mut PendingStoreOps<(), MapMeta>,
     )>,
     entity_query: Query<(
         &MapSaveTarget,
@@ -239,7 +331,9 @@ fn save_dirty_chunks_debounced(
         return;
     }
 
-    for (mut instance, config, map_id, mut pending_saves) in &mut map_query {
+    for (mut instance, config, map_id, mut pending_saves, meta_store, mut meta_ops) in
+        &mut map_query
+    {
         let Some(map_dir) = config.save_dir.as_deref() else {
             trace!("save_dirty_chunks_debounced: no save_dir for {map_id:?}, skipping");
             continue;
@@ -258,9 +352,7 @@ fn save_dirty_chunks_debounced(
             generation_version: config.generation_version,
             spawn_points,
         };
-        if let Err(e) = save_map_meta(map_dir, &meta) {
-            error!("Failed to save map meta for {map_id:?}: {e}");
-        }
+        meta_ops.spawn_save(&meta_store.0, (), meta);
     }
 
     collect_and_save_entities(&save_path, &entity_query);
@@ -306,7 +398,13 @@ pub fn save_dirty_chunks_sync(instance: &mut VoxelMapInstance, map_dir: &Path) {
 
 pub fn save_world_on_shutdown(
     mut exit_reader: MessageReader<AppExit>,
-    mut map_query: Query<(&mut VoxelMapInstance, &VoxelMapConfig, &MapInstanceId)>,
+    mut map_query: Query<(
+        &mut VoxelMapInstance,
+        &VoxelMapConfig,
+        &MapInstanceId,
+        &StoreBackend<(), MapMeta, FsMapMetaStore>,
+        &mut PendingStoreOps<(), MapMeta>,
+    )>,
     dirty_state: Res<WorldDirtyState>,
     save_path: Res<WorldSavePath>,
     entity_query: Query<(
@@ -322,16 +420,21 @@ pub fn save_world_on_shutdown(
     }
     exit_reader.clear();
 
-    if !dirty_state.is_dirty {
-        return;
+    // Dirty chunks only need saving when edits occurred
+    if dirty_state.is_dirty {
+        for (mut instance, config, _, _, _) in &mut map_query {
+            let Some(map_dir) = config.save_dir.as_deref() else {
+                continue;
+            };
+            save_dirty_chunks_sync(&mut instance, map_dir);
+        }
     }
 
-    for (mut instance, config, map_id) in &mut map_query {
-        let Some(map_dir) = config.save_dir.as_deref() else {
+    // Meta and entities are always saved — their state is independent of voxel edits
+    for (_, config, map_id, meta_store, mut meta_ops) in &mut map_query {
+        if config.save_dir.is_none() {
             continue;
-        };
-        save_dirty_chunks_sync(&mut instance, map_dir);
-
+        }
         let spawn_points: Vec<Vec3> = respawn_query
             .iter()
             .filter(|(_, mid)| *mid == map_id)
@@ -343,9 +446,8 @@ pub fn save_world_on_shutdown(
             generation_version: config.generation_version,
             spawn_points,
         };
-        if let Err(e) = save_map_meta(map_dir, &meta) {
-            error!("Failed to save meta on shutdown for {map_id:?}: {e}");
-        }
+        meta_ops.spawn_save(&meta_store.0, (), meta);
+        meta_ops.flush();
     }
 
     collect_and_save_entities(&save_path, &entity_query);
@@ -421,11 +523,25 @@ fn load_map_entities(
     count
 }
 
-/// Load persisted entities for the overworld on startup.
-pub fn load_startup_entities(mut commands: Commands, save_path: Res<WorldSavePath>) {
-    let count = load_map_entities(&mut commands, &save_path, &MapInstanceId::Overworld);
-    if count > 0 {
-        info!("Loaded {count} entities for overworld");
+/// Synchronously load entities for maps in `AwaitingEntities` state and transition to `Ready`.
+///
+/// Temporary: Phase 2 will migrate this to async store-backed loading.
+fn poll_map_entities(
+    mut commands: Commands,
+    save_path: Res<WorldSavePath>,
+    mut query: Query<(&MapInstanceId, &mut MapLoadState)>,
+) {
+    for (map_id, mut state) in &mut query {
+        if *state != MapLoadState::AwaitingEntities {
+            continue;
+        }
+
+        let count = load_map_entities(&mut commands, &save_path, map_id);
+        if count > 0 {
+            info!("Loaded {count} entities for {map_id:?}");
+        }
+
+        *state = MapLoadState::Ready;
     }
 }
 
@@ -457,13 +573,12 @@ impl Plugin for ServerMapPlugin {
             .init_resource::<WorldDirtyState>()
             .init_resource::<PendingVoxelBroadcasts>()
             .init_resource::<WorldSavePath>()
-            .add_systems(
-                OnEnter(AppState::Ready),
-                (spawn_overworld, load_startup_entities).chain(),
-            )
+            .add_systems(OnEnter(AppState::Ready), init_overworld_entity)
             .add_systems(
                 Update,
                 (
+                    poll_map_meta.run_if(in_state(AppState::Ready)),
+                    poll_map_entities.run_if(in_state(AppState::Ready)),
                     (handle_voxel_edit_requests, flush_voxel_broadcasts).chain(),
                     push_chunks_to_clients,
                     save_dirty_chunks_debounced,

@@ -11,7 +11,7 @@ use protocol::world_object::{
 };
 use protocol::*;
 
-use crate::map::{load_startup_entities, ClientChunkVisibility};
+use crate::map::{ClientChunkVisibility, MapLoadState};
 use voxel_map_engine::prelude::ChunkTicket;
 
 /// Default spawn position used for respawning and initial player placement.
@@ -22,9 +22,12 @@ pub struct ServerGameplayPlugin;
 impl Plugin for ServerGameplayPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(handle_connected);
+        app.add_systems(OnEnter(AppState::Ready), spawn_dummy_target);
         app.add_systems(
-            OnEnter(AppState::Ready),
-            (spawn_dummy_target, validate_respawn_points).after(load_startup_entities),
+            Update,
+            validate_respawn_points.run_if(any_with_component::<MapLoadState>.and(
+                |query: Query<&MapLoadState>| query.iter().any(|s| *s == MapLoadState::Ready),
+            )),
         );
         app.add_systems(FixedUpdate, handle_character_movement);
         app.add_message::<DeathEvent>();

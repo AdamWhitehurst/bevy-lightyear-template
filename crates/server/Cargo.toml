@@ -21,6 +21,7 @@ lightyear = { workspace = true, features = ["server", "netcode", "udp", "webtran
 lightyear_crossbeam = { workspace = true }
 protocol = { workspace = true }
 anyhow = "1.0"
+persistence = { workspace = true }
 async-compat = "0.2"
 avian3d = { workspace = true }
 bincode = "1.3"

@@ -1,3 +1,5 @@
+pub mod fs_map_meta;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 

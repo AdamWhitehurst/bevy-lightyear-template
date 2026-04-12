@@ -8,6 +8,7 @@ members = [
   "crates/ui",
   "crates/voxel_map_engine",
   "crates/sprite_rig",
+  "crates/persistence",
 ]
 exclude = [
   "git/avian",
@@ -47,6 +48,7 @@ lightyear = { path = "git/lightyear/lightyear", features = [
 ] }
 lightyear_crossbeam = { path = "git/lightyear/lightyear_crossbeam" }
 lightyear_replication = { path = "git/lightyear/lightyear_replication" }
+persistence = { path = "crates/persistence" }
 protocol = { path = "crates/protocol" }
 ron = "0.12"
 bevy_common_assets = { version = "0.15", features = ["ron"] }
