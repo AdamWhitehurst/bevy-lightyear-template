@@ -13,6 +13,7 @@ use super::loading::{
 use super::spawn::{
     ability_projectile_spawn, despawn_ability_projectile_spawn, handle_ability_projectile_spawn,
 };
+use super::types::AbilityDefs;
 use super::types::{
     AbilityAsset, AbilityEffect, AbilityPhases, AbilitySlots, EffectTarget, ForceFrame,
     InputEffect, OnEndEffects, OnHitEffectDefs, OnInputEffects, OnTickEffects, TickEffect,
@@ -67,7 +68,7 @@ impl Plugin for AbilityPlugin {
         app.add_systems(
             Update,
             (
-                insert_ability_defs,
+                insert_ability_defs.run_if(not(resource_exists::<AbilityDefs>)),
                 reload_ability_defs,
                 sync_default_ability_slots,
             ),
