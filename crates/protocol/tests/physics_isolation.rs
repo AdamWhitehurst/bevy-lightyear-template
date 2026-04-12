@@ -5,8 +5,8 @@ use bevy::prelude::*;
 use protocol::map::{attach_chunk_colliders, MapInstanceId, MapRegistry, VoxelChunk};
 use protocol::physics::MapCollisionHooks;
 use voxel_map_engine::prelude::{
-    ChunkTicket, FlatGenerator, TicketType, VoxelGenerator, VoxelMapConfig, VoxelMapInstance,
-    VoxelPlugin,
+    ChunkTicket, FlatGenerator, MapDimensions, RuntimeShape, TicketType, VoxelGenerator,
+    VoxelMapConfig, VoxelMapInstance, VoxelPlugin,
 };
 
 fn test_app() -> App {
@@ -136,12 +136,22 @@ fn chunk_target_derived_from_map_registry() {
     app.insert_resource(voxel_map_engine::ChunkGenerationEnabled);
     app.init_resource::<MapRegistry>();
 
-    let generator = VoxelGenerator(Arc::new(FlatGenerator));
+    let generator = VoxelGenerator(Arc::new(FlatGenerator {
+        chunk_size: 16,
+        shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+    }));
+    let dimensions = MapDimensions {
+        chunk_size: 16,
+        column_y_range: (-8, 8),
+        tree_height: 5,
+        bounds: None,
+    };
     let map_a = app
         .world_mut()
         .spawn((
-            VoxelMapInstance::new(5),
-            VoxelMapConfig::new(0, 0, 1, None, 5),
+            VoxelMapInstance::new(5, 16),
+            VoxelMapConfig::new(0, 0, 1, true),
+            dimensions.clone(),
             generator.clone(),
             Transform::default(),
         ))
@@ -149,8 +159,9 @@ fn chunk_target_derived_from_map_registry() {
     let map_b = app
         .world_mut()
         .spawn((
-            VoxelMapInstance::new(5),
-            VoxelMapConfig::new(1, 0, 1, None, 5),
+            VoxelMapInstance::new(5, 16),
+            VoxelMapConfig::new(1, 0, 1, true),
+            dimensions.clone(),
             generator,
             Transform::default(),
         ))
@@ -243,9 +254,18 @@ fn chunk_colliders_inherit_map_instance_id() {
     let map = app
         .world_mut()
         .spawn((
-            VoxelMapInstance::new(5),
-            VoxelMapConfig::new(0, 0, 1, None, 5),
-            VoxelGenerator(Arc::new(FlatGenerator)),
+            VoxelMapInstance::new(5, 16),
+            VoxelMapConfig::new(0, 0, 1, true),
+            MapDimensions {
+                chunk_size: 16,
+                column_y_range: (-8, 8),
+                tree_height: 5,
+                bounds: None,
+            },
+            VoxelGenerator(Arc::new(FlatGenerator {
+                chunk_size: 16,
+                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+            })),
             Transform::default(),
             MapInstanceId::Overworld,
         ))

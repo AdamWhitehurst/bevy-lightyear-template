@@ -23,7 +23,7 @@ impl Plugin for ServerGameplayPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(handle_connected);
         app.add_systems(
-            Startup,
+            OnEnter(AppState::Ready),
             (spawn_dummy_target, validate_respawn_points).after(load_startup_entities),
         );
         app.add_systems(FixedUpdate, handle_character_movement);

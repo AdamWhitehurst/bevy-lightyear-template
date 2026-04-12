@@ -12,6 +12,7 @@ pub struct ChunkChannel;
 pub struct ChunkDataSync {
     pub map_id: MapInstanceId,
     pub chunk_pos: IVec3,
+    pub chunk_size: u32,
     pub data: PalettedChunk,
 }
 

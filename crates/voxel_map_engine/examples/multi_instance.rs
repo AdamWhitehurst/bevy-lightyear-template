@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bevy::prelude::*;
-use ndshape::ConstShape;
+use ndshape::{RuntimeShape, Shape};
 use voxel_map_engine::prelude::*;
 
 #[derive(Resource)]
@@ -49,14 +49,24 @@ fn setup(mut commands: Commands) {
 }
 
 fn spawn_overworld(commands: &mut Commands) -> Entity {
-    let (mut instance, config, marker) = VoxelMapInstance::overworld(42);
+    let dimensions = MapDimensions {
+        chunk_size: 16,
+        column_y_range: (-2, 2),
+        tree_height: 5,
+        bounds: None,
+    };
+    let mut instance = VoxelMapInstance::new(dimensions.tree_height, dimensions.chunk_size);
     instance.debug_colors = true;
     commands
         .spawn((
             instance,
-            config,
-            VoxelGenerator(Arc::new(FlatGenerator)),
-            marker,
+            VoxelMapConfig::new(42, 0, 10, true),
+            dimensions,
+            VoxelGenerator(Arc::new(FlatGenerator {
+                chunk_size: 16,
+                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+            })),
+            Overworld,
             PendingChunks::default(),
             Transform::default(),
         ))
@@ -64,14 +74,22 @@ fn spawn_overworld(commands: &mut Commands) -> Entity {
 }
 
 fn spawn_homebase(commands: &mut Commands) -> Entity {
-    let (mut instance, config, marker) = VoxelMapInstance::homebase(0, IVec3::new(8, 4, 8));
+    let bounds = IVec3::new(8, 4, 8);
+    let dimensions = MapDimensions {
+        chunk_size: 16,
+        column_y_range: (-4, 4),
+        tree_height: 3,
+        bounds: Some(bounds),
+    };
+    let mut instance = VoxelMapInstance::new(dimensions.tree_height, dimensions.chunk_size);
     instance.debug_colors = true;
     commands
         .spawn((
             instance,
-            config,
+            VoxelMapConfig::new(0, 0, bounds_to_spawning_distance(bounds), true),
+            dimensions,
             VoxelGenerator(Arc::new(RaisedGenerator)),
-            marker,
+            Homebase { owner: 0 },
             PendingChunks::default(),
             Transform::from_translation(Vec3::new(200.0, 0.0, 0.0)),
         ))
@@ -79,14 +97,22 @@ fn spawn_homebase(commands: &mut Commands) -> Entity {
 }
 
 fn spawn_arena(commands: &mut Commands) -> Entity {
-    let (mut instance, config, marker) = VoxelMapInstance::arena(1, 99, IVec3::new(10, 4, 10));
+    let bounds = IVec3::new(10, 4, 10);
+    let dimensions = MapDimensions {
+        chunk_size: 16,
+        column_y_range: (-8, 8),
+        tree_height: 3,
+        bounds: Some(bounds),
+    };
+    let mut instance = VoxelMapInstance::new(dimensions.tree_height, dimensions.chunk_size);
     instance.debug_colors = true;
     commands
         .spawn((
             instance,
-            config,
+            VoxelMapConfig::new(99, 0, bounds_to_spawning_distance(bounds), true),
+            dimensions,
             VoxelGenerator(Arc::new(BowlGenerator)),
-            marker,
+            Arena { id: 1 },
             PendingChunks::default(),
             Transform::from_translation(Vec3::new(-200.0, 0.0, 0.0)),
         ))
@@ -97,10 +123,11 @@ struct RaisedGenerator;
 
 impl VoxelGeneratorImpl for RaisedGenerator {
     fn generate_terrain(&self, chunk_pos: IVec3) -> Vec<WorldVoxel> {
-        let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
-        for i in 0..PaddedChunkShape::SIZE {
-            let [_x, y, _z] = PaddedChunkShape::delinearize(i);
-            let world_y = chunk_pos.y * CHUNK_SIZE as i32 + y as i32 - 1;
+        let shape = RuntimeShape::<u32, 3>::new([18, 18, 18]);
+        let mut voxels = vec![WorldVoxel::Air; shape.usize()];
+        for i in 0..shape.size() {
+            let [_x, y, _z] = shape.delinearize(i);
+            let world_y = chunk_pos.y * 16 + y as i32 - 1;
             if world_y < 4 {
                 voxels[i as usize] = WorldVoxel::Solid(0);
             }
@@ -113,12 +140,13 @@ struct BowlGenerator;
 
 impl VoxelGeneratorImpl for BowlGenerator {
     fn generate_terrain(&self, chunk_pos: IVec3) -> Vec<WorldVoxel> {
-        let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
-        for i in 0..PaddedChunkShape::SIZE {
-            let [x, y, z] = PaddedChunkShape::delinearize(i);
-            let world_x = (chunk_pos.x * CHUNK_SIZE as i32 + x as i32 - 1) as f32;
-            let world_y = (chunk_pos.y * CHUNK_SIZE as i32 + y as i32 - 1) as f32;
-            let world_z = (chunk_pos.z * CHUNK_SIZE as i32 + z as i32 - 1) as f32;
+        let shape = RuntimeShape::<u32, 3>::new([18, 18, 18]);
+        let mut voxels = vec![WorldVoxel::Air; shape.usize()];
+        for i in 0..shape.size() {
+            let [x, y, z] = shape.delinearize(i);
+            let world_x = (chunk_pos.x * 16 + x as i32 - 1) as f32;
+            let world_y = (chunk_pos.y * 16 + y as i32 - 1) as f32;
+            let world_z = (chunk_pos.z * 16 + z as i32 - 1) as f32;
             let dist = (world_x * world_x + world_z * world_z).sqrt();
             let surface_y = -2.0 + dist * 0.15;
             if world_y < surface_y {

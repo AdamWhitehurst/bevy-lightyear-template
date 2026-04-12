@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
-use ndshape::ConstShape;
 use voxel_map_engine::prelude::*;
 
 fn test_app() -> App {
@@ -20,15 +19,24 @@ fn spawn_map(app: &mut App, spawning_distance: u32) -> Entity {
     spawn_map_with(
         app,
         spawning_distance,
-        VoxelGenerator(Arc::new(FlatGenerator)),
+        VoxelGenerator(Arc::new(FlatGenerator {
+            chunk_size: 16,
+            shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+        })),
     )
 }
 
 fn spawn_map_with(app: &mut App, spawning_distance: u32, generator: VoxelGenerator) -> Entity {
     app.world_mut()
         .spawn((
-            VoxelMapInstance::new(5),
-            VoxelMapConfig::new(0, 0, spawning_distance, None, 5),
+            VoxelMapInstance::new(5, 16),
+            VoxelMapConfig::new(0, 0, spawning_distance, true),
+            MapDimensions {
+                chunk_size: 16,
+                column_y_range: (-8, 8),
+                tree_height: 5,
+                bounds: None,
+            },
             generator,
             Transform::default(),
         ))
@@ -334,7 +342,7 @@ struct AllAirGenerator;
 
 impl VoxelGeneratorImpl for AllAirGenerator {
     fn generate_terrain(&self, _chunk_pos: IVec3) -> Vec<WorldVoxel> {
-        vec![WorldVoxel::Air; PaddedChunkShape::USIZE]
+        vec![WorldVoxel::Air; 18 * 18 * 18]
     }
 }
 

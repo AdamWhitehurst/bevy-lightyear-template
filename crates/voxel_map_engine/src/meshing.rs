@@ -3,26 +3,25 @@ use bevy::log::info_span;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use block_mesh::{GreedyQuadsBuffer, RIGHT_HANDED_Y_UP_CONFIG, greedy_quads};
-use ndshape::ConstShape;
+use ndshape::Shape;
 
-use crate::types::{CHUNK_SIZE, PaddedChunkShape, WorldVoxel};
+use crate::types::WorldVoxel;
 
-/// Mesh a padded 18^3 voxel array into a Bevy Mesh using greedy quads.
-pub fn mesh_chunk_greedy(voxels: &[WorldVoxel]) -> Option<Mesh> {
-    debug_assert_eq!(voxels.len(), PaddedChunkShape::USIZE);
+/// Mesh a padded voxel array into a Bevy Mesh using greedy quads.
+/// `shape` describes the padded chunk dimensions; `voxels.len()` must equal `shape.usize()`.
+pub fn mesh_chunk_greedy<S: Shape<3, Coord = u32>>(
+    voxels: &[WorldVoxel],
+    shape: &S,
+) -> Option<Mesh> {
+    debug_assert_eq!(voxels.len(), shape.usize());
 
     let mut buffer = GreedyQuadsBuffer::new(voxels.len());
     let faces = RIGHT_HANDED_Y_UP_CONFIG.faces;
+    let dims = shape.as_array();
+    let max = [dims[0] - 1, dims[1] - 1, dims[2] - 1];
     {
         let _span = info_span!("greedy_quads").entered();
-        greedy_quads(
-            voxels,
-            &PaddedChunkShape {},
-            [0; 3],
-            [17; 3],
-            &faces,
-            &mut buffer,
-        );
+        greedy_quads(voxels, shape, [0; 3], max, &faces, &mut buffer);
     }
 
     if buffer.quads.num_quads() == 0 {
@@ -68,11 +67,15 @@ pub fn mesh_chunk_greedy(voxels: &[WorldVoxel]) -> Option<Mesh> {
 
 /// Generate voxels for flat terrain at y=0.
 /// world_y <= 0 → Solid(0), world_y > 0 → Air.
-pub fn flat_terrain_voxels(chunk_pos: IVec3) -> Vec<WorldVoxel> {
-    let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
-    for i in 0..PaddedChunkShape::SIZE {
-        let [_x, y, _z] = PaddedChunkShape::delinearize(i);
-        let world_y = chunk_pos.y * CHUNK_SIZE as i32 + y as i32 - 1;
+pub fn flat_terrain_voxels<S: Shape<3, Coord = u32>>(
+    chunk_pos: IVec3,
+    chunk_size: u32,
+    shape: &S,
+) -> Vec<WorldVoxel> {
+    let mut voxels = vec![WorldVoxel::Air; shape.usize()];
+    for i in 0..shape.size() {
+        let [_x, y, _z] = shape.delinearize(i);
+        let world_y = chunk_pos.y * chunk_size as i32 + y as i32 - 1;
         if world_y <= 0 {
             voxels[i as usize] = WorldVoxel::Solid(0);
         }
@@ -83,11 +86,17 @@ pub fn flat_terrain_voxels(chunk_pos: IVec3) -> Vec<WorldVoxel> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ndshape::RuntimeShape;
+
+    fn padded_shape() -> RuntimeShape<u32, 3> {
+        RuntimeShape::<u32, 3>::new([18, 18, 18])
+    }
 
     #[test]
     fn flat_terrain_voxels_produces_mesh_at_surface() {
-        let voxels = flat_terrain_voxels(IVec3::new(0, 0, 0));
-        let mesh = mesh_chunk_greedy(&voxels);
+        let shape = padded_shape();
+        let voxels = flat_terrain_voxels(IVec3::new(0, 0, 0), 16, &shape);
+        let mesh = mesh_chunk_greedy(&voxels, &shape);
         assert!(
             mesh.is_some(),
             "y=0 chunk should contain a surface crossing"
@@ -96,8 +105,9 @@ mod tests {
 
     #[test]
     fn flat_terrain_voxels_no_mesh_for_underground() {
-        let voxels = flat_terrain_voxels(IVec3::new(0, -2, 0));
-        let mesh = mesh_chunk_greedy(&voxels);
+        let shape = padded_shape();
+        let voxels = flat_terrain_voxels(IVec3::new(0, -2, 0), 16, &shape);
+        let mesh = mesh_chunk_greedy(&voxels, &shape);
         assert!(
             mesh.is_none(),
             "fully underground chunk should produce no mesh"
@@ -106,8 +116,9 @@ mod tests {
 
     #[test]
     fn flat_terrain_voxels_no_mesh_for_sky() {
-        let voxels = flat_terrain_voxels(IVec3::new(0, 2, 0));
-        let mesh = mesh_chunk_greedy(&voxels);
+        let shape = padded_shape();
+        let voxels = flat_terrain_voxels(IVec3::new(0, 2, 0), 16, &shape);
+        let mesh = mesh_chunk_greedy(&voxels, &shape);
         assert!(
             mesh.is_none(),
             "fully above-surface chunk should produce no mesh"
@@ -116,8 +127,9 @@ mod tests {
 
     #[test]
     fn mesh_has_valid_attributes() {
-        let voxels = flat_terrain_voxels(IVec3::new(0, 0, 0));
-        let mesh = mesh_chunk_greedy(&voxels).expect("should produce mesh");
+        let shape = padded_shape();
+        let voxels = flat_terrain_voxels(IVec3::new(0, 0, 0), 16, &shape);
+        let mesh = mesh_chunk_greedy(&voxels, &shape).expect("should produce mesh");
         assert!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
         assert!(mesh.attribute(Mesh::ATTRIBUTE_NORMAL).is_some());
         assert!(mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_some());

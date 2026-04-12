@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bevy::log::{info_span, trace};
 use bevy::prelude::*;
-use ndshape::ConstShape;
+use ndshape::{RuntimeShape, Shape};
 use noise::{
     Fbm, HybridMulti, MultiFractal, NoiseFn, OpenSimplex, Perlin, RidgedMulti, ScalePoint,
     Seedable, SuperSimplex, Value, Worley,
@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::{SurfaceHeightMap, VoxelGenerator, VoxelGeneratorImpl, WorldObjectSpawn};
 use crate::meshing::flat_terrain_voxels;
 use crate::placement::jittered_grid_sample;
-use crate::types::{CHUNK_SIZE, PaddedChunkShape, WorldVoxel};
+use crate::types::WorldVoxel;
 
 /// Base noise algorithm.
 #[derive(Clone, Debug, Serialize, Deserialize, Reflect, Default)]
@@ -201,84 +201,98 @@ where
     )
 }
 
-const PADDED_XZ: usize = 18;
-const CACHE_LEN: usize = PADDED_XZ * PADDED_XZ;
-
-/// Generates voxel data for a single padded chunk (18^3) using heightmap noise.
+/// Generates voxel data for a single padded chunk using heightmap noise.
 ///
 /// When `moisture_map` and `biome_rules` are both provided, biome-aware material
 /// selection is used. Otherwise all solid voxels use material index 0.
-pub fn generate_heightmap_chunk(
+pub fn generate_heightmap_chunk<S: Shape<3, Coord = u32>>(
     chunk_pos: IVec3,
     seed: u64,
     height_map: &HeightMap,
     moisture_map: Option<&MoistureMap>,
     biome_rules: Option<&BiomeRules>,
+    chunk_size: u32,
+    padded_size: u32,
+    shape: &S,
 ) -> Vec<WorldVoxel> {
     let height_noise = build_noise_fn(&height_map.noise, seed);
     let moisture_noise = moisture_map.map(|m| build_noise_fn(&m.noise, seed));
 
     let height_cache = {
         let _span = info_span!("build_height_cache").entered();
-        build_height_cache(chunk_pos, &*height_noise, height_map)
+        build_height_cache(
+            chunk_pos,
+            &*height_noise,
+            height_map,
+            chunk_size,
+            padded_size,
+        )
     };
     let moisture_cache = moisture_noise.as_ref().map(|noise| {
         let _span = info_span!("build_moisture_cache").entered();
-        build_2d_cache(chunk_pos, &**noise)
+        build_2d_cache(chunk_pos, &**noise, chunk_size, padded_size)
     });
 
     let _span = info_span!("fill_voxels").entered();
-    let total = PaddedChunkShape::SIZE as usize;
+    let total = shape.usize();
     let mut voxels = vec![WorldVoxel::Air; total];
 
-    for i in 0..total {
-        let [px, py, pz] = PaddedChunkShape::delinearize(i as u32);
-        let world_y = chunk_pos.y * CHUNK_SIZE as i32 + py as i32 - 1;
-        let terrain_height = height_cache[xz_index(px, pz)];
+    for i in 0..shape.size() {
+        let [px, py, pz] = shape.delinearize(i);
+        let world_y = chunk_pos.y * chunk_size as i32 + py as i32 - 1;
+        let terrain_height = height_cache[xz_index(px, pz, padded_size)];
 
-        if world_y as f64 <= terrain_height {
+        if (world_y as f64) <= terrain_height {
             let material = pick_material(
                 world_y,
                 terrain_height,
-                xz_index(px, pz),
-                moisture_cache.as_ref(),
+                xz_index(px, pz, padded_size),
+                moisture_cache.as_deref(),
                 biome_rules,
             );
-            voxels[i] = WorldVoxel::Solid(material);
+            voxels[i as usize] = WorldVoxel::Solid(material);
         }
     }
 
     voxels
 }
 
-fn xz_index(px: u32, pz: u32) -> usize {
-    px as usize * PADDED_XZ + pz as usize
+fn xz_index(px: u32, pz: u32, padded_size: u32) -> usize {
+    px as usize * padded_size as usize + pz as usize
 }
 
 fn build_height_cache(
     chunk_pos: IVec3,
     noise: &dyn NoiseFn<f64, 2>,
     height_map: &HeightMap,
-) -> [f64; CACHE_LEN] {
-    let mut cache = [0.0; CACHE_LEN];
-    for px in 0..PADDED_XZ as u32 {
-        for pz in 0..PADDED_XZ as u32 {
-            let world_x = chunk_pos.x * CHUNK_SIZE as i32 + px as i32 - 1;
-            let world_z = chunk_pos.z * CHUNK_SIZE as i32 + pz as i32 - 1;
+    chunk_size: u32,
+    padded_size: u32,
+) -> Vec<f64> {
+    let mut cache = vec![0.0; (padded_size as usize).pow(2)];
+    for px in 0..padded_size {
+        for pz in 0..padded_size {
+            let world_x = chunk_pos.x * chunk_size as i32 + px as i32 - 1;
+            let world_z = chunk_pos.z * chunk_size as i32 + pz as i32 - 1;
             let sample = noise.get([world_x as f64, world_z as f64]);
-            cache[xz_index(px, pz)] = height_map.base_height as f64 + sample * height_map.amplitude;
+            cache[xz_index(px, pz, padded_size)] =
+                height_map.base_height as f64 + sample * height_map.amplitude;
         }
     }
     cache
 }
 
-fn build_2d_cache(chunk_pos: IVec3, noise: &dyn NoiseFn<f64, 2>) -> [f64; CACHE_LEN] {
-    let mut cache = [0.0; CACHE_LEN];
-    for px in 0..PADDED_XZ as u32 {
-        for pz in 0..PADDED_XZ as u32 {
-            let world_x = chunk_pos.x * CHUNK_SIZE as i32 + px as i32 - 1;
-            let world_z = chunk_pos.z * CHUNK_SIZE as i32 + pz as i32 - 1;
-            cache[xz_index(px, pz)] = noise.get([world_x as f64, world_z as f64]);
+fn build_2d_cache(
+    chunk_pos: IVec3,
+    noise: &dyn NoiseFn<f64, 2>,
+    chunk_size: u32,
+    padded_size: u32,
+) -> Vec<f64> {
+    let mut cache = vec![0.0; (padded_size as usize).pow(2)];
+    for px in 0..padded_size {
+        for pz in 0..padded_size {
+            let world_x = chunk_pos.x * chunk_size as i32 + px as i32 - 1;
+            let world_z = chunk_pos.z * chunk_size as i32 + pz as i32 - 1;
+            cache[xz_index(px, pz, padded_size)] = noise.get([world_x as f64, world_z as f64]);
         }
     }
     cache
@@ -288,7 +302,7 @@ fn pick_material(
     world_y: i32,
     terrain_height: f64,
     cache_idx: usize,
-    moisture_cache: Option<&[f64; CACHE_LEN]>,
+    moisture_cache: Option<&[f64]>,
     biome_rules: Option<&BiomeRules>,
 ) -> u8 {
     let (Some(moisture), Some(rules)) = (moisture_cache, biome_rules) else {
@@ -350,6 +364,9 @@ struct HeightmapGenerator {
     moisture_map: Option<MoistureMap>,
     biome_rules: Option<BiomeRules>,
     placement_rules: Option<PlacementRules>,
+    chunk_size: u32,
+    padded_size: u32,
+    shape: RuntimeShape<u32, 3>,
 }
 
 impl VoxelGeneratorImpl for HeightmapGenerator {
@@ -360,6 +377,9 @@ impl VoxelGeneratorImpl for HeightmapGenerator {
             &self.height_map,
             self.moisture_map.as_ref(),
             self.biome_rules.as_ref(),
+            self.chunk_size,
+            self.padded_size,
+            &self.shape,
         )
     }
 
@@ -374,19 +394,25 @@ impl VoxelGeneratorImpl for HeightmapGenerator {
         let mut spawns = Vec::new();
 
         for (_rule_idx, rule) in rules.0.iter().enumerate() {
-            let candidates =
-                jittered_grid_sample(self.seed, chunk_pos, rule.min_spacing, rule.density);
+            let candidates = jittered_grid_sample(
+                self.seed,
+                chunk_pos,
+                self.chunk_size,
+                rule.min_spacing,
+                rule.density,
+            );
 
             for world_pos in candidates {
-                let local_x = (world_pos.x - chunk_pos.x as f32 * CHUNK_SIZE as f32).floor() as u32;
-                let local_z = (world_pos.y - chunk_pos.z as f32 * CHUNK_SIZE as f32).floor() as u32;
-                if local_x >= CHUNK_SIZE || local_z >= CHUNK_SIZE {
+                let local_x =
+                    (world_pos.x - chunk_pos.x as f32 * self.chunk_size as f32).floor() as u32;
+                let local_z =
+                    (world_pos.y - chunk_pos.z as f32 * self.chunk_size as f32).floor() as u32;
+                if local_x >= self.chunk_size || local_z >= self.chunk_size {
                     trace!("place_features: candidate ({local_x}, {local_z}) out of chunk bounds");
                     continue;
                 }
 
-                let height_idx = (local_x * CHUNK_SIZE + local_z) as usize;
-                let Some(height) = heights.heights[height_idx] else {
+                let Some(height) = heights.at(local_x + 1, local_z + 1) else {
                     trace!("place_features: no surface at ({local_x}, {local_z}), skipping");
                     continue;
                 };
@@ -396,7 +422,13 @@ impl VoxelGeneratorImpl for HeightmapGenerator {
                 }
 
                 if let Some(slope_max) = rule.slope_max {
-                    if exceeds_slope(local_x, local_z, &heights.heights, slope_max) {
+                    if exceeds_slope(
+                        local_x + 1,
+                        local_z + 1,
+                        heights,
+                        slope_max,
+                        self.padded_size,
+                    ) {
                         continue;
                     }
                 }
@@ -430,25 +462,32 @@ impl VoxelGeneratorImpl for HeightmapGenerator {
     }
 }
 
-/// Returns `true` if the terrain slope at `(x, z)` exceeds `max_slope` (rise/run).
+/// Returns `true` if the terrain slope at padded coordinate `(px, pz)` exceeds
+/// `max_slope` (rise/run).
 ///
 /// Estimates slope from the height difference to cardinal neighbors in the
-/// surface height map. If a neighbor is out of bounds or has no surface, that
-/// direction is skipped.
-fn exceeds_slope(x: u32, z: u32, heights: &[Option<f64>; 256], max_slope: f64) -> bool {
-    let center = match heights[(x * CHUNK_SIZE + z) as usize] {
+/// surface height map. Indices are padded-space; the 1-voxel border is
+/// populated so chunk-edge neighbors resolve without clipping.
+fn exceeds_slope(
+    px: u32,
+    pz: u32,
+    heights: &SurfaceHeightMap,
+    max_slope: f64,
+    padded_size: u32,
+) -> bool {
+    let center = match heights.at(px, pz) {
         Some(h) => h,
         None => return false,
     };
 
     let neighbors: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
     for (dx, dz) in neighbors {
-        let nx = x as i32 + dx;
-        let nz = z as i32 + dz;
-        if nx < 0 || nx >= CHUNK_SIZE as i32 || nz < 0 || nz >= CHUNK_SIZE as i32 {
+        let nx = px as i32 + dx;
+        let nz = pz as i32 + dz;
+        if nx < 0 || nx >= padded_size as i32 || nz < 0 || nz >= padded_size as i32 {
             continue;
         }
-        if let Some(nh) = heights[(nx as u32 * CHUNK_SIZE + nz as u32) as usize] {
+        if let Some(nh) = heights.at(nx as u32, nz as u32) {
             let slope = (nh - center).abs();
             if slope > max_slope {
                 return true;
@@ -459,24 +498,32 @@ fn exceeds_slope(x: u32, z: u32, heights: &[Option<f64>; 256], max_slope: f64) -
 }
 
 /// Flat terrain generator (no noise).
-pub struct FlatGenerator;
+pub struct FlatGenerator {
+    pub chunk_size: u32,
+    pub shape: RuntimeShape<u32, 3>,
+}
 
 impl VoxelGeneratorImpl for FlatGenerator {
     fn generate_terrain(&self, chunk_pos: IVec3) -> Vec<WorldVoxel> {
-        flat_terrain_voxels(chunk_pos)
+        flat_terrain_voxels(chunk_pos, self.chunk_size, &self.shape)
     }
 }
 
-/// Build a [`VoxelGenerator`] from terrain components on a map entity.
+/// Build a [`VoxelGenerator`] from terrain components passed directly.
 ///
-/// Reads [`HeightMap`], [`MoistureMap`], and [`BiomeRules`] from the entity.
+/// Used by spawn functions that read the def before components have been
+/// inserted onto the entity (inline construction during map spawn).
 /// If no `HeightMap` is present, falls back to [`FlatGenerator`].
-pub fn build_generator(entity: EntityRef, seed: u64) -> VoxelGenerator {
-    let height = entity.get::<HeightMap>().cloned();
-    let moisture = entity.get::<MoistureMap>().cloned();
-    let biomes = entity.get::<BiomeRules>().cloned();
-    let placement = entity.get::<PlacementRules>().cloned();
-
+pub fn build_generator_from_components(
+    seed: u64,
+    chunk_size: u32,
+    padded_size: u32,
+    shape: RuntimeShape<u32, 3>,
+    height: Option<HeightMap>,
+    moisture: Option<MoistureMap>,
+    biomes: Option<BiomeRules>,
+    placement: Option<PlacementRules>,
+) -> VoxelGenerator {
     debug_assert!(
         moisture.is_none() || height.is_some(),
         "MoistureMap without HeightMap is meaningless"
@@ -497,17 +544,22 @@ pub fn build_generator(entity: EntityRef, seed: u64) -> VoxelGenerator {
             moisture_map: moisture,
             biome_rules: biomes,
             placement_rules: placement,
+            chunk_size,
+            padded_size,
+            shape,
         })),
-        None => VoxelGenerator(Arc::new(FlatGenerator)),
+        None => VoxelGenerator(Arc::new(FlatGenerator { chunk_size, shape })),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::PaddedChunkShape;
-    use ndshape::ConstShape;
     use noise::NoiseFn;
+
+    fn padded_shape() -> RuntimeShape<u32, 3> {
+        RuntimeShape::<u32, 3>::new([18, 18, 18])
+    }
 
     fn default_noise_def() -> NoiseDef {
         NoiseDef {
@@ -564,7 +616,9 @@ mod tests {
             amplitude: 20.0,
         };
 
-        let voxels = generate_heightmap_chunk(IVec3::ZERO, 42, &height_map, None, None);
+        let shape = padded_shape();
+        let voxels =
+            generate_heightmap_chunk(IVec3::ZERO, 42, &height_map, None, None, 16, 18, &shape);
         let air_count = voxels.iter().filter(|v| **v == WorldVoxel::Air).count();
         let solid_count = voxels
             .iter()
@@ -587,12 +641,22 @@ mod tests {
         };
 
         // Chunk at y=-5 means world_y ranges roughly from -80..-64, well below surface.
-        let voxels = generate_heightmap_chunk(IVec3::new(0, -5, 0), 42, &height_map, None, None);
+        let shape = padded_shape();
+        let voxels = generate_heightmap_chunk(
+            IVec3::new(0, -5, 0),
+            42,
+            &height_map,
+            None,
+            None,
+            16,
+            18,
+            &shape,
+        );
         let solid_count = voxels
             .iter()
             .filter(|v| matches!(v, WorldVoxel::Solid(_)))
             .count();
-        let total = PaddedChunkShape::SIZE as usize;
+        let total = shape.usize();
 
         assert_eq!(
             solid_count, total,
@@ -655,12 +719,16 @@ mod tests {
             make_biome_rule("sand", (-100.0, 100.0), (0.0, 1.0), 2),
         ]);
 
+        let shape = padded_shape();
         let voxels = generate_heightmap_chunk(
             IVec3::ZERO,
             42,
             &height_map,
             Some(&moisture_map),
             Some(&biome_rules),
+            16,
+            18,
+            &shape,
         );
 
         let mut materials: std::collections::HashSet<u8> = std::collections::HashSet::new();

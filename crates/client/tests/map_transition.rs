@@ -9,7 +9,8 @@ use protocol::PendingTransition;
 use protocol::{CharacterMarker, MapInstanceId, MapRegistry};
 use ui::{ClientState, MapTransitionState};
 use voxel_map_engine::prelude::{
-    chunk_to_column, ChunkTicket, FlatGenerator, VoxelGenerator, VoxelMapConfig, VoxelMapInstance,
+    chunk_to_column, ChunkTicket, FlatGenerator, MapDimensions, RuntimeShape, VoxelGenerator,
+    VoxelMapConfig, VoxelMapInstance,
 };
 
 fn transition_test_app() -> App {
@@ -31,9 +32,18 @@ fn spawn_map(app: &mut App) -> Entity {
     let map = app
         .world_mut()
         .spawn((
-            VoxelMapInstance::new(3),
-            VoxelMapConfig::new(0, 0, 1, None, 3),
-            VoxelGenerator(Arc::new(FlatGenerator)),
+            VoxelMapInstance::new(3, 16),
+            VoxelMapConfig::new(0, 0, 1, false),
+            MapDimensions {
+                chunk_size: 16,
+                column_y_range: (-8, 8),
+                tree_height: 3,
+                bounds: None,
+            },
+            VoxelGenerator(Arc::new(FlatGenerator {
+                chunk_size: 16,
+                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+            })),
             Transform::default(),
             MapInstanceId::Overworld,
         ))

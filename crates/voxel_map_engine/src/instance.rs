@@ -1,11 +1,10 @@
 use bevy::prelude::*;
 use grid_tree::{NodeKey, OctreeI32, VisitCommand};
-use ndshape::ConstShape;
+use ndshape::{RuntimeShape, Shape};
 use std::collections::{HashMap, HashSet};
 
 use crate::api::voxel_to_chunk_pos;
-use crate::config::VoxelMapConfig;
-use crate::types::{CHUNK_SIZE, ChunkData, PaddedChunkShape, WorldVoxel};
+use crate::types::{ChunkData, WorldVoxel};
 
 /// Marker: this map is the shared overworld.
 #[derive(Component)]
@@ -35,55 +34,26 @@ pub struct VoxelMapInstance {
     /// Chunks that need async remeshing after in-place mutation.
     pub chunks_needing_remesh: HashSet<IVec3>,
     pub debug_colors: bool,
+    pub chunk_size: u32,
+    pub padded_size: u32,
+    /// Padded chunk shape `[padded_size; 3]`. Cloned into async tasks.
+    pub shape: RuntimeShape<u32, 3>,
 }
 
 impl VoxelMapInstance {
-    pub fn new(tree_height: u32) -> Self {
+    pub fn new(tree_height: u32, chunk_size: u32) -> Self {
+        debug_assert!(chunk_size.is_power_of_two() && chunk_size >= 8);
+        let padded_size = chunk_size + 2;
         Self {
             tree: OctreeI32::new(tree_height as u8),
             chunk_levels: HashMap::new(),
             dirty_chunks: HashSet::new(),
             chunks_needing_remesh: HashSet::new(),
             debug_colors: false,
+            chunk_size,
+            padded_size,
+            shape: RuntimeShape::<u32, 3>::new([padded_size, padded_size, padded_size]),
         }
-    }
-
-    /// Bundle for an unbounded overworld map.
-    pub fn overworld(seed: u64) -> (Self, VoxelMapConfig, Overworld) {
-        let tree_height = 5;
-        (
-            Self::new(tree_height),
-            VoxelMapConfig::new(seed, 0, 10, None, tree_height),
-            Overworld,
-        )
-    }
-
-    /// Bundle for a player's bounded homebase map.
-    pub fn homebase(owner_id: u64, bounds: IVec3) -> (Self, VoxelMapConfig, Homebase) {
-        let tree_height = 3;
-        let spawning_distance = bounds_to_spawning_distance(bounds);
-        (
-            Self::new(tree_height),
-            VoxelMapConfig::new(
-                seed_from_id(owner_id),
-                0,
-                spawning_distance,
-                Some(bounds),
-                tree_height,
-            ),
-            Homebase { owner: owner_id },
-        )
-    }
-
-    /// Bundle for a bounded competition arena map.
-    pub fn arena(id: u64, seed: u64, bounds: IVec3) -> (Self, VoxelMapConfig, Arena) {
-        let tree_height = 3;
-        let spawning_distance = bounds_to_spawning_distance(bounds);
-        (
-            Self::new(tree_height),
-            VoxelMapConfig::new(seed, 0, spawning_distance, Some(bounds), tree_height),
-            Arena { id },
-        )
     }
 }
 
@@ -129,22 +99,20 @@ impl VoxelMapInstance {
     /// it for async remesh. Also updates neighbor chunk padding for boundary voxels.
     /// If the chunk is not loaded, the edit is silently dropped.
     pub fn set_voxel(&mut self, world_pos: IVec3, voxel: WorldVoxel) {
-        let chunk_pos = voxel_to_chunk_pos(world_pos);
-        let local = world_pos - chunk_pos * CHUNK_SIZE as i32;
+        let chunk_pos = voxel_to_chunk_pos(world_pos, self.chunk_size);
+        let local = world_pos - chunk_pos * self.chunk_size as i32;
+        let padded = [
+            (local.x + 1) as u32,
+            (local.y + 1) as u32,
+            (local.z + 1) as u32,
+        ];
+        let index = self.shape.linearize(padded) as usize;
 
-        {
-            let Some(chunk_data) = self.get_chunk_data_mut(chunk_pos) else {
-                trace!("set_voxel: chunk {chunk_pos} not loaded, edit at {world_pos} dropped");
-                return;
-            };
-            let padded = [
-                (local.x + 1) as u32,
-                (local.y + 1) as u32,
-                (local.z + 1) as u32,
-            ];
-            let index = PaddedChunkShape::linearize(padded) as usize;
-            chunk_data.voxels.set(index, voxel);
-        }
+        let Some(chunk_data) = self.get_chunk_data_mut(chunk_pos) else {
+            trace!("set_voxel: chunk {chunk_pos} not loaded, edit at {world_pos} dropped");
+            return;
+        };
+        chunk_data.voxels.set(index, voxel);
 
         self.dirty_chunks.insert(chunk_pos);
         self.chunks_needing_remesh.insert(chunk_pos);
@@ -154,28 +122,29 @@ impl VoxelMapInstance {
 
     /// Update padding voxels in neighboring chunks when a boundary voxel is modified.
     fn update_neighbor_padding(&mut self, chunk_pos: IVec3, local: IVec3, voxel: WorldVoxel) {
+        let chunk_size = self.chunk_size as i32;
         for axis in 0..3 {
             let l = local[axis];
             if l == 0 {
                 let mut neighbor = chunk_pos;
                 neighbor[axis] -= 1;
+                let mut pl = local;
+                pl[axis] = chunk_size;
+                let padded = [(pl.x + 1) as u32, (pl.y + 1) as u32, (pl.z + 1) as u32];
+                let idx = self.shape.linearize(padded) as usize;
                 if let Some(nd) = self.get_chunk_data_mut(neighbor) {
-                    let mut pl = local;
-                    pl[axis] = CHUNK_SIZE as i32;
-                    let padded = [(pl.x + 1) as u32, (pl.y + 1) as u32, (pl.z + 1) as u32];
-                    let idx = PaddedChunkShape::linearize(padded) as usize;
                     nd.voxels.set(idx, voxel);
                 }
                 self.chunks_needing_remesh.insert(neighbor);
             }
-            if l == CHUNK_SIZE as i32 - 1 {
+            if l == chunk_size - 1 {
                 let mut neighbor = chunk_pos;
                 neighbor[axis] += 1;
+                let mut pl = local;
+                pl[axis] = -1;
+                let padded = [(pl.x + 1) as u32, (pl.y + 1) as u32, (pl.z + 1) as u32];
+                let idx = self.shape.linearize(padded) as usize;
                 if let Some(nd) = self.get_chunk_data_mut(neighbor) {
-                    let mut pl = local;
-                    pl[axis] = -1;
-                    let padded = [(pl.x + 1) as u32, (pl.y + 1) as u32, (pl.z + 1) as u32];
-                    let idx = PaddedChunkShape::linearize(padded) as usize;
                     nd.voxels.set(idx, voxel);
                 }
                 self.chunks_needing_remesh.insert(neighbor);
@@ -184,7 +153,7 @@ impl VoxelMapInstance {
     }
 }
 
-fn bounds_to_spawning_distance(bounds: IVec3) -> u32 {
+pub fn bounds_to_spawning_distance(bounds: IVec3) -> u32 {
     bounds.max_element().max(1) as u32
 }
 
@@ -198,9 +167,12 @@ mod tests {
     use super::*;
     use crate::types::{ChunkStatus, FillType};
 
+    /// Padded chunk volume for the default `chunk_size=16`, used by tests.
+    const PADDED_VOLUME_16: usize = 18 * 18 * 18;
+
     #[test]
     fn new_creates_empty_instance() {
-        let instance = VoxelMapInstance::new(3);
+        let instance = VoxelMapInstance::new(3, 16);
         assert!(instance.chunk_levels.is_empty());
         assert!(instance.dirty_chunks.is_empty());
         assert!(instance.chunks_needing_remesh.is_empty());
@@ -208,7 +180,7 @@ mod tests {
 
     #[test]
     fn insert_and_find_chunk() {
-        let mut instance = VoxelMapInstance::new(3);
+        let mut instance = VoxelMapInstance::new(3, 16);
         let key = NodeKey::new(0, IVec3::new(1, 0, 2));
 
         instance
@@ -219,47 +191,13 @@ mod tests {
             });
 
         let relation = instance.tree.find_node(key).unwrap();
-        *instance.tree.get_value_mut(relation.child).unwrap() = Some(ChunkData::new_empty());
+        *instance.tree.get_value_mut(relation.child).unwrap() =
+            Some(ChunkData::new_empty(PADDED_VOLUME_16));
 
         let found = instance.tree.find_node(key);
         assert!(found.is_some());
         let data = instance.tree.get_value(found.unwrap().child).unwrap();
         assert!(data.is_some());
-    }
-
-    #[test]
-    fn overworld_bundle_has_correct_config() {
-        let (instance, config, _marker) = VoxelMapInstance::overworld(42);
-        assert_eq!(config.seed, 42);
-        assert_eq!(config.tree_height, 5);
-        assert_eq!(config.spawning_distance, 10);
-        assert!(config.bounds.is_none());
-        assert!(instance.chunk_levels.is_empty());
-    }
-
-    #[test]
-    fn homebase_bundle_has_correct_config() {
-        let owner_id: u64 = 7;
-        let bounds = IVec3::new(4, 8, 6);
-        let (instance, config, marker) = VoxelMapInstance::homebase(owner_id, bounds);
-        assert_eq!(config.seed, owner_id);
-        assert_eq!(config.tree_height, 3);
-        assert_eq!(config.spawning_distance, 8);
-        assert_eq!(config.bounds, Some(bounds));
-        assert_eq!(marker.owner, owner_id);
-        assert!(instance.chunk_levels.is_empty());
-    }
-
-    #[test]
-    fn arena_bundle_has_correct_config() {
-        let bounds = IVec3::new(3, 5, 4);
-        let (instance, config, marker) = VoxelMapInstance::arena(99, 123, bounds);
-        assert_eq!(config.seed, 123);
-        assert_eq!(config.tree_height, 3);
-        assert_eq!(config.spawning_distance, 5);
-        assert_eq!(config.bounds, Some(bounds));
-        assert_eq!(marker.id, 99);
-        assert!(instance.chunk_levels.is_empty());
     }
 
     #[test]
@@ -270,27 +208,10 @@ mod tests {
     }
 
     #[test]
-    fn homebase_seed_deterministic() {
-        let id: u64 = 12345;
-        let bounds = IVec3::new(4, 4, 4);
-        let (_, config1, _) = VoxelMapInstance::homebase(id, bounds);
-        let (_, config2, _) = VoxelMapInstance::homebase(id, bounds);
-        assert_eq!(config1.seed, config2.seed);
-    }
-
-    #[test]
-    fn different_owners_different_seeds() {
-        let bounds = IVec3::new(4, 4, 4);
-        let (_, config1, _) = VoxelMapInstance::homebase(1, bounds);
-        let (_, config2, _) = VoxelMapInstance::homebase(2, bounds);
-        assert_ne!(config1.seed, config2.seed);
-    }
-
-    #[test]
     fn insert_and_retrieve_chunk_data() {
-        let mut instance = VoxelMapInstance::new(5);
+        let mut instance = VoxelMapInstance::new(5, 16);
         let pos = IVec3::new(1, 0, 2);
-        let chunk = ChunkData::new_empty();
+        let chunk = ChunkData::new_empty(PADDED_VOLUME_16);
         instance.insert_chunk_data(pos, chunk);
         assert!(instance.get_chunk_data(pos).is_some());
         assert_eq!(
@@ -301,9 +222,9 @@ mod tests {
 
     #[test]
     fn remove_chunk_data_returns_data() {
-        let mut instance = VoxelMapInstance::new(5);
+        let mut instance = VoxelMapInstance::new(5, 16);
         let pos = IVec3::ZERO;
-        instance.insert_chunk_data(pos, ChunkData::new_empty());
+        instance.insert_chunk_data(pos, ChunkData::new_empty(PADDED_VOLUME_16));
         let removed = instance.remove_chunk_data(pos);
         assert!(removed.is_some());
         assert!(instance.get_chunk_data(pos).is_none());
@@ -311,23 +232,23 @@ mod tests {
 
     #[test]
     fn remove_nonexistent_chunk_returns_none() {
-        let mut instance = VoxelMapInstance::new(5);
+        let mut instance = VoxelMapInstance::new(5, 16);
         assert!(instance.remove_chunk_data(IVec3::ZERO).is_none());
     }
 
     #[test]
     fn get_nonexistent_chunk_returns_none() {
-        let instance = VoxelMapInstance::new(5);
+        let instance = VoxelMapInstance::new(5, 16);
         assert!(instance.get_chunk_data(IVec3::new(99, 99, 99)).is_none());
     }
 
     #[test]
     fn overwrite_chunk_data() {
-        let mut instance = VoxelMapInstance::new(5);
+        let mut instance = VoxelMapInstance::new(5, 16);
         let pos = IVec3::ZERO;
-        instance.insert_chunk_data(pos, ChunkData::new_empty());
+        instance.insert_chunk_data(pos, ChunkData::new_empty(PADDED_VOLUME_16));
 
-        let mut voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+        let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         voxels[0] = WorldVoxel::Solid(1);
         let solid_chunk = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
         instance.insert_chunk_data(pos, solid_chunk);
@@ -339,9 +260,9 @@ mod tests {
 
     #[test]
     fn set_voxel_mutates_octree_in_place() {
-        let mut instance = VoxelMapInstance::new(5);
+        let mut instance = VoxelMapInstance::new(5, 16);
         let chunk_pos = IVec3::ZERO;
-        let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+        let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         instance.insert_chunk_data(
             chunk_pos,
             ChunkData::from_voxels(&voxels, ChunkStatus::Full),
@@ -350,14 +271,14 @@ mod tests {
         let world_pos = IVec3::new(5, 5, 5);
         instance.set_voxel(world_pos, WorldVoxel::Solid(42));
 
-        let data = instance.get_chunk_data(chunk_pos).unwrap();
-        let local = world_pos - chunk_pos * CHUNK_SIZE as i32;
+        let local = world_pos - chunk_pos * instance.chunk_size as i32;
         let padded = [
             (local.x + 1) as u32,
             (local.y + 1) as u32,
             (local.z + 1) as u32,
         ];
-        let index = PaddedChunkShape::linearize(padded) as usize;
+        let index = instance.shape.linearize(padded) as usize;
+        let data = instance.get_chunk_data(chunk_pos).unwrap();
         assert_eq!(data.voxels.get(index), WorldVoxel::Solid(42));
         assert!(instance.dirty_chunks.contains(&chunk_pos));
         assert!(instance.chunks_needing_remesh.contains(&chunk_pos));
@@ -365,7 +286,7 @@ mod tests {
 
     #[test]
     fn set_voxel_on_unloaded_chunk_is_dropped() {
-        let mut instance = VoxelMapInstance::new(5);
+        let mut instance = VoxelMapInstance::new(5, 16);
         instance.set_voxel(IVec3::new(5, 5, 5), WorldVoxel::Solid(1));
         assert!(instance.dirty_chunks.is_empty());
         assert!(instance.chunks_needing_remesh.is_empty());
@@ -373,9 +294,9 @@ mod tests {
 
     #[test]
     fn multiple_edits_same_chunk_single_remesh() {
-        let mut instance = VoxelMapInstance::new(5);
+        let mut instance = VoxelMapInstance::new(5, 16);
         let chunk_pos = IVec3::ZERO;
-        let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+        let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         instance.insert_chunk_data(
             chunk_pos,
             ChunkData::from_voxels(&voxels, ChunkStatus::Full),
@@ -391,12 +312,12 @@ mod tests {
 
     #[test]
     fn boundary_edit_updates_neighbor_padding() {
-        let mut instance = VoxelMapInstance::new(5);
+        let mut instance = VoxelMapInstance::new(5, 16);
         let chunk_a = IVec3::ZERO;
         let chunk_b = IVec3::X; // neighbor in +x direction
 
-        let voxels_a = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
-        let voxels_b = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+        let voxels_a = vec![WorldVoxel::Air; PADDED_VOLUME_16];
+        let voxels_b = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         instance.insert_chunk_data(
             chunk_a,
             ChunkData::from_voxels(&voxels_a, ChunkStatus::Full),
@@ -411,13 +332,13 @@ mod tests {
         instance.set_voxel(world_pos, WorldVoxel::Solid(7));
 
         // Owning chunk should have the voxel at padded [16, 6, 6]
+        let idx_a = instance.shape.linearize([16, 6, 6]) as usize;
+        let idx_b = instance.shape.linearize([0, 6, 6]) as usize;
         let data_a = instance.get_chunk_data(chunk_a).unwrap();
-        let idx_a = PaddedChunkShape::linearize([16, 6, 6]) as usize;
         assert_eq!(data_a.voxels.get(idx_a), WorldVoxel::Solid(7));
 
         // Neighbor chunk_b should have padding updated at padded [0, 6, 6]
         let data_b = instance.get_chunk_data(chunk_b).unwrap();
-        let idx_b = PaddedChunkShape::linearize([0, 6, 6]) as usize;
         assert_eq!(
             data_b.voxels.get(idx_b),
             WorldVoxel::Solid(7),
@@ -431,11 +352,11 @@ mod tests {
 
     #[test]
     fn boundary_edit_low_edge_updates_neighbor_padding() {
-        let mut instance = VoxelMapInstance::new(5);
+        let mut instance = VoxelMapInstance::new(5, 16);
         let chunk_a = IVec3::ZERO;
         let chunk_neg = -IVec3::X; // neighbor in -x direction
 
-        let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+        let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         instance.insert_chunk_data(chunk_a, ChunkData::from_voxels(&voxels, ChunkStatus::Full));
         instance.insert_chunk_data(
             chunk_neg,
@@ -447,13 +368,13 @@ mod tests {
         instance.set_voxel(world_pos, WorldVoxel::Solid(11));
 
         // Owning chunk should have the voxel at padded [1, 4, 4]
+        let idx_a = instance.shape.linearize([1, 4, 4]) as usize;
+        let idx_neg = instance.shape.linearize([17, 4, 4]) as usize;
         let data_a = instance.get_chunk_data(chunk_a).unwrap();
-        let idx_a = PaddedChunkShape::linearize([1, 4, 4]) as usize;
         assert_eq!(data_a.voxels.get(idx_a), WorldVoxel::Solid(11));
 
         // Neighbor chunk_neg should have padding updated at padded [17, 4, 4]
         let data_neg = instance.get_chunk_data(chunk_neg).unwrap();
-        let idx_neg = PaddedChunkShape::linearize([17, 4, 4]) as usize;
         assert_eq!(
             data_neg.voxels.get(idx_neg),
             WorldVoxel::Solid(11),

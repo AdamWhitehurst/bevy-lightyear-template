@@ -15,9 +15,18 @@ fn test_app() -> App {
 fn spawn_map(app: &mut App, spawning_distance: u32) -> Entity {
     app.world_mut()
         .spawn((
-            VoxelMapInstance::new(5),
-            VoxelMapConfig::new(0, 0, spawning_distance, None, 5),
-            VoxelGenerator(std::sync::Arc::new(FlatGenerator)),
+            VoxelMapInstance::new(5, 16),
+            VoxelMapConfig::new(0, 0, spawning_distance, true),
+            MapDimensions {
+                chunk_size: 16,
+                column_y_range: (-8, 8),
+                tree_height: 5,
+                bounds: None,
+            },
+            VoxelGenerator(std::sync::Arc::new(FlatGenerator {
+                chunk_size: 16,
+                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+            })),
             Transform::default(),
         ))
         .id()
@@ -117,9 +126,18 @@ fn bounded_map_respects_bounds() {
     let map = app
         .world_mut()
         .spawn((
-            VoxelMapInstance::new(5),
-            VoxelMapConfig::new(0, 0, 5, Some(IVec3::new(2, 2, 2)), 5),
-            VoxelGenerator(std::sync::Arc::new(FlatGenerator)),
+            VoxelMapInstance::new(5, 16),
+            VoxelMapConfig::new(0, 0, 5, true),
+            MapDimensions {
+                chunk_size: 16,
+                column_y_range: (-8, 8),
+                tree_height: 5,
+                bounds: Some(IVec3::new(2, 2, 2)),
+            },
+            VoxelGenerator(std::sync::Arc::new(FlatGenerator {
+                chunk_size: 16,
+                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+            })),
             Transform::default(),
         ))
         .id();

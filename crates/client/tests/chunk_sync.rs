@@ -5,9 +5,12 @@ use lightyear::prelude::{Controlled, Predicted};
 use protocol::{CharacterMarker, MapInstanceId, MapRegistry};
 use voxel_map_engine::prelude::{
     chunk_to_column, column_to_chunks, ChunkData, ChunkStatus, ChunkTicket, FillType,
-    FlatGenerator, PalettedChunk, TicketType, VoxelChunk, VoxelGenerator, VoxelMapConfig,
-    VoxelMapInstance, VoxelPlugin, WorldVoxel, DEFAULT_COLUMN_Y_MAX, DEFAULT_COLUMN_Y_MIN,
+    FlatGenerator, MapDimensions, PalettedChunk, RuntimeShape, TicketType, VoxelChunk,
+    VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, WorldVoxel,
 };
+
+/// Padded chunk volume for the default `chunk_size=16`, used by tests.
+const PADDED_VOLUME_16: usize = 18 * 18 * 18;
 
 fn test_app() -> App {
     let mut app = App::new();
@@ -21,14 +24,22 @@ fn test_app() -> App {
 }
 
 fn spawn_client_map(app: &mut App) -> Entity {
-    let mut config = VoxelMapConfig::new(0, 0, 1, None, 3);
-    config.generates_chunks = false;
+    let config = VoxelMapConfig::new(0, 0, 1, false);
     let map = app
         .world_mut()
         .spawn((
-            VoxelMapInstance::new(3),
+            VoxelMapInstance::new(3, 16),
             config,
-            VoxelGenerator(Arc::new(FlatGenerator)),
+            MapDimensions {
+                chunk_size: 16,
+                column_y_range: (-8, 8),
+                tree_height: 3,
+                bounds: None,
+            },
+            VoxelGenerator(Arc::new(FlatGenerator {
+                chunk_size: 16,
+                shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
+            })),
             Transform::default(),
             MapInstanceId::Overworld,
         ))
@@ -66,7 +77,7 @@ fn simulate_unload_column(app: &mut App, map: Entity, col: IVec2) {
         .world_mut()
         .get_mut::<VoxelMapInstance>(map)
         .expect("map must have VoxelMapInstance");
-    for chunk_pos in column_to_chunks(col, DEFAULT_COLUMN_Y_MIN, DEFAULT_COLUMN_Y_MAX) {
+    for chunk_pos in column_to_chunks(col, (-8, 8)) {
         instance.remove_chunk_data(chunk_pos);
     }
     instance.chunk_levels.remove(&col);
@@ -79,7 +90,10 @@ fn chunk_data_stored_after_sync() {
     app.update();
 
     let chunk_pos = IVec3::ZERO;
-    let voxels = PalettedChunk::SingleValue(WorldVoxel::Solid(42));
+    let voxels = PalettedChunk::SingleValue {
+        voxel: WorldVoxel::Solid(42),
+        len: PADDED_VOLUME_16,
+    };
     simulate_chunk_sync(&mut app, map, chunk_pos, voxels.clone());
 
     let instance = app.world().get::<VoxelMapInstance>(map).unwrap();
@@ -114,13 +128,19 @@ fn chunk_levels_not_overwritten_by_second_sync_in_same_column() {
         &mut app,
         map,
         pos_a,
-        PalettedChunk::SingleValue(WorldVoxel::Solid(1)),
+        PalettedChunk::SingleValue {
+            voxel: WorldVoxel::Solid(1),
+            len: PADDED_VOLUME_16,
+        },
     );
     simulate_chunk_sync(
         &mut app,
         map,
         pos_b,
-        PalettedChunk::SingleValue(WorldVoxel::Solid(2)),
+        PalettedChunk::SingleValue {
+            voxel: WorldVoxel::Solid(2),
+            len: PADDED_VOLUME_16,
+        },
     );
 
     let instance = app.world().get::<VoxelMapInstance>(map).unwrap();
@@ -153,13 +173,19 @@ fn unload_column_removes_data_and_levels() {
         &mut app,
         map,
         pos_a,
-        PalettedChunk::SingleValue(WorldVoxel::Solid(1)),
+        PalettedChunk::SingleValue {
+            voxel: WorldVoxel::Solid(1),
+            len: PADDED_VOLUME_16,
+        },
     );
     simulate_chunk_sync(
         &mut app,
         map,
         pos_b,
-        PalettedChunk::SingleValue(WorldVoxel::Solid(2)),
+        PalettedChunk::SingleValue {
+            voxel: WorldVoxel::Solid(2),
+            len: PADDED_VOLUME_16,
+        },
     );
 
     simulate_unload_column(&mut app, map, col);
@@ -190,7 +216,10 @@ fn despawn_out_of_range_removes_mesh_entities_after_unload() {
         &mut app,
         map,
         chunk_pos,
-        PalettedChunk::SingleValue(WorldVoxel::Solid(1)),
+        PalettedChunk::SingleValue {
+            voxel: WorldVoxel::Solid(1),
+            len: PADDED_VOLUME_16,
+        },
     );
 
     // Spawn a mesh entity as child of the map, simulating what handle_chunk_data_sync does
@@ -251,7 +280,10 @@ fn client_propagator_does_not_remove_server_pushed_data() {
         &mut app,
         map,
         far_pos,
-        PalettedChunk::SingleValue(WorldVoxel::Solid(1)),
+        PalettedChunk::SingleValue {
+            voxel: WorldVoxel::Solid(1),
+            len: PADDED_VOLUME_16,
+        },
     );
 
     // Run several frames

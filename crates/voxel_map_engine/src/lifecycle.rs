@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use tracy_client::plot;
 
 use crate::chunk::VoxelChunk;
-use crate::config::{VoxelGenerator, VoxelMapConfig};
+use crate::config::{MapDimensions, VoxelGenerator, VoxelMapConfig};
 use crate::generation::{
     GEN_BATCH_SIZE, PendingChunks, PendingEntitySpawns, build_surface_height_map,
     spawn_features_task, spawn_mesh_task, spawn_terrain_batch,
@@ -17,11 +17,8 @@ use crate::generation::{
 use crate::instance::VoxelMapInstance;
 use crate::meshing::mesh_chunk_greedy;
 use crate::propagator::TicketLevelPropagator;
-use crate::ticket::{
-    ChunkTicket, DEFAULT_COLUMN_Y_MAX, DEFAULT_COLUMN_Y_MIN, TicketType, chunk_to_column,
-    column_to_chunks,
-};
-use crate::types::{CHUNK_SIZE, ChunkStatus, FillType};
+use crate::ticket::{ChunkTicket, TicketType, chunk_to_column, column_to_chunks};
+use crate::types::{ChunkStatus, FillType};
 
 /// Per-frame time budget for chunk pipeline work on a single map.
 /// Reset at the start of each frame by `update_chunks`.
@@ -151,15 +148,23 @@ pub struct PendingSaves {
 /// A single chunk save request waiting in the queue.
 struct PendingSave {
     position: IVec3,
+    chunk_size: u32,
     data: crate::types::ChunkData,
     save_dir: PathBuf,
 }
 
 impl PendingSaves {
     /// Enqueue a chunk for async saving.
-    pub fn enqueue(&mut self, position: IVec3, data: crate::types::ChunkData, save_dir: PathBuf) {
+    pub fn enqueue(
+        &mut self,
+        position: IVec3,
+        chunk_size: u32,
+        data: crate::types::ChunkData,
+        save_dir: PathBuf,
+    ) {
         self.queue.push_back(PendingSave {
             position,
+            chunk_size,
             data,
             save_dir,
         });
@@ -198,8 +203,8 @@ pub(crate) struct CachedTicket {
 }
 
 /// Convert a world-space position to a 2D column position (drop Y).
-pub fn world_to_column_pos(translation: Vec3) -> IVec2 {
-    let chunk = world_to_chunk_pos(translation);
+pub fn world_to_column_pos(translation: Vec3, chunk_size: u32) -> IVec2 {
+    let chunk = world_to_chunk_pos(translation, chunk_size);
     IVec2::new(chunk.x, chunk.z)
 }
 
@@ -329,6 +334,7 @@ pub(crate) fn update_chunks(
         Entity,
         &mut VoxelMapInstance,
         &VoxelMapConfig,
+        &MapDimensions,
         &VoxelGenerator,
         &mut PendingChunks,
         &mut TicketLevelPropagator,
@@ -346,13 +352,11 @@ pub(crate) fn update_chunks(
 
     collect_tickets(&mut map_query, &ticket_query, &mut ticket_cache);
 
-    let y_min = DEFAULT_COLUMN_Y_MIN;
-    let y_max = DEFAULT_COLUMN_Y_MAX;
-
     for (
         _map_entity,
         mut instance,
         config,
+        dimensions,
         generator,
         mut pending,
         mut propagator,
@@ -363,6 +367,8 @@ pub(crate) fn update_chunks(
         mut tracker,
     ) in &mut map_query
     {
+        let (y_min, y_max) = dimensions.column_y_range;
+
         let diff = {
             let _span = info_span!("propagate_ticket_levels").entered();
             propagator.propagate()
@@ -382,12 +388,12 @@ pub(crate) fn update_chunks(
             );
         }
         for &(col, level) in &diff.loaded {
-            if is_column_within_bounds(col, config.bounds) {
+            if is_column_within_bounds(col, dimensions.bounds) {
                 instance.chunk_levels.insert(col, level);
             }
         }
         for &(col, level) in &diff.changed {
-            if is_column_within_bounds(col, config.bounds) {
+            if is_column_within_bounds(col, dimensions.bounds) {
                 instance.chunk_levels.insert(col, level);
             }
         }
@@ -398,7 +404,7 @@ pub(crate) fn update_chunks(
                 &propagator,
                 &mut gen_queue,
                 &diff,
-                config.bounds,
+                dimensions.bounds,
                 y_min,
                 y_max,
             );
@@ -408,6 +414,7 @@ pub(crate) fn update_chunks(
                 &mut gen_queue,
                 &mut tracker,
                 config,
+                dimensions,
                 generator,
                 &budget,
             );
@@ -429,6 +436,7 @@ fn collect_tickets(
         Entity,
         &mut VoxelMapInstance,
         &VoxelMapConfig,
+        &MapDimensions,
         &VoxelGenerator,
         &mut PendingChunks,
         &mut TicketLevelPropagator,
@@ -451,7 +459,7 @@ fn collect_tickets(
         .collect();
     for entity in stale {
         if let Some(cached) = ticket_cache.remove(&entity) {
-            if let Ok((_, _, _, _, _, mut prop, _, _, _, _, _)) =
+            if let Ok((_, _, _, _, _, _, mut prop, _, _, _, _, _)) =
                 map_query.get_mut(cached.map_entity)
             {
                 prop.remove_source(entity);
@@ -462,7 +470,7 @@ fn collect_tickets(
     for (ticket_entity, ticket, transform) in ticket_query.iter() {
         // Compute column from immutable access; borrow drops at end of block.
         let column = {
-            let Ok((_, _, _, _, _, _, map_transform, _, _, _, _)) =
+            let Ok((_, instance, _, _, _, _, _, map_transform, _, _, _, _)) =
                 map_query.get(ticket.map_entity)
             else {
                 trace!(
@@ -473,7 +481,7 @@ fn collect_tickets(
             };
             let map_inv = map_transform.affine().inverse();
             let local_pos = map_inv.transform_point3(transform.translation());
-            world_to_column_pos(local_pos)
+            world_to_column_pos(local_pos, instance.chunk_size)
         };
 
         let needs_update = match ticket_cache.get(&ticket_entity) {
@@ -490,14 +498,14 @@ fn collect_tickets(
             // If map changed, remove source from old map's propagator first
             if let Some(cached) = ticket_cache.get(&ticket_entity) {
                 if cached.map_entity != ticket.map_entity {
-                    if let Ok((_, _, _, _, _, mut old_prop, _, _, _, _, _)) =
+                    if let Ok((_, _, _, _, _, _, mut old_prop, _, _, _, _, _)) =
                         map_query.get_mut(cached.map_entity)
                     {
                         old_prop.remove_source(ticket_entity);
                     }
                 }
             }
-            if let Ok((_, _, _, _, _, mut prop, _, _, _, _, _)) =
+            if let Ok((_, _, _, _, _, _, mut prop, _, _, _, _, _)) =
                 map_query.get_mut(ticket.map_entity)
             {
                 prop.set_source(
@@ -531,12 +539,13 @@ fn remove_column_chunks(
     y_max: i32,
 ) {
     let _span = info_span!("remove_column_chunks").entered();
-    for chunk_pos in column_to_chunks(col, y_min, y_max) {
+    for chunk_pos in column_to_chunks(col, (y_min, y_max)) {
         if instance.dirty_chunks.remove(&chunk_pos) {
             if let Some(dir) = save_dir {
                 if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
                     pending_saves.queue.push_back(PendingSave {
                         position: chunk_pos,
+                        chunk_size: instance.chunk_size,
                         data: chunk_data.clone(),
                         save_dir: dir.to_path_buf(),
                     });
@@ -568,9 +577,12 @@ pub fn drain_pending_saves(mut map_query: Query<&mut PendingSaves>) {
         {
             let save = pending.queue.pop_front().unwrap();
             let task = pool.spawn(async move {
-                if let Err(e) =
-                    crate::persistence::save_chunk(&save.save_dir, save.position, &save.data)
-                {
+                if let Err(e) = crate::persistence::save_chunk(
+                    &save.save_dir,
+                    save.position,
+                    save.chunk_size,
+                    &save.data,
+                ) {
                     error!("Failed to save chunk at {:?}: {e}", save.position);
                 }
             });
@@ -611,7 +623,7 @@ fn enqueue_new_chunks(
     for &(col, level) in diff.loaded.iter().chain(diff.changed.iter()) {
         let distance = propagator.min_distance_to_source(col);
         let max_status = ChunkStatus::max_for_level(level);
-        for chunk_pos in column_to_chunks(col, y_min, y_max) {
+        for chunk_pos in column_to_chunks(col, (y_min, y_max)) {
             if !is_within_bounds(chunk_pos, bounds) {
                 continue;
             }
@@ -637,12 +649,14 @@ fn enqueue_new_chunks(
 ///
 /// Stale entries (chunk already generated, already pending, column unloaded,
 /// or out of bounds) are skipped via lazy deletion.
+#[allow(clippy::too_many_arguments)]
 fn drain_gen_queue(
     instance: &mut VoxelMapInstance,
     pending: &mut PendingChunks,
     gen_queue: &mut GenQueue,
     tracker: &mut ChunkWorkTracker,
     config: &VoxelMapConfig,
+    dimensions: &MapDimensions,
     generator: &VoxelGenerator,
     budget: &ChunkWorkBudget,
 ) {
@@ -681,7 +695,7 @@ fn drain_gen_queue(
             stale += 1;
             continue;
         }
-        if !is_within_bounds(work.position, config.bounds) {
+        if !is_within_bounds(work.position, dimensions.bounds) {
             stale += 1;
             continue;
         }
@@ -715,6 +729,8 @@ fn drain_gen_queue(
                         std::mem::take(&mut terrain_batch),
                         generator,
                         config.save_dir.clone(),
+                        instance.chunk_size,
+                        instance.shape.clone(),
                     );
                     terrain_batch = Vec::with_capacity(GEN_BATCH_SIZE);
                 }
@@ -737,7 +753,13 @@ fn drain_gen_queue(
                     });
                     continue;
                 }
-                let height_map = build_surface_height_map(work.position, &chunk_data.voxels);
+                let height_map = build_surface_height_map(
+                    work.position,
+                    &chunk_data.voxels,
+                    instance.chunk_size,
+                    instance.padded_size,
+                    &instance.shape,
+                );
                 tracker.generating.insert(work.position);
                 spawn_features_task(
                     pending,
@@ -755,7 +777,7 @@ fn drain_gen_queue(
                     .voxels
                     .to_voxels();
                 tracker.generating.insert(work.position);
-                spawn_mesh_task(pending, work.position, voxels);
+                spawn_mesh_task(pending, work.position, voxels, instance.shape.clone());
                 spawned += 1;
             }
             ChunkStatus::Full => {
@@ -770,7 +792,14 @@ fn drain_gen_queue(
 
     // Flush remaining terrain batch
     if !terrain_batch.is_empty() {
-        spawn_terrain_batch(pending, terrain_batch, generator, config.save_dir.clone());
+        spawn_terrain_batch(
+            pending,
+            terrain_batch,
+            generator,
+            config.save_dir.clone(),
+            instance.chunk_size,
+            instance.shape.clone(),
+        );
     }
 
     let stop_reason = if pending.tasks.len() >= MAX_PENDING_GEN_TASKS {
@@ -916,7 +945,7 @@ fn handle_completed_chunk(
     // Spawn mesh entity only when a mesh is present (Mesh stage or disk-loaded Full chunks)
     if let Some(mesh) = result.mesh {
         let mesh_handle = meshes.add(mesh);
-        let offset = chunk_world_offset(result.position);
+        let offset = chunk_world_offset(result.position, instance.chunk_size);
 
         let material = if instance.debug_colors {
             materials.add(StandardMaterial {
@@ -973,12 +1002,12 @@ fn is_within_bounds(pos: IVec3, bounds: Option<IVec3>) -> bool {
     }
 }
 
-fn world_to_chunk_pos(translation: Vec3) -> IVec3 {
-    (translation / CHUNK_SIZE as f32).floor().as_ivec3()
+pub fn world_to_chunk_pos(translation: Vec3, chunk_size: u32) -> IVec3 {
+    (translation / chunk_size as f32).floor().as_ivec3()
 }
 
-fn chunk_world_offset(chunk_pos: IVec3) -> Vec3 {
-    chunk_pos.as_vec3() * CHUNK_SIZE as f32 - Vec3::ONE
+fn chunk_world_offset(chunk_pos: IVec3, chunk_size: u32) -> Vec3 {
+    chunk_pos.as_vec3() * chunk_size as f32 - Vec3::ONE
 }
 
 /// Despawn chunk entities whose column is no longer in the parent map's `chunk_levels`.
@@ -1083,7 +1112,8 @@ pub fn spawn_remesh_tasks(
                 let _span = info_span!("expand_palette").entered();
                 chunk_data.voxels.to_voxels()
             };
-            let task = pool.spawn(async move { mesh_chunk_greedy(&voxels) });
+            let shape = instance.shape.clone();
+            let task = pool.spawn(async move { mesh_chunk_greedy(&voxels, &shape) });
             pending.tasks.push(RemeshTask {
                 chunk_pos: work.position,
                 task,
@@ -1153,7 +1183,7 @@ pub fn poll_remesh_tasks(
                 }
                 (Some(mesh), None) => {
                     let handle = meshes.add(mesh);
-                    let offset = chunk_world_offset(remesh.chunk_pos);
+                    let offset = chunk_world_offset(remesh.chunk_pos, instance.chunk_size);
                     let material = if instance.debug_colors {
                         materials.add(StandardMaterial {
                             base_color: color_from_chunk_pos(remesh.chunk_pos),
@@ -1199,25 +1229,25 @@ mod tests {
 
     #[test]
     fn world_to_chunk_pos_positive() {
-        let pos = world_to_chunk_pos(Vec3::new(20.0, 0.0, 5.0));
+        let pos = world_to_chunk_pos(Vec3::new(20.0, 0.0, 5.0), 16);
         assert_eq!(pos, IVec3::new(1, 0, 0));
     }
 
     #[test]
     fn world_to_chunk_pos_negative() {
-        let pos = world_to_chunk_pos(Vec3::new(-1.0, -17.0, 0.0));
+        let pos = world_to_chunk_pos(Vec3::new(-1.0, -17.0, 0.0), 16);
         assert_eq!(pos, IVec3::new(-1, -2, 0));
     }
 
     #[test]
     fn chunk_world_offset_calculation() {
-        let offset = chunk_world_offset(IVec3::new(1, 2, 3));
+        let offset = chunk_world_offset(IVec3::new(1, 2, 3), 16);
         assert_eq!(offset, Vec3::new(15.0, 31.0, 47.0));
     }
 
     #[test]
     fn world_to_column_pos_drops_y() {
-        let col = world_to_column_pos(Vec3::new(20.0, 99.0, 5.0));
+        let col = world_to_column_pos(Vec3::new(20.0, 99.0, 5.0), 16);
         assert_eq!(col, IVec2::new(1, 0));
     }
 }

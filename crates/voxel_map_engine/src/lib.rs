@@ -15,6 +15,8 @@ pub mod terrain;
 pub mod ticket;
 pub mod types;
 
+pub use ndshape::{RuntimeShape, Shape};
+
 use bevy::prelude::*;
 
 /// Insert this resource to enable chunk generation systems (propagator,
@@ -27,6 +29,7 @@ pub struct VoxelPlugin;
 
 impl Plugin for VoxelPlugin {
     fn build(&self, app: &mut App) {
+        app.register_type::<config::MapDimensions>();
         app.register_type::<terrain::HeightMap>();
         app.register_type::<terrain::MoistureMap>();
         app.register_type::<terrain::BiomeRules>();
@@ -72,5 +75,5 @@ pub mod prelude {
     pub use crate::terrain::*;
     pub use crate::ticket::*;
     pub use crate::types::*;
-    pub use crate::{ChunkGenerationEnabled, VoxelPlugin};
+    pub use crate::{ChunkGenerationEnabled, RuntimeShape, Shape, VoxelPlugin};
 }

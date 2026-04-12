@@ -24,7 +24,7 @@ impl TicketType {
     /// The default Chebyshev radius for this ticket type.
     pub fn default_radius(self) -> u32 {
         match self {
-            TicketType::Player => 200,
+            TicketType::Player => 4,
             TicketType::Npc => 1,
             TicketType::MapTransition => 4,
         }
@@ -137,14 +137,10 @@ pub const LOAD_LEVEL_THRESHOLD: u32 = 20;
 /// Maximum level value. Columns beyond this are not tracked by the propagator.
 pub const MAX_LEVEL: u32 = 64;
 
-/// Default column height range: 16 chunks vertically (Y range −8 to 7, exclusive upper bound).
-pub const DEFAULT_COLUMN_Y_MIN: i32 = -8;
-pub const DEFAULT_COLUMN_Y_MAX: i32 = 8;
-
 /// Expand a 2D column position to all 3D chunk positions in the column.
-/// Uses exclusive upper bound: `y_min..y_max`.
-pub fn column_to_chunks(col: IVec2, y_min: i32, y_max: i32) -> impl Iterator<Item = IVec3> {
-    (y_min..y_max).map(move |y| IVec3::new(col.x, y, col.y))
+/// Uses exclusive upper bound: `y_range.0..y_range.1`.
+pub fn column_to_chunks(col: IVec2, y_range: (i32, i32)) -> impl Iterator<Item = IVec3> {
+    (y_range.0..y_range.1).map(move |y| IVec3::new(col.x, y, col.y))
 }
 
 /// Convert a 3D chunk position to its 2D column (drop Y).
@@ -165,7 +161,7 @@ mod tests {
 
     #[test]
     fn ticket_type_default_radii() {
-        assert_eq!(TicketType::Player.default_radius(), 200);
+        assert_eq!(TicketType::Player.default_radius(), 4);
         assert_eq!(TicketType::Npc.default_radius(), 1);
         assert_eq!(TicketType::MapTransition.default_radius(), 4);
     }
@@ -182,7 +178,7 @@ mod tests {
     #[test]
     fn column_to_chunks_produces_correct_range() {
         let col = IVec2::new(3, 5);
-        let chunks: Vec<IVec3> = column_to_chunks(col, -2, 2).collect();
+        let chunks: Vec<IVec3> = column_to_chunks(col, (-2, 2)).collect();
         assert_eq!(chunks.len(), 4); // -2, -1, 0, 1 (exclusive upper)
         assert_eq!(chunks[0], IVec3::new(3, -2, 5));
         assert_eq!(chunks[3], IVec3::new(3, 1, 5));
@@ -203,7 +199,7 @@ mod tests {
         let e = test_entity();
         let p = ChunkTicket::player(e);
         assert_eq!(p.ticket_type, TicketType::Player);
-        assert_eq!(p.radius, 200);
+        assert_eq!(p.radius, 4);
         let n = ChunkTicket::npc(e);
         assert_eq!(n.ticket_type, TicketType::Npc);
         assert_eq!(n.radius, 1);

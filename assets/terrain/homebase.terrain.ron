@@ -1,2 +1,8 @@
 {
+    "voxel_map_engine::config::MapDimensions": (
+        chunk_size: 32,
+        column_y_range: (-4, 4),
+        tree_height: 3,
+        bounds: Some((4, 4, 4)),
+    ),
 }

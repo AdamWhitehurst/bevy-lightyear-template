@@ -3,12 +3,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::palette::PalettedChunk;
 
-/// 16^3 voxel chunks with 1-voxel padding on each side -> 18^3 padded array
-pub type PaddedChunkShape = ndshape::ConstShape3u32<18, 18, 18>;
-
-pub const CHUNK_SIZE: u32 = 16;
-pub const PADDED_CHUNK_SIZE: u32 = 18;
-
 /// Voxel data stored per position
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect)]
 pub enum WorldVoxel {
@@ -78,14 +72,17 @@ pub struct ChunkData {
 }
 
 impl ChunkData {
-    /// Create an empty chunk (all air).
+    /// Create an empty chunk (all air) with the given padded volume.
     ///
     /// Status is `Full` because this creates a fully-resolved all-air chunk
     /// (used by tests and the API layer for explicit voxel edits), not a chunk
     /// entering the generation pipeline.
-    pub fn new_empty() -> Self {
+    pub fn new_empty(padded_volume: usize) -> Self {
         Self {
-            voxels: PalettedChunk::SingleValue(WorldVoxel::Air),
+            voxels: PalettedChunk::SingleValue {
+                voxel: WorldVoxel::Air,
+                len: padded_volume,
+            },
             fill_type: FillType::Empty,
             hash: 0,
             status: ChunkStatus::Full,
@@ -179,24 +176,13 @@ impl block_mesh::MergeVoxel for WorldVoxel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ndshape::ConstShape;
 
-    #[test]
-    fn padded_chunk_shape_size() {
-        assert_eq!(PaddedChunkShape::SIZE, 18 * 18 * 18);
-    }
-
-    #[test]
-    fn padded_chunk_shape_linearize_roundtrip() {
-        let point = [5u32, 10, 3];
-        let index = PaddedChunkShape::linearize(point);
-        let back = PaddedChunkShape::delinearize(index);
-        assert_eq!(point, back);
-    }
+    /// Padded chunk volume for the default `chunk_size=16`, used by tests.
+    const PADDED_VOLUME_16: usize = 18 * 18 * 18;
 
     #[test]
     fn chunk_data_new_empty() {
-        let chunk = ChunkData::new_empty();
+        let chunk = ChunkData::new_empty(PADDED_VOLUME_16);
         assert!(chunk.voxels.is_uniform());
         assert_eq!(chunk.voxels.get(0), WorldVoxel::Air);
         assert_eq!(chunk.fill_type, FillType::Empty);
@@ -245,12 +231,12 @@ mod tests {
 
     #[test]
     fn from_voxels_sets_fill_type_and_hash() {
-        let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+        let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         let chunk = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
         assert_eq!(chunk.fill_type, FillType::Empty);
         assert!(chunk.voxels.is_uniform());
 
-        let mut mixed = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+        let mut mixed = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         mixed[0] = WorldVoxel::Solid(1);
         let chunk = ChunkData::from_voxels(&mixed, ChunkStatus::Full);
         assert_eq!(chunk.fill_type, FillType::Mixed);
@@ -276,13 +262,13 @@ mod tests {
 
     #[test]
     fn chunk_data_new_empty_has_full_status() {
-        let chunk = ChunkData::new_empty();
+        let chunk = ChunkData::new_empty(PADDED_VOLUME_16);
         assert_eq!(chunk.status, ChunkStatus::Full);
     }
 
     #[test]
     fn chunk_data_from_voxels_preserves_status() {
-        let voxels = vec![WorldVoxel::Air; PaddedChunkShape::USIZE];
+        let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         let terrain = ChunkData::from_voxels(&voxels, ChunkStatus::Terrain);
         assert_eq!(terrain.status, ChunkStatus::Terrain);
 
