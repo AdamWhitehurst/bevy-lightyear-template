@@ -792,13 +792,18 @@ Sweep all test call sites and examples for the removed `VoxelMapConfig::new` sig
 ### Verification
 
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test --workspace` passes (all crates, all tests)
+- [x] `cargo check-all` passes
+- [x] `cargo test --workspace` passes (all crates, all tests)
 
 #### Manual
 - [ ] `cargo run --example multi_instance` runs (from `voxel_map_engine`)
 - [ ] `cargo run --example terrain` runs
 - [ ] `cargo run --example editing` runs
+
+> Note: Phase 7's test/example updates were folded into Phase 5 because
+> removing VoxelMapConfig fields breaks every call site at once and the
+> test suite can't pass until they're all updated. Phase 7 is therefore
+> a no-op commit that just records plan-wide verification.
 
 ---
 
