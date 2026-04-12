@@ -924,10 +924,16 @@ fn handle_completed_chunk(
         instance.insert_chunk_data(result.position, chunk_data);
         status
     } else {
-        // Features stage: update status in-place, no re-palettization
-        let data = instance
-            .get_chunk_data_mut(result.position)
-            .expect("chunk must exist for Features status update");
+        // Features stage: update status in-place, no re-palettization.
+        // The chunk may have been unloaded while the async Features task was
+        // in-flight (e.g. a ticket moved columns). Discard the stale result.
+        let Some(data) = instance.get_chunk_data_mut(result.position) else {
+            trace!(
+                "discarding stale Features result for {:?}: column unloaded while task was in-flight",
+                result.position
+            );
+            return;
+        };
         data.status = ChunkStatus::Features;
         if !result.from_disk {
             instance.dirty_chunks.insert(result.position);

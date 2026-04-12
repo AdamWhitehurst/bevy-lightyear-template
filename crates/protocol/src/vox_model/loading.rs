@@ -179,7 +179,7 @@ pub(super) fn reload_vox_models(
         .read()
         .any(|e| matches!(e, AssetEvent::Modified { .. }))
     {
-        trace!("No modified events found for reload_vox_models");
+        // trace!("No modified events found for reload_vox_models");
         return;
     }
     let folder = loaded_folders
