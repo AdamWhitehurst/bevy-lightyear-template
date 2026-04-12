@@ -1,3 +1,4 @@
+pub mod fs_map_entities;
 pub mod fs_map_meta;
 
 use std::fs;

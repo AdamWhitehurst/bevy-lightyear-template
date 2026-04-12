@@ -27,10 +27,9 @@ use voxel_map_engine::prelude::{
     VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
 };
 
+use crate::persistence::fs_map_entities::FsMapEntitiesStore;
 use crate::persistence::fs_map_meta::FsMapMetaStore;
-use crate::persistence::{
-    load_entities, load_map_meta, map_save_dir, save_entities, MapMeta, WorldSavePath,
-};
+use crate::persistence::{load_entities, load_map_meta, map_save_dir, MapMeta, WorldSavePath};
 use persistence::{PendingStoreOps, StoreBackend};
 use protocol::map::{MapSaveTarget, SavedEntity, SavedEntityKind};
 use protocol::terrain::TerrainDef;
@@ -123,6 +122,10 @@ fn init_overworld_entity(
                 map_dir: map_dir.clone(),
             }),
             PendingStoreOps::<(), MapMeta>::default(),
+            StoreBackend::new(FsMapEntitiesStore {
+                map_dir: map_dir.clone(),
+            }),
+            PendingStoreOps::<(), Vec<SavedEntity>>::default(),
         ))
         .id();
 
@@ -299,7 +302,6 @@ fn build_generator_from_def(
 fn save_dirty_chunks_debounced(
     time: Res<Time>,
     mut dirty_state: ResMut<WorldDirtyState>,
-    save_path: Res<WorldSavePath>,
     mut map_query: Query<(
         &mut VoxelMapInstance,
         &VoxelMapConfig,
@@ -307,6 +309,8 @@ fn save_dirty_chunks_debounced(
         &mut PendingSaves,
         &StoreBackend<(), MapMeta, FsMapMetaStore>,
         &mut PendingStoreOps<(), MapMeta>,
+        &StoreBackend<(), Vec<SavedEntity>, FsMapEntitiesStore>,
+        &mut PendingStoreOps<(), Vec<SavedEntity>>,
     )>,
     entity_query: Query<(
         &MapSaveTarget,
@@ -331,8 +335,18 @@ fn save_dirty_chunks_debounced(
         return;
     }
 
-    for (mut instance, config, map_id, mut pending_saves, meta_store, mut meta_ops) in
-        &mut map_query
+    let by_map = collect_entities_by_map(&entity_query);
+
+    for (
+        mut instance,
+        config,
+        map_id,
+        mut pending_saves,
+        meta_store,
+        mut meta_ops,
+        entity_store,
+        mut entity_ops,
+    ) in &mut map_query
     {
         let Some(map_dir) = config.save_dir.as_deref() else {
             trace!("save_dirty_chunks_debounced: no save_dir for {map_id:?}, skipping");
@@ -353,9 +367,11 @@ fn save_dirty_chunks_debounced(
             spawn_points,
         };
         meta_ops.spawn_save(&meta_store.0, (), meta);
-    }
 
-    collect_and_save_entities(&save_path, &entity_query);
+        if let Some(entities) = by_map.get(map_id) {
+            entity_ops.spawn_save(&entity_store.0, (), entities.clone());
+        }
+    }
 
     dirty_state.is_dirty = false;
     dirty_state.first_dirty_time = None;
@@ -404,9 +420,10 @@ pub fn save_world_on_shutdown(
         &MapInstanceId,
         &StoreBackend<(), MapMeta, FsMapMetaStore>,
         &mut PendingStoreOps<(), MapMeta>,
+        &StoreBackend<(), Vec<SavedEntity>, FsMapEntitiesStore>,
+        &mut PendingStoreOps<(), Vec<SavedEntity>>,
     )>,
     dirty_state: Res<WorldDirtyState>,
-    save_path: Res<WorldSavePath>,
     entity_query: Query<(
         &MapSaveTarget,
         &MapInstanceId,
@@ -420,9 +437,11 @@ pub fn save_world_on_shutdown(
     }
     exit_reader.clear();
 
+    let by_map = collect_entities_by_map(&entity_query);
+
     // Dirty chunks only need saving when edits occurred
     if dirty_state.is_dirty {
-        for (mut instance, config, _, _, _) in &mut map_query {
+        for (mut instance, config, _, _, _, _, _) in &mut map_query {
             let Some(map_dir) = config.save_dir.as_deref() else {
                 continue;
             };
@@ -431,7 +450,9 @@ pub fn save_world_on_shutdown(
     }
 
     // Meta and entities are always saved — their state is independent of voxel edits
-    for (_, config, map_id, meta_store, mut meta_ops) in &mut map_query {
+    for (_, config, map_id, meta_store, mut meta_ops, entity_store, mut entity_ops) in
+        &mut map_query
+    {
         if config.save_dir.is_none() {
             continue;
         }
@@ -448,31 +469,28 @@ pub fn save_world_on_shutdown(
         };
         meta_ops.spawn_save(&meta_store.0, (), meta);
         meta_ops.flush();
+
+        if let Some(entities) = by_map.get(map_id) {
+            entity_ops.spawn_save(&entity_store.0, (), entities.clone());
+        }
+        entity_ops.flush();
     }
 
-    collect_and_save_entities(&save_path, &entity_query);
     info!("World saved on shutdown");
 }
 
-/// Collect all persistable entities grouped by map and save to disk.
-fn collect_and_save_entities(
-    save_path: &WorldSavePath,
+/// Collect all persistable entities grouped by map instance.
+fn collect_entities_by_map(
     entity_query: &Query<(
         &MapSaveTarget,
         &MapInstanceId,
         &Position,
         Option<&RespawnPoint>,
     )>,
-) {
+) -> HashMap<MapInstanceId, Vec<SavedEntity>> {
     let mut by_map: HashMap<MapInstanceId, Vec<SavedEntity>> = HashMap::new();
 
-    for item in entity_query.iter() {
-        let (_marker, map_id, position, respawn): (
-            &MapSaveTarget,
-            &MapInstanceId,
-            &Position,
-            Option<&RespawnPoint>,
-        ) = item;
+    for (_marker, map_id, position, respawn) in entity_query.iter() {
         let kind = if respawn.is_some() {
             SavedEntityKind::RespawnPoint
         } else {
@@ -489,16 +507,12 @@ fn collect_and_save_entities(
         });
     }
 
-    for (map_id, entities) in &by_map {
-        let map_dir = map_save_dir(&save_path.0, map_id);
-        if let Err(e) = save_entities(&map_dir, entities) {
-            error!("Failed to save entities for {map_id:?}: {e}");
-        }
-    }
+    by_map
 }
 
-/// Load entities from disk for a map and spawn them in the ECS.
-fn load_map_entities(
+/// Synchronously load and spawn entities for a map. Used by homebase spawn path
+/// which doesn't yet use the async store lifecycle.
+fn load_map_entities_sync(
     commands: &mut Commands,
     save_path: &WorldSavePath,
     map_id: &MapInstanceId,
@@ -511,8 +525,13 @@ fn load_map_entities(
             return 0;
         }
     };
-
     let count = entities.len();
+    spawn_saved_entities(commands, map_id, &entities);
+    count
+}
+
+/// Spawn map entities (respawn points, etc.) from loaded data.
+fn spawn_saved_entities(commands: &mut Commands, map_id: &MapInstanceId, entities: &[SavedEntity]) {
     for saved in entities {
         match saved.kind {
             SavedEntityKind::RespawnPoint => {
@@ -520,28 +539,43 @@ fn load_map_entities(
             }
         }
     }
-    count
 }
 
-/// Synchronously load entities for maps in `AwaitingEntities` state and transition to `Ready`.
-///
-/// Temporary: Phase 2 will migrate this to async store-backed loading.
+/// Async load of map entities. Kicks off load on first frame, polls for completion.
 fn poll_map_entities(
     mut commands: Commands,
-    save_path: Res<WorldSavePath>,
-    mut query: Query<(&MapInstanceId, &mut MapLoadState)>,
+    mut query: Query<(
+        &MapInstanceId,
+        &mut MapLoadState,
+        &StoreBackend<(), Vec<SavedEntity>, FsMapEntitiesStore>,
+        &mut PendingStoreOps<(), Vec<SavedEntity>>,
+    )>,
 ) {
-    for (map_id, mut state) in &mut query {
+    for (map_id, mut state, store, mut ops) in &mut query {
         if *state != MapLoadState::AwaitingEntities {
             continue;
         }
 
-        let count = load_map_entities(&mut commands, &save_path, map_id);
-        if count > 0 {
-            info!("Loaded {count} entities for {map_id:?}");
+        // First frame: kick off the load
+        if ops.completed_loads.is_empty() && !ops.has_pending() && ops.load_errors.is_empty() {
+            ops.spawn_load(&store.0, ());
+            return;
         }
 
-        *state = MapLoadState::Ready;
+        ops.poll();
+
+        if let Some((_, entities_opt)) = ops.completed_loads.pop() {
+            if let Some(entities) = &entities_opt {
+                info!("Loaded {} entities for {map_id:?}", entities.len());
+                spawn_saved_entities(&mut commands, map_id, entities);
+            }
+            *state = MapLoadState::Ready;
+        }
+
+        for (_, e) in ops.load_errors.drain(..) {
+            warn!("Failed to load entities for {map_id:?}: {e}, proceeding with none");
+            *state = MapLoadState::Ready;
+        }
     }
 }
 
@@ -1264,7 +1298,7 @@ fn spawn_homebase(
 
     registry.insert(map_id.clone(), entity);
 
-    let entity_count = load_map_entities(commands, save_path, map_id);
+    let entity_count = load_map_entities_sync(commands, save_path, map_id);
     if entity_count > 0 {
         trace!("Loaded {entity_count} entities for homebase-{owner}");
     }

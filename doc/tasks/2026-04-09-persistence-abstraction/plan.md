@@ -469,7 +469,7 @@ New system, runs in `Update`. Queries entities with `MapLoadState::AwaitingEntit
 
 ### Verification
 #### Automated
-- [ ] `cargo check-all` passes
+- [x] `cargo check-all` passes
 
 #### Manual
 - [ ] `cargo server` — place a world object, trigger debounced save, restart, confirm object reappears
