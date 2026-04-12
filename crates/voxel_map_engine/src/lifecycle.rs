@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use tracy_client::plot;
 
 use crate::chunk::VoxelChunk;
-use crate::config::{VoxelGenerator, VoxelMapConfig};
+use crate::config::{MapDimensions, VoxelGenerator, VoxelMapConfig};
 use crate::generation::{
     GEN_BATCH_SIZE, PendingChunks, PendingEntitySpawns, build_surface_height_map,
     spawn_features_task, spawn_mesh_task, spawn_terrain_batch,
@@ -334,6 +334,7 @@ pub(crate) fn update_chunks(
         Entity,
         &mut VoxelMapInstance,
         &VoxelMapConfig,
+        &MapDimensions,
         &VoxelGenerator,
         &mut PendingChunks,
         &mut TicketLevelPropagator,
@@ -355,6 +356,7 @@ pub(crate) fn update_chunks(
         _map_entity,
         mut instance,
         config,
+        dimensions,
         generator,
         mut pending,
         mut propagator,
@@ -365,7 +367,7 @@ pub(crate) fn update_chunks(
         mut tracker,
     ) in &mut map_query
     {
-        let (y_min, y_max) = config.column_y_range;
+        let (y_min, y_max) = dimensions.column_y_range;
 
         let diff = {
             let _span = info_span!("propagate_ticket_levels").entered();
@@ -386,12 +388,12 @@ pub(crate) fn update_chunks(
             );
         }
         for &(col, level) in &diff.loaded {
-            if is_column_within_bounds(col, config.bounds) {
+            if is_column_within_bounds(col, dimensions.bounds) {
                 instance.chunk_levels.insert(col, level);
             }
         }
         for &(col, level) in &diff.changed {
-            if is_column_within_bounds(col, config.bounds) {
+            if is_column_within_bounds(col, dimensions.bounds) {
                 instance.chunk_levels.insert(col, level);
             }
         }
@@ -402,7 +404,7 @@ pub(crate) fn update_chunks(
                 &propagator,
                 &mut gen_queue,
                 &diff,
-                config.bounds,
+                dimensions.bounds,
                 y_min,
                 y_max,
             );
@@ -412,6 +414,7 @@ pub(crate) fn update_chunks(
                 &mut gen_queue,
                 &mut tracker,
                 config,
+                dimensions,
                 generator,
                 &budget,
             );
@@ -433,6 +436,7 @@ fn collect_tickets(
         Entity,
         &mut VoxelMapInstance,
         &VoxelMapConfig,
+        &MapDimensions,
         &VoxelGenerator,
         &mut PendingChunks,
         &mut TicketLevelPropagator,
@@ -455,7 +459,7 @@ fn collect_tickets(
         .collect();
     for entity in stale {
         if let Some(cached) = ticket_cache.remove(&entity) {
-            if let Ok((_, _, _, _, _, mut prop, _, _, _, _, _)) =
+            if let Ok((_, _, _, _, _, _, mut prop, _, _, _, _, _)) =
                 map_query.get_mut(cached.map_entity)
             {
                 prop.remove_source(entity);
@@ -466,7 +470,7 @@ fn collect_tickets(
     for (ticket_entity, ticket, transform) in ticket_query.iter() {
         // Compute column from immutable access; borrow drops at end of block.
         let column = {
-            let Ok((_, instance, _, _, _, _, map_transform, _, _, _, _)) =
+            let Ok((_, instance, _, _, _, _, _, map_transform, _, _, _, _)) =
                 map_query.get(ticket.map_entity)
             else {
                 trace!(
@@ -494,14 +498,14 @@ fn collect_tickets(
             // If map changed, remove source from old map's propagator first
             if let Some(cached) = ticket_cache.get(&ticket_entity) {
                 if cached.map_entity != ticket.map_entity {
-                    if let Ok((_, _, _, _, _, mut old_prop, _, _, _, _, _)) =
+                    if let Ok((_, _, _, _, _, _, mut old_prop, _, _, _, _, _)) =
                         map_query.get_mut(cached.map_entity)
                     {
                         old_prop.remove_source(ticket_entity);
                     }
                 }
             }
-            if let Ok((_, _, _, _, _, mut prop, _, _, _, _, _)) =
+            if let Ok((_, _, _, _, _, _, mut prop, _, _, _, _, _)) =
                 map_query.get_mut(ticket.map_entity)
             {
                 prop.set_source(
@@ -645,12 +649,14 @@ fn enqueue_new_chunks(
 ///
 /// Stale entries (chunk already generated, already pending, column unloaded,
 /// or out of bounds) are skipped via lazy deletion.
+#[allow(clippy::too_many_arguments)]
 fn drain_gen_queue(
     instance: &mut VoxelMapInstance,
     pending: &mut PendingChunks,
     gen_queue: &mut GenQueue,
     tracker: &mut ChunkWorkTracker,
     config: &VoxelMapConfig,
+    dimensions: &MapDimensions,
     generator: &VoxelGenerator,
     budget: &ChunkWorkBudget,
 ) {
@@ -689,7 +695,7 @@ fn drain_gen_queue(
             stale += 1;
             continue;
         }
-        if !is_within_bounds(work.position, config.bounds) {
+        if !is_within_bounds(work.position, dimensions.bounds) {
             stale += 1;
             continue;
         }

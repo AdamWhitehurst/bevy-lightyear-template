@@ -107,16 +107,7 @@ fn spawn_overworld(
         .map_dimensions()
         .expect("overworld.terrain.ron must contain MapDimensions");
 
-    let mut config = VoxelMapConfig::new(
-        0,
-        0,
-        2,
-        dimensions.bounds,
-        dimensions.tree_height,
-        dimensions.chunk_size,
-        dimensions.column_y_range,
-    );
-    config.generates_chunks = false;
+    let config = VoxelMapConfig::new(0, 0, 2, false);
 
     let padded = dimensions.padded_size();
     let map = commands
@@ -201,18 +192,18 @@ fn handle_chunk_data_sync(
 fn handle_unload_column(
     mut receivers: Query<&mut MessageReceiver<UnloadColumn>>,
     registry: Res<MapRegistry>,
-    mut map_query: Query<(&mut VoxelMapInstance, &VoxelMapConfig)>,
+    mut map_query: Query<(&mut VoxelMapInstance, &MapDimensions)>,
 ) {
     for mut receiver in &mut receivers {
         for unload in receiver.receive() {
             let Some(&map_entity) = registry.0.get(&unload.map_id) else {
                 continue;
             };
-            let Ok((mut instance, config)) = map_query.get_mut(map_entity) else {
+            let Ok((mut instance, dimensions)) = map_query.get_mut(map_entity) else {
                 continue;
             };
             let col = unload.column;
-            for chunk_pos in column_to_chunks(col, config.column_y_range) {
+            for chunk_pos in column_to_chunks(col, dimensions.column_y_range) {
                 instance.remove_chunk_data(chunk_pos);
             }
             instance.chunk_levels.remove(&col);
@@ -571,16 +562,7 @@ fn spawn_map_instance(
         .map(|b| b.max_element().max(1) as u32)
         .unwrap_or(10);
 
-    let mut config = VoxelMapConfig::new(
-        seed,
-        0,
-        spawning_distance,
-        dimensions.bounds,
-        dimensions.tree_height,
-        dimensions.chunk_size,
-        dimensions.column_y_range,
-    );
-    config.generates_chunks = false;
+    let config = VoxelMapConfig::new(seed, 0, spawning_distance, false);
 
     let entity = commands
         .spawn((

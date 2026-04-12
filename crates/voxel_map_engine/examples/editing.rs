@@ -25,7 +25,13 @@ fn setup(mut commands: Commands) {
     let map_entity = commands
         .spawn((
             instance,
-            VoxelMapConfig::new(0, 0, 5, None, 5, 16, (-8, 8)),
+            VoxelMapConfig::new(0, 0, 5, true),
+            MapDimensions {
+                chunk_size: 16,
+                column_y_range: (-8, 8),
+                tree_height: 5,
+                bounds: None,
+            },
             VoxelGenerator(Arc::new(FlatGenerator {
                 chunk_size: 16,
                 shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),

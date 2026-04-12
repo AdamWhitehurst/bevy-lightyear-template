@@ -4,7 +4,6 @@ use ndshape::{RuntimeShape, Shape};
 use std::collections::{HashMap, HashSet};
 
 use crate::api::voxel_to_chunk_pos;
-use crate::config::VoxelMapConfig;
 use crate::types::{ChunkData, WorldVoxel};
 
 /// Marker: this map is the shared overworld.
@@ -55,59 +54,6 @@ impl VoxelMapInstance {
             padded_size,
             shape: RuntimeShape::<u32, 3>::new([padded_size, padded_size, padded_size]),
         }
-    }
-
-    /// Bundle for an unbounded overworld map.
-    pub fn overworld(seed: u64) -> (Self, VoxelMapConfig, Overworld) {
-        let tree_height = 5;
-        let chunk_size = 64;
-        let column_y_range = (-2, 2);
-        (
-            Self::new(tree_height, chunk_size),
-            VoxelMapConfig::new(seed, 0, 10, None, tree_height, chunk_size, column_y_range),
-            Overworld,
-        )
-    }
-
-    /// Bundle for a player's bounded homebase map.
-    pub fn homebase(owner_id: u64, bounds: IVec3) -> (Self, VoxelMapConfig, Homebase) {
-        let tree_height = 3;
-        let chunk_size = 32;
-        let column_y_range = (-4, 4);
-        let spawning_distance = bounds_to_spawning_distance(bounds);
-        (
-            Self::new(tree_height, chunk_size),
-            VoxelMapConfig::new(
-                seed_from_id(owner_id),
-                0,
-                spawning_distance,
-                Some(bounds),
-                tree_height,
-                chunk_size,
-                column_y_range,
-            ),
-            Homebase { owner: owner_id },
-        )
-    }
-
-    /// Bundle for a bounded competition arena map.
-    pub fn arena(id: u64, seed: u64, bounds: IVec3) -> (Self, VoxelMapConfig, Arena) {
-        let tree_height = 3;
-        let chunk_size = 16;
-        let spawning_distance = bounds_to_spawning_distance(bounds);
-        (
-            Self::new(tree_height, chunk_size),
-            VoxelMapConfig::new(
-                seed,
-                0,
-                spawning_distance,
-                Some(bounds),
-                tree_height,
-                chunk_size,
-                (-8, 8),
-            ),
-            Arena { id },
-        )
     }
 }
 
@@ -255,62 +201,10 @@ mod tests {
     }
 
     #[test]
-    fn overworld_bundle_has_correct_config() {
-        let (instance, config, _marker) = VoxelMapInstance::overworld(42);
-        assert_eq!(config.seed, 42);
-        assert_eq!(config.tree_height, 5);
-        assert_eq!(config.spawning_distance, 10);
-        assert!(config.bounds.is_none());
-        assert!(instance.chunk_levels.is_empty());
-    }
-
-    #[test]
-    fn homebase_bundle_has_correct_config() {
-        let owner_id: u64 = 7;
-        let bounds = IVec3::new(4, 8, 6);
-        let (instance, config, marker) = VoxelMapInstance::homebase(owner_id, bounds);
-        assert_eq!(config.seed, owner_id);
-        assert_eq!(config.tree_height, 3);
-        assert_eq!(config.spawning_distance, 8);
-        assert_eq!(config.bounds, Some(bounds));
-        assert_eq!(marker.owner, owner_id);
-        assert!(instance.chunk_levels.is_empty());
-    }
-
-    #[test]
-    fn arena_bundle_has_correct_config() {
-        let bounds = IVec3::new(3, 5, 4);
-        let (instance, config, marker) = VoxelMapInstance::arena(99, 123, bounds);
-        assert_eq!(config.seed, 123);
-        assert_eq!(config.tree_height, 3);
-        assert_eq!(config.spawning_distance, 5);
-        assert_eq!(config.bounds, Some(bounds));
-        assert_eq!(marker.id, 99);
-        assert!(instance.chunk_levels.is_empty());
-    }
-
-    #[test]
     fn bounds_to_spawning_distance_uses_max_axis() {
         assert_eq!(bounds_to_spawning_distance(IVec3::new(1, 2, 3)), 3);
         assert_eq!(bounds_to_spawning_distance(IVec3::new(10, 1, 1)), 10);
         assert_eq!(bounds_to_spawning_distance(IVec3::new(1, 1, 1)), 1);
-    }
-
-    #[test]
-    fn homebase_seed_deterministic() {
-        let id: u64 = 12345;
-        let bounds = IVec3::new(4, 4, 4);
-        let (_, config1, _) = VoxelMapInstance::homebase(id, bounds);
-        let (_, config2, _) = VoxelMapInstance::homebase(id, bounds);
-        assert_eq!(config1.seed, config2.seed);
-    }
-
-    #[test]
-    fn different_owners_different_seeds() {
-        let bounds = IVec3::new(4, 4, 4);
-        let (_, config1, _) = VoxelMapInstance::homebase(1, bounds);
-        let (_, config2, _) = VoxelMapInstance::homebase(2, bounds);
-        assert_ne!(config1.seed, config2.seed);
     }
 
     #[test]

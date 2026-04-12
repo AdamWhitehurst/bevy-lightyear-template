@@ -49,17 +49,24 @@ fn setup(mut commands: Commands) {
 }
 
 fn spawn_overworld(commands: &mut Commands) -> Entity {
-    let (mut instance, config, marker) = VoxelMapInstance::overworld(42);
+    let dimensions = MapDimensions {
+        chunk_size: 16,
+        column_y_range: (-2, 2),
+        tree_height: 5,
+        bounds: None,
+    };
+    let mut instance = VoxelMapInstance::new(dimensions.tree_height, dimensions.chunk_size);
     instance.debug_colors = true;
     commands
         .spawn((
             instance,
-            config,
+            VoxelMapConfig::new(42, 0, 10, true),
+            dimensions,
             VoxelGenerator(Arc::new(FlatGenerator {
                 chunk_size: 16,
                 shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
             })),
-            marker,
+            Overworld,
             PendingChunks::default(),
             Transform::default(),
         ))
@@ -67,14 +74,22 @@ fn spawn_overworld(commands: &mut Commands) -> Entity {
 }
 
 fn spawn_homebase(commands: &mut Commands) -> Entity {
-    let (mut instance, config, marker) = VoxelMapInstance::homebase(0, IVec3::new(8, 4, 8));
+    let bounds = IVec3::new(8, 4, 8);
+    let dimensions = MapDimensions {
+        chunk_size: 16,
+        column_y_range: (-4, 4),
+        tree_height: 3,
+        bounds: Some(bounds),
+    };
+    let mut instance = VoxelMapInstance::new(dimensions.tree_height, dimensions.chunk_size);
     instance.debug_colors = true;
     commands
         .spawn((
             instance,
-            config,
+            VoxelMapConfig::new(0, 0, bounds_to_spawning_distance(bounds), true),
+            dimensions,
             VoxelGenerator(Arc::new(RaisedGenerator)),
-            marker,
+            Homebase { owner: 0 },
             PendingChunks::default(),
             Transform::from_translation(Vec3::new(200.0, 0.0, 0.0)),
         ))
@@ -82,14 +97,22 @@ fn spawn_homebase(commands: &mut Commands) -> Entity {
 }
 
 fn spawn_arena(commands: &mut Commands) -> Entity {
-    let (mut instance, config, marker) = VoxelMapInstance::arena(1, 99, IVec3::new(10, 4, 10));
+    let bounds = IVec3::new(10, 4, 10);
+    let dimensions = MapDimensions {
+        chunk_size: 16,
+        column_y_range: (-8, 8),
+        tree_height: 3,
+        bounds: Some(bounds),
+    };
+    let mut instance = VoxelMapInstance::new(dimensions.tree_height, dimensions.chunk_size);
     instance.debug_colors = true;
     commands
         .spawn((
             instance,
-            config,
+            VoxelMapConfig::new(99, 0, bounds_to_spawning_distance(bounds), true),
+            dimensions,
             VoxelGenerator(Arc::new(BowlGenerator)),
-            marker,
+            Arena { id: 1 },
             PendingChunks::default(),
             Transform::from_translation(Vec3::new(-200.0, 0.0, 0.0)),
         ))

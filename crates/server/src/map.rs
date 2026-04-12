@@ -21,10 +21,9 @@ use protocol::{
 use tracy_client::plot;
 use voxel_map_engine::lifecycle::{self, PendingSaves};
 use voxel_map_engine::prelude::{
-    bounds_to_spawning_distance, build_generator, build_generator_from_components, seed_from_id,
-    BiomeRules, ChunkTicket, HeightMap, Homebase, MapDimensions, MoistureMap, PlacementRules,
-    RuntimeShape, VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld,
-    WorldVoxel,
+    bounds_to_spawning_distance, build_generator_from_components, seed_from_id, BiomeRules,
+    ChunkTicket, HeightMap, Homebase, MapDimensions, MoistureMap, PlacementRules, RuntimeShape,
+    VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
 };
 
 use crate::persistence::{
@@ -118,15 +117,7 @@ pub fn spawn_overworld(
         .map_dimensions()
         .expect("overworld.terrain.ron must contain MapDimensions");
 
-    let mut config = VoxelMapConfig::new(
-        seed,
-        generation_version,
-        2,
-        dimensions.bounds,
-        dimensions.tree_height,
-        dimensions.chunk_size,
-        dimensions.column_y_range,
-    );
+    let mut config = VoxelMapConfig::new(seed, generation_version, 2, true);
     config.save_dir = Some(map_dir);
 
     let instance = VoxelMapInstance::new(dimensions.tree_height, dimensions.chunk_size);
@@ -261,40 +252,6 @@ fn clone_terrain_components(
                 .into_partial_reflect()
         })
         .collect()
-}
-
-/// Builds `VoxelGenerator` for map entities whose terrain components have been flushed.
-///
-/// Exclusive system: needs `&mut World` to pass `EntityRef` to `build_generator`,
-/// keeping that function extensible to new terrain components without signature changes.
-fn build_terrain_generators(world: &mut World) {
-    let mut query = world.query_filtered::<(
-        Entity,
-        &VoxelMapConfig,
-        &VoxelMapInstance,
-    ), (
-        With<TerrainDefApplied>,
-        Without<VoxelGenerator>,
-    )>();
-    let entities: Vec<(Entity, u64, u32, u32, RuntimeShape<u32, 3>)> = query
-        .iter(world)
-        .map(|(e, config, instance)| {
-            (
-                e,
-                config.seed,
-                config.chunk_size,
-                config.padded_size,
-                instance.shape.clone(),
-            )
-        })
-        .collect();
-
-    for (entity, seed, chunk_size, padded_size, shape) in entities {
-        let entity_ref = world.entity(entity);
-        let generator = build_generator(entity_ref, seed, chunk_size, padded_size, shape);
-        world.entity_mut(entity).insert(generator);
-        trace!("Built terrain generator for map entity {entity:?}");
-    }
 }
 
 fn save_dirty_chunks_debounced(
@@ -554,12 +511,8 @@ impl Plugin for ServerMapPlugin {
             )
             .add_systems(
                 Update,
-                (
-                    apply_terrain_defs.run_if(resource_exists::<TerrainDefRegistry>),
-                    ApplyDeferred,
-                    build_terrain_generators,
-                )
-                    .chain()
+                apply_terrain_defs
+                    .run_if(resource_exists::<TerrainDefRegistry>)
                     .before(lifecycle::ensure_pending_chunks),
             )
             .add_systems(
@@ -819,7 +772,7 @@ pub fn push_chunks_to_clients(
         &Position,
         &mut ClientChunkVisibility,
     )>,
-    map_query: Query<(&VoxelMapInstance, &VoxelMapConfig, &MapInstanceId)>,
+    map_query: Query<(&VoxelMapInstance, &MapDimensions, &MapInstanceId)>,
     mut senders: Query<&mut MessageSender<ChunkDataSync>>,
     mut multi_sender: ServerMultiMessageSender,
 ) {
@@ -830,7 +783,7 @@ pub fn push_chunks_to_clients(
             visibility.tracked_map = Some(ticket.map_entity);
         }
 
-        let Ok((instance, config, map_id)) = map_query.get(ticket.map_entity) else {
+        let Ok((instance, dimensions, map_id)) = map_query.get(ticket.map_entity) else {
             trace!(
                 "push_chunks_to_clients: map entity {:?} not found",
                 ticket.map_entity
@@ -847,7 +800,7 @@ pub fn push_chunks_to_clients(
             &current_columns,
             &mut visibility,
             instance,
-            config.column_y_range,
+            dimensions.column_y_range,
             map_id,
             player_col,
             client_entity,
@@ -858,7 +811,7 @@ pub fn push_chunks_to_clients(
         unload_stale_columns(
             &mut visibility,
             &current_columns,
-            config.column_y_range,
+            dimensions.column_y_range,
             map_id,
             client_entity,
             &mut multi_sender,
@@ -986,7 +939,7 @@ pub fn handle_map_switch_requests(
     remote_ids: Query<&RemoteId>,
     mut registry: ResMut<MapRegistry>,
     mut room_registry: ResMut<RoomRegistry>,
-    config_query: Query<&VoxelMapConfig>,
+    map_params_query: Query<(&VoxelMapConfig, &MapDimensions)>,
     save_path: Res<WorldSavePath>,
     // Option<Res<_>> here because tests may run without a loaded terrain registry.
     // At runtime the `.run_if(resource_exists::<TerrainDefRegistry>)` guard prevents
@@ -1033,7 +986,7 @@ pub fn handle_map_switch_requests(
                 &target_map_id,
                 &mut *registry,
                 &mut *room_registry,
-                &config_query,
+                &map_params_query,
                 &mut senders,
                 &*save_path,
                 &*terrain_registry,
@@ -1071,7 +1024,7 @@ fn execute_server_transition(
     target_map_id: &MapInstanceId,
     registry: &mut MapRegistry,
     room_registry: &mut RoomRegistry,
-    config_query: &Query<&VoxelMapConfig>,
+    map_params_query: &Query<(&VoxelMapConfig, &MapDimensions)>,
     senders: &mut Query<&mut MessageSender<MapTransitionStart>>,
     save_path: &WorldSavePath,
     terrain_registry: &TerrainDefRegistry,
@@ -1112,7 +1065,7 @@ fn execute_server_transition(
         commands,
         target_map_id,
         registry,
-        config_query,
+        map_params_query,
         save_path,
         terrain_registry,
         type_registry,
@@ -1142,28 +1095,28 @@ fn execute_server_transition(
 }
 
 /// Returns the map entity and transition params. If the map already exists,
-/// reads params from its `VoxelMapConfig`. If newly spawned, derives them
-/// from the `MapInstanceId` (the entity isn't queryable yet via commands).
+/// reads params from its `VoxelMapConfig`/`MapDimensions`. If newly spawned,
+/// derives them from the terrain def (the entity isn't queryable yet via commands).
 #[allow(clippy::too_many_arguments)]
 fn ensure_map_exists(
     commands: &mut Commands,
     map_id: &MapInstanceId,
     registry: &mut MapRegistry,
-    config_query: &Query<&VoxelMapConfig>,
+    map_params_query: &Query<(&VoxelMapConfig, &MapDimensions)>,
     save_path: &WorldSavePath,
     terrain_registry: &TerrainDefRegistry,
     type_registry: &AppTypeRegistry,
 ) -> (Entity, MapTransitionParams) {
     if let Some(&entity) = registry.0.get(map_id) {
-        let config = config_query
+        let (config, dimensions) = map_params_query
             .get(entity)
-            .expect("Existing map entity must have VoxelMapConfig");
+            .expect("Existing map entity must have VoxelMapConfig + MapDimensions");
         let params = MapTransitionParams {
             seed: config.seed,
             generation_version: config.generation_version,
-            bounds: config.bounds,
-            chunk_size: config.chunk_size,
-            column_y_range: config.column_y_range,
+            bounds: dimensions.bounds,
+            chunk_size: dimensions.chunk_size,
+            column_y_range: dimensions.column_y_range,
         };
         return (entity, params);
     }
@@ -1211,15 +1164,7 @@ fn spawn_homebase(
     let bounds = dimensions.bounds;
     let spawning_distance = bounds_to_spawning_distance(bounds.unwrap_or(IVec3::ONE));
 
-    let mut config = VoxelMapConfig::new(
-        seed,
-        0,
-        spawning_distance,
-        bounds,
-        dimensions.tree_height,
-        dimensions.chunk_size,
-        dimensions.column_y_range,
-    );
+    let mut config = VoxelMapConfig::new(seed, 0, spawning_distance, true);
     config.save_dir = Some(map_dir);
 
     let instance = VoxelMapInstance::new(dimensions.tree_height, dimensions.chunk_size);
@@ -1228,9 +1173,9 @@ fn spawn_homebase(
     let params = MapTransitionParams {
         seed: config.seed,
         generation_version: config.generation_version,
-        bounds: config.bounds,
-        chunk_size: config.chunk_size,
-        column_y_range: config.column_y_range,
+        bounds: dimensions.bounds,
+        chunk_size: dimensions.chunk_size,
+        column_y_range: dimensions.column_y_range,
     };
 
     let entity = commands

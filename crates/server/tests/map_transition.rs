@@ -3,7 +3,6 @@ use bevy::prelude::*;
 use lightyear::prelude::{Room, RoomEvent, RoomPlugin, RoomTarget};
 use protocol::map::{MapInstanceId, PendingTransition};
 use server::map::RoomRegistry;
-use voxel_map_engine::prelude::VoxelMapInstance;
 
 #[test]
 fn room_registry_creates_separate_rooms_for_different_maps() {
@@ -102,11 +101,9 @@ fn pending_transition_marker_can_be_added_and_removed() {
 
 #[test]
 fn different_homebase_owners_produce_different_seeds() {
-    let bounds = IVec3::new(4, 4, 4);
-    let (_, config_a, _) = VoxelMapInstance::homebase(111, bounds);
-    let (_, config_b, _) = VoxelMapInstance::homebase(222, bounds);
     assert_ne!(
-        config_a.seed, config_b.seed,
+        voxel_map_engine::prelude::seed_from_id(111),
+        voxel_map_engine::prelude::seed_from_id(222),
         "Different owners must produce different seeds"
     );
 }

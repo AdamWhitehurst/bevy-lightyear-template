@@ -5,8 +5,8 @@ use lightyear::prelude::{Controlled, Predicted};
 use protocol::{CharacterMarker, MapInstanceId, MapRegistry};
 use voxel_map_engine::prelude::{
     chunk_to_column, column_to_chunks, ChunkData, ChunkStatus, ChunkTicket, FillType,
-    FlatGenerator, PalettedChunk, RuntimeShape, TicketType, VoxelChunk, VoxelGenerator,
-    VoxelMapConfig, VoxelMapInstance, VoxelPlugin, WorldVoxel,
+    FlatGenerator, MapDimensions, PalettedChunk, RuntimeShape, TicketType, VoxelChunk,
+    VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, WorldVoxel,
 };
 
 /// Padded chunk volume for the default `chunk_size=16`, used by tests.
@@ -24,13 +24,18 @@ fn test_app() -> App {
 }
 
 fn spawn_client_map(app: &mut App) -> Entity {
-    let mut config = VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8));
-    config.generates_chunks = false;
+    let config = VoxelMapConfig::new(0, 0, 1, false);
     let map = app
         .world_mut()
         .spawn((
             VoxelMapInstance::new(3, 16),
             config,
+            MapDimensions {
+                chunk_size: 16,
+                column_y_range: (-8, 8),
+                tree_height: 3,
+                bounds: None,
+            },
             VoxelGenerator(Arc::new(FlatGenerator {
                 chunk_size: 16,
                 shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),

@@ -23,7 +23,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use ui::{ClientState, MapTransitionState};
 use voxel_map_engine::prelude::{
-    FlatGenerator, RuntimeShape, VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin,
+    FlatGenerator, MapDimensions, RuntimeShape, VoxelGenerator, VoxelMapConfig, VoxelMapInstance,
+    VoxelPlugin,
 };
 
 /// Simplified test stepper for crossbeam transport testing
@@ -882,7 +883,13 @@ fn register_overworld_on_server(stepper: &mut CrossbeamTestStepper) -> Entity {
         .world_mut()
         .spawn((
             VoxelMapInstance::new(3, 16),
-            VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8)),
+            VoxelMapConfig::new(0, 0, 1, true),
+            MapDimensions {
+                chunk_size: 16,
+                column_y_range: (-8, 8),
+                tree_height: 3,
+                bounds: None,
+            },
             VoxelGenerator(Arc::new(FlatGenerator {
                 chunk_size: 16,
                 shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
@@ -1236,7 +1243,13 @@ fn server_and_client_spawn_matching_homebase_configs() {
         .world_mut()
         .spawn((
             VoxelMapInstance::new(3, 16),
-            VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8)),
+            VoxelMapConfig::new(0, 0, 1, true),
+            MapDimensions {
+                chunk_size: 16,
+                column_y_range: (-8, 8),
+                tree_height: 3,
+                bounds: None,
+            },
             VoxelGenerator(Arc::new(FlatGenerator {
                 chunk_size: 16,
                 shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
@@ -1331,14 +1344,19 @@ fn server_and_client_spawn_matching_homebase_configs() {
         .world()
         .get::<VoxelMapConfig>(client_homebase_entity)
         .expect("Client homebase must have VoxelMapConfig");
+    let server_dims = server_app
+        .world()
+        .get::<MapDimensions>(server_homebase_entity)
+        .expect("Server homebase must have MapDimensions");
+    let client_dims = client_app
+        .world()
+        .get::<MapDimensions>(client_homebase_entity)
+        .expect("Client homebase must have MapDimensions");
 
     assert_eq!(server_config.seed, client_config.seed, "seed must match");
+    assert_eq!(server_dims.bounds, client_dims.bounds, "bounds must match");
     assert_eq!(
-        server_config.bounds, client_config.bounds,
-        "bounds must match"
-    );
-    assert_eq!(
-        server_config.tree_height, client_config.tree_height,
+        server_dims.tree_height, client_dims.tree_height,
         "tree_height must match"
     );
 }
@@ -1392,7 +1410,13 @@ fn test_voxel_edit_ack_received() {
         .world_mut()
         .spawn((
             instance,
-            VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8)),
+            VoxelMapConfig::new(0, 0, 1, true),
+            MapDimensions {
+                chunk_size: 16,
+                column_y_range: (-8, 8),
+                tree_height: 3,
+                bounds: None,
+            },
             VoxelGenerator(Arc::new(FlatGenerator {
                 chunk_size: 16,
                 shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
@@ -1524,7 +1548,13 @@ fn test_server_pushes_chunks_without_request() {
         .world_mut()
         .spawn((
             instance,
-            VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8)),
+            VoxelMapConfig::new(0, 0, 1, true),
+            MapDimensions {
+                chunk_size: 16,
+                column_y_range: (-8, 8),
+                tree_height: 3,
+                bounds: None,
+            },
             VoxelGenerator(Arc::new(FlatGenerator {
                 chunk_size: 16,
                 shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),
@@ -1644,7 +1674,13 @@ fn test_server_sends_unload_column_when_out_of_range() {
         .world_mut()
         .spawn((
             instance,
-            VoxelMapConfig::new(0, 0, 1, None, 3, 16, (-8, 8)),
+            VoxelMapConfig::new(0, 0, 1, true),
+            MapDimensions {
+                chunk_size: 16,
+                column_y_range: (-8, 8),
+                tree_height: 3,
+                bounds: None,
+            },
             VoxelGenerator(Arc::new(FlatGenerator {
                 chunk_size: 16,
                 shape: RuntimeShape::<u32, 3>::new([18, 18, 18]),

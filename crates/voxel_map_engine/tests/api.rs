@@ -30,7 +30,13 @@ fn spawn_map_with(app: &mut App, spawning_distance: u32, generator: VoxelGenerat
     app.world_mut()
         .spawn((
             VoxelMapInstance::new(5, 16),
-            VoxelMapConfig::new(0, 0, spawning_distance, None, 5, 16, (-8, 8)),
+            VoxelMapConfig::new(0, 0, spawning_distance, true),
+            MapDimensions {
+                chunk_size: 16,
+                column_y_range: (-8, 8),
+                tree_height: 5,
+                bounds: None,
+            },
             generator,
             Transform::default(),
         ))

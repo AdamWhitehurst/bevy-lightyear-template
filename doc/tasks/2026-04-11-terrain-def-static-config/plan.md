@@ -663,11 +663,11 @@ Delete convenience constructors `VoxelMapInstance::overworld`, `homebase`, `aren
 ### Verification
 
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test -p voxel_map_engine` passes
-- [ ] `cargo test -p server` passes
-- [ ] `cargo test -p client` passes
-- [ ] grep: `config.chunk_size`, `config.padded_size`, `config.bounds`, `config.column_y_range`, `config.tree_height` → zero matches in `crates/`
+- [x] `cargo check-all` passes
+- [x] `cargo test -p voxel_map_engine` passes
+- [x] `cargo test -p server` passes
+- [x] `cargo test -p client` passes
+- [x] grep: `config.chunk_size`, `config.padded_size`, `config.bounds`, `config.column_y_range`, `config.tree_height` → zero matches in `crates/`
 
 #### Manual
 - [ ] `cargo server` + `cargo client` still run full happy path: connect, load overworld, transition to homebase, edit blocks, save, reload

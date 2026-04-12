@@ -2,7 +2,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use ndshape::Shape;
 
-use crate::config::{VoxelGenerator, VoxelMapConfig};
+use crate::config::VoxelGenerator;
 use crate::instance::VoxelMapInstance;
 use crate::raycast::{VoxelRaycastResult, voxel_line_traversal};
 use crate::types::WorldVoxel;
@@ -12,15 +12,7 @@ use crate::types::WorldVoxel;
 /// Every operation takes a `map: Entity` parameter to select which map instance to operate on.
 #[derive(SystemParam)]
 pub struct VoxelWorld<'w, 's> {
-    maps: Query<
-        'w,
-        's,
-        (
-            &'static mut VoxelMapInstance,
-            &'static VoxelMapConfig,
-            &'static VoxelGenerator,
-        ),
-    >,
+    maps: Query<'w, 's, (&'static mut VoxelMapInstance, &'static VoxelGenerator)>,
 }
 
 impl VoxelWorld<'_, '_> {
@@ -28,7 +20,7 @@ impl VoxelWorld<'_, '_> {
     ///
     /// Checks the octree first, then evaluates the voxel generator as fallback.
     pub fn get_voxel(&self, map: Entity, pos: IVec3) -> WorldVoxel {
-        let Ok((instance, _config, generator)) = self.maps.get(map) else {
+        let Ok((instance, generator)) = self.maps.get(map) else {
             warn!("get_voxel: entity {map:?} has no VoxelMapInstance");
             return WorldVoxel::Unset;
         };
@@ -54,7 +46,7 @@ impl VoxelWorld<'_, '_> {
         self.maps
             .get(map)
             .ok()
-            .map(|(instance, _, _)| instance.chunk_size)
+            .map(|(instance, _)| instance.chunk_size)
     }
 
     /// Mutate a voxel directly in the octree. Marks the chunk dirty and queues remesh.
@@ -64,7 +56,7 @@ impl VoxelWorld<'_, '_> {
             "set_voxel: cannot write Unset (internal sentinel)"
         );
 
-        let Ok((mut instance, _, _)) = self.maps.get_mut(map) else {
+        let Ok((mut instance, _)) = self.maps.get_mut(map) else {
             warn!("set_voxel: entity {map:?} has no VoxelMapInstance");
             return;
         };
@@ -83,7 +75,7 @@ impl VoxelWorld<'_, '_> {
         max_distance: f32,
         filter: impl Fn(WorldVoxel) -> bool,
     ) -> Option<VoxelRaycastResult> {
-        let Ok((instance, _config, generator)) = self.maps.get(map) else {
+        let Ok((instance, generator)) = self.maps.get(map) else {
             warn!("raycast: entity {map:?} has no VoxelMapInstance");
             return None;
         };
