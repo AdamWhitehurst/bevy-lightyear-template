@@ -508,33 +508,6 @@ impl VoxelGeneratorImpl for FlatGenerator {
     }
 }
 
-/// Build a [`VoxelGenerator`] from terrain components on a map entity.
-///
-/// Reads [`HeightMap`], [`MoistureMap`], and [`BiomeRules`] from the entity.
-/// If no `HeightMap` is present, falls back to [`FlatGenerator`].
-pub fn build_generator(
-    entity: EntityRef,
-    seed: u64,
-    chunk_size: u32,
-    padded_size: u32,
-    shape: RuntimeShape<u32, 3>,
-) -> VoxelGenerator {
-    let height = entity.get::<HeightMap>().cloned();
-    let moisture = entity.get::<MoistureMap>().cloned();
-    let biomes = entity.get::<BiomeRules>().cloned();
-    let placement = entity.get::<PlacementRules>().cloned();
-    build_generator_from_components(
-        seed,
-        chunk_size,
-        padded_size,
-        shape,
-        height,
-        moisture,
-        biomes,
-        placement,
-    )
-}
-
 /// Build a [`VoxelGenerator`] from terrain components passed directly.
 ///
 /// Used by spawn functions that read the def before components have been

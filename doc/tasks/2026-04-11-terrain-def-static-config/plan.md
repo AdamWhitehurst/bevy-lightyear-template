@@ -717,9 +717,9 @@ Delete the old `build_generator(entity: EntityRef, ...)` signature.
 ### Verification
 
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] All tests pass
-- [ ] grep: `TerrainDefApplied`, `apply_terrain_defs`, `build_terrain_generators` → zero matches in `crates/`
+- [x] `cargo check-all` passes
+- [x] All tests pass
+- [x] grep: `TerrainDefApplied`, `apply_terrain_defs`, `build_terrain_generators` → zero matches in `crates/`
 
 #### Manual
 - [ ] Full end-to-end flow still works: server + client launch, map loads, transitions work, edits work, save/reload works

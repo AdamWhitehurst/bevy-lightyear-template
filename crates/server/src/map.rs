@@ -130,7 +130,6 @@ pub fn spawn_overworld(
             dimensions.clone(),
             Transform::default(),
             MapInstanceId::Overworld,
-            TerrainDefApplied,
         ))
         .id();
 
@@ -205,53 +204,6 @@ fn build_generator_from_def(
         biomes,
         placement,
     )
-}
-
-/// Marker indicating terrain definition components have been applied to this map entity.
-#[derive(Component)]
-struct TerrainDefApplied;
-
-/// Applies terrain definition components from `TerrainDefRegistry` to map entities.
-///
-/// Waits for `TerrainDefRegistry` to be loaded (async asset pipeline), then applies
-/// terrain components from the matching `.terrain.ron` file onto each map entity.
-fn apply_terrain_defs(
-    mut commands: Commands,
-    query: Query<(Entity, &MapInstanceId), (With<VoxelMapInstance>, Without<TerrainDefApplied>)>,
-    terrain_registry: Res<TerrainDefRegistry>,
-    type_registry: Res<AppTypeRegistry>,
-) {
-    for (entity, map_id) in &query {
-        let def_name = terrain_def_name(map_id);
-        if let Some(terrain_def) = terrain_registry.get(&def_name) {
-            let components = clone_terrain_components(terrain_def);
-            apply_object_components(&mut commands, entity, components, type_registry.0.clone());
-        }
-        commands.entity(entity).insert(TerrainDefApplied);
-        trace!("Applied terrain def '{def_name}' to map entity {entity:?}");
-    }
-}
-
-/// Maps a `MapInstanceId` to its terrain definition name.
-fn terrain_def_name(map_id: &MapInstanceId) -> String {
-    match map_id {
-        MapInstanceId::Overworld => "overworld".to_string(),
-        MapInstanceId::Homebase { .. } => "homebase".to_string(),
-    }
-}
-
-/// Clone terrain definition components via `reflect_clone`.
-fn clone_terrain_components(
-    def: &protocol::terrain::TerrainDef,
-) -> Vec<Box<dyn bevy::reflect::PartialReflect>> {
-    def.components
-        .iter()
-        .map(|c| {
-            c.reflect_clone()
-                .expect("terrain component must be cloneable")
-                .into_partial_reflect()
-        })
-        .collect()
 }
 
 fn save_dirty_chunks_debounced(
@@ -508,12 +460,6 @@ impl Plugin for ServerMapPlugin {
             .add_systems(
                 OnEnter(AppState::Ready),
                 (spawn_overworld, load_startup_entities).chain(),
-            )
-            .add_systems(
-                Update,
-                apply_terrain_defs
-                    .run_if(resource_exists::<TerrainDefRegistry>)
-                    .before(lifecycle::ensure_pending_chunks),
             )
             .add_systems(
                 Update,
@@ -1186,7 +1132,6 @@ fn spawn_homebase(
             Homebase { owner },
             Transform::default(),
             map_id.clone(),
-            TerrainDefApplied,
         ))
         .id();
 
