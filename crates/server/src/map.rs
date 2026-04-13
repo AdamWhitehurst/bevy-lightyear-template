@@ -36,7 +36,9 @@ use protocol::terrain::TerrainDef;
 use protocol::vox_model::VoxModelRegistry;
 use protocol::world_object::{apply_object_components, WorldObjectDefRegistry};
 use protocol::{AppState, RespawnPoint, TerrainDefRegistry};
+use voxel_map_engine::config::WorldObjectSpawn;
 use voxel_map_engine::persistence as chunk_persist;
+use voxel_map_engine::persistence::fs_chunk_entities::FsChunkEntitiesStore;
 
 /// Plugin managing server-side voxel map functionality.
 pub struct ServerMapPlugin;
@@ -126,6 +128,10 @@ fn init_overworld_entity(
                 map_dir: map_dir.clone(),
             }),
             PendingStoreOps::<(), Vec<SavedEntity>>::default(),
+            StoreBackend::new(FsChunkEntitiesStore {
+                map_dir: map_dir.clone(),
+            }),
+            PendingStoreOps::<IVec3, Vec<WorldObjectSpawn>>::default(),
         ))
         .id();
 
@@ -597,6 +603,13 @@ fn on_map_instance_id_added(
     });
 }
 
+/// Poll async chunk entity store operations each frame.
+fn poll_chunk_entity_ops(mut query: Query<&mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>>) {
+    for mut ops in &mut query {
+        ops.poll();
+    }
+}
+
 impl Plugin for ServerMapPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(lightyear::prelude::RoomPlugin)
@@ -627,6 +640,7 @@ impl Plugin for ServerMapPlugin {
                         ),
                     crate::chunk_entities::evict_chunk_entities
                         .after(lifecycle::despawn_out_of_range_chunks),
+                    poll_chunk_entity_ops,
                 ),
             )
             .add_systems(

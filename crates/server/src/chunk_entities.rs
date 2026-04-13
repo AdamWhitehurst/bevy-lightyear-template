@@ -2,15 +2,16 @@ use std::collections::HashMap;
 
 use avian3d::prelude::Position;
 use bevy::prelude::*;
-use bevy::tasks::AsyncComputeTaskPool;
+use persistence::{PendingStoreOps, StoreBackend};
 use protocol::map::{ChunkEntityRef, MapInstanceId};
 use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
 use protocol::world_object::{
     ActiveTransformation, PlacementOffset, WorldObjectDefRegistry, WorldObjectId,
 };
+use voxel_map_engine::config::WorldObjectSpawn;
+use voxel_map_engine::persistence::fs_chunk_entities::FsChunkEntitiesStore;
 use voxel_map_engine::prelude::{
-    chunk_to_column, PendingEntitySpawns, PersistedComponent, VoxelMapConfig, VoxelMapInstance,
-    WorldObjectSpawn,
+    chunk_to_column, PendingEntitySpawns, PersistedComponent, VoxelMapInstance,
 };
 
 use crate::world_object::spawn_world_object;
@@ -25,8 +26,9 @@ pub fn spawn_chunk_entities(
     mut map_query: Query<(
         Entity,
         &MapInstanceId,
-        &VoxelMapConfig,
         &mut PendingEntitySpawns,
+        Option<&StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>>,
+        Option<&mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>>,
     )>,
     defs: Res<WorldObjectDefRegistry>,
     type_registry: Res<AppTypeRegistry>,
@@ -34,13 +36,15 @@ pub fn spawn_chunk_entities(
     vox_assets: Res<Assets<VoxModelAsset>>,
     meshes: Res<Assets<Mesh>>,
 ) {
-    for (map_entity, map_id, config, mut pending) in &mut map_query {
+    for (map_entity, map_id, mut pending, store, mut ops) in &mut map_query {
         for (chunk_pos, spawns) in pending.0.drain(..) {
             if spawns.is_empty() {
                 continue;
             }
 
-            save_new_chunk_entities(config, chunk_pos, &spawns);
+            if let (Some(store), Some(ref mut ops)) = (&store, &mut ops) {
+                ops.spawn_save(&store.0, chunk_pos, spawns.clone());
+            }
 
             for spawn in &spawns {
                 let id = WorldObjectId(spawn.object_id.clone());
@@ -90,23 +94,6 @@ pub fn spawn_chunk_entities(
     }
 }
 
-/// Saves entity spawn data to disk asynchronously (fire-and-forget).
-fn save_new_chunk_entities(config: &VoxelMapConfig, chunk_pos: IVec3, spawns: &[WorldObjectSpawn]) {
-    let Some(ref dir) = config.save_dir else {
-        return;
-    };
-    let dir = dir.clone();
-    let spawns = spawns.to_vec();
-    let pool = AsyncComputeTaskPool::get();
-    pool.spawn(async move {
-        if let Err(e) = voxel_map_engine::persistence::save_chunk_entities(&dir, chunk_pos, &spawns)
-        {
-            error!("Failed to save new chunk entities at {chunk_pos}: {e}");
-        }
-    })
-    .detach();
-}
-
 /// Saves and despawns chunk entities when their chunk is evicted (column unloaded).
 ///
 /// Checks each `ChunkEntityRef` entity — if its chunk's column is no longer in
@@ -121,12 +108,16 @@ pub fn evict_chunk_entities(
         Option<&ActiveTransformation>,
         Option<&protocol::Health>,
     )>,
-    map_query: Query<(&VoxelMapInstance, &VoxelMapConfig)>,
+    map_query: Query<&VoxelMapInstance>,
+    mut store_query: Query<(
+        &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
+        &mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>,
+    )>,
 ) {
     let mut by_chunk: HashMap<(Entity, IVec3), Vec<(Entity, WorldObjectSpawn)>> = HashMap::new();
 
     for (entity, chunk_ref, obj_id, pos, active_transform, health) in &entity_query {
-        let Ok((instance, _)) = map_query.get(chunk_ref.map_entity) else {
+        let Ok(instance) = map_query.get(chunk_ref.map_entity) else {
             continue;
         };
         let col = chunk_to_column(chunk_ref.chunk_pos);
@@ -150,23 +141,10 @@ pub fn evict_chunk_entities(
     }
 
     for ((map_entity, chunk_pos), entities) in by_chunk {
-        let Ok((_, config)) = map_query.get(map_entity) else {
-            continue;
-        };
-
         let spawns: Vec<WorldObjectSpawn> = entities.iter().map(|(_, s)| s.clone()).collect();
 
-        if let Some(ref dir) = config.save_dir {
-            let dir = dir.clone();
-            let pool = AsyncComputeTaskPool::get();
-            pool.spawn(async move {
-                if let Err(e) =
-                    voxel_map_engine::persistence::save_chunk_entities(&dir, chunk_pos, &spawns)
-                {
-                    error!("Failed to save evicted chunk entities at {chunk_pos}: {e}");
-                }
-            })
-            .detach();
+        if let Ok((store, mut ops)) = store_query.get_mut(map_entity) {
+            ops.spawn_save(&store.0, chunk_pos, spawns);
         }
 
         for (entity, _) in entities {
@@ -188,7 +166,10 @@ pub fn save_all_chunk_entities_on_exit(
         Option<&ActiveTransformation>,
         Option<&protocol::Health>,
     )>,
-    map_query: Query<&VoxelMapConfig>,
+    mut store_query: Query<(
+        &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
+        &mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>,
+    )>,
 ) {
     if exit_reader.is_empty() {
         return;
@@ -206,16 +187,13 @@ pub fn save_all_chunk_entities_on_exit(
             });
     }
     for ((map_entity, chunk_pos), spawns) in by_chunk {
-        let Ok(config) = map_query.get(map_entity) else {
+        let Ok((store, mut ops)) = store_query.get_mut(map_entity) else {
             continue;
         };
-        if let Some(ref dir) = config.save_dir {
-            if let Err(e) =
-                voxel_map_engine::persistence::save_chunk_entities(dir, chunk_pos, &spawns)
-            {
-                error!("Shutdown save failed for chunk {chunk_pos}: {e}");
-            }
-        }
+        ops.spawn_save(&store.0, chunk_pos, spawns);
+    }
+    for (_, mut ops) in &mut store_query {
+        ops.flush();
     }
 }
 

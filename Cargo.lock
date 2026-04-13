@@ -7881,6 +7881,7 @@ dependencies = [
  "ndcopy",
  "ndshape",
  "noise",
+ "persistence",
  "serde",
  "tempfile",
  "tracy-client",

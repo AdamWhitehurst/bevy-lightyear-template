@@ -14,6 +14,7 @@ ndcopy = { path = "../../git/ndcopy-rs" }
 grid-tree = { path = "../../git/grid-tree-rs" }
 block-mesh = { path = "../../git/block-mesh-rs" }
 noise = "0.9"
+persistence = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 bincode = "1.3"
 zstd = "0.13"

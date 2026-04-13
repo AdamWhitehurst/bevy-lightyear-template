@@ -9,6 +9,7 @@ use ndshape::{RuntimeShape, Shape};
 use crate::config::{SurfaceHeightMap, VoxelGenerator, VoxelGeneratorImpl, WorldObjectSpawn};
 use crate::meshing::mesh_chunk_greedy;
 use crate::palette::PalettedChunk;
+use crate::persistence::fs_chunk_entities::FsChunkEntitiesStore;
 use crate::types::{ChunkData, ChunkStatus, FillType, WorldVoxel};
 
 /// Number of chunks to generate per async task.
@@ -47,6 +48,7 @@ pub fn spawn_terrain_batch(
     save_dir: Option<PathBuf>,
     chunk_size: u32,
     shape: RuntimeShape<u32, 3>,
+    entity_store: Option<FsChunkEntitiesStore>,
 ) {
     let generator = Arc::clone(&generator.0);
     let pool = AsyncComputeTaskPool::get();
@@ -69,18 +71,7 @@ pub fn spawn_terrain_batch(
                                 let _span = info_span!("mesh_chunk").entered();
                                 mesh_chunk_greedy(&voxels, &shape)
                             };
-                            let entity_spawns = if let Some(ref dir) = save_dir {
-                                match crate::persistence::load_chunk_entities(dir, pos) {
-                                    Ok(Some(spawns)) => spawns,
-                                    Ok(None) => vec![],
-                                    Err(e) => {
-                                        bevy::log::warn!("Failed to load entities at {pos}: {e}");
-                                        vec![]
-                                    }
-                                }
-                            } else {
-                                vec![]
-                            };
+                            let entity_spawns = load_chunk_entities_from_store(&entity_store, pos);
                             return ChunkGenResult {
                                 position: pos,
                                 mesh,
@@ -114,24 +105,18 @@ pub fn spawn_features_task(
     position: IVec3,
     height_map: SurfaceHeightMap,
     generator: &VoxelGenerator,
-    save_dir: Option<PathBuf>,
+    entity_store: Option<FsChunkEntitiesStore>,
 ) {
     let generator = Arc::clone(&generator.0);
     let pool = AsyncComputeTaskPool::get();
 
     let task = pool.spawn(async move {
         let _span = info_span!("features_stage", ?position).entered();
-        let entity_spawns = if let Some(ref dir) = save_dir {
-            match crate::persistence::load_chunk_entities(dir, position) {
-                Ok(Some(spawns)) => spawns,
-                Ok(None) => generator.place_features(position, &height_map),
-                Err(e) => {
-                    bevy::log::warn!("Failed to load entities at {position}: {e}");
-                    generator.place_features(position, &height_map)
-                }
-            }
-        } else {
+        let saved = load_chunk_entities_from_store(&entity_store, position);
+        let entity_spawns = if saved.is_empty() {
             generator.place_features(position, &height_map)
+        } else {
+            saved
         };
         vec![ChunkGenResult {
             position,
@@ -208,6 +193,25 @@ pub fn build_surface_height_map<S: Shape<3, Coord = u32>>(
         }
     }
     map
+}
+
+/// Load entity spawns from a store, returning an empty vec on missing or error.
+fn load_chunk_entities_from_store(
+    store: &Option<FsChunkEntitiesStore>,
+    pos: IVec3,
+) -> Vec<WorldObjectSpawn> {
+    let Some(store) = store else {
+        return vec![];
+    };
+    use persistence::Store;
+    match store.load(&pos) {
+        Ok(Some(spawns)) => spawns,
+        Ok(None) => vec![],
+        Err(e) => {
+            bevy::log::warn!("Failed to load entities at {pos}: {e}");
+            vec![]
+        }
+    }
 }
 
 /// Generate terrain-only for a single chunk position.

@@ -595,7 +595,7 @@ Save errors are logged inside `poll()`. No separate error observer needed.
 
 ### Verification
 #### Automated
-- [ ] `cargo check-all` passes
+- [x] `cargo check-all` passes
 
 #### Manual
 - [ ] `cargo server` — place object, unload chunk (walk away), reload (walk back), confirm persisted

@@ -16,6 +16,7 @@ use crate::generation::{
 };
 use crate::instance::VoxelMapInstance;
 use crate::meshing::mesh_chunk_greedy;
+use crate::persistence::fs_chunk_entities::FsChunkEntitiesStore;
 use crate::propagator::TicketLevelPropagator;
 use crate::ticket::{ChunkTicket, TicketType, chunk_to_column, column_to_chunks};
 use crate::types::{ChunkStatus, FillType};
@@ -344,6 +345,15 @@ pub(crate) fn update_chunks(
         &mut PendingSaves,
         &mut ChunkWorkTracker,
     )>,
+    entity_store_query: Query<
+        Option<
+            &persistence::StoreBackend<
+                IVec3,
+                Vec<crate::config::WorldObjectSpawn>,
+                FsChunkEntitiesStore,
+            >,
+        >,
+    >,
     ticket_query: Query<(Entity, &ChunkTicket, &GlobalTransform)>,
     mut tick: Local<u32>,
     mut ticket_cache: Local<HashMap<Entity, CachedTicket>>,
@@ -353,7 +363,7 @@ pub(crate) fn update_chunks(
     collect_tickets(&mut map_query, &ticket_query, &mut ticket_cache);
 
     for (
-        _map_entity,
+        map_entity,
         mut instance,
         config,
         dimensions,
@@ -408,6 +418,11 @@ pub(crate) fn update_chunks(
                 y_min,
                 y_max,
             );
+            let entity_store = entity_store_query
+                .get(map_entity)
+                .ok()
+                .flatten()
+                .map(|sb| &sb.0);
             drain_gen_queue(
                 &mut instance,
                 &mut pending,
@@ -417,6 +432,7 @@ pub(crate) fn update_chunks(
                 dimensions,
                 generator,
                 &budget,
+                entity_store,
             );
         }
 
@@ -659,6 +675,7 @@ fn drain_gen_queue(
     dimensions: &MapDimensions,
     generator: &VoxelGenerator,
     budget: &ChunkWorkBudget,
+    entity_store: Option<&FsChunkEntitiesStore>,
 ) {
     let _span = info_span!("drain_gen_queue").entered();
 
@@ -731,6 +748,7 @@ fn drain_gen_queue(
                         config.save_dir.clone(),
                         instance.chunk_size,
                         instance.shape.clone(),
+                        entity_store.cloned(),
                     );
                     terrain_batch = Vec::with_capacity(GEN_BATCH_SIZE);
                 }
@@ -766,7 +784,7 @@ fn drain_gen_queue(
                     work.position,
                     height_map,
                     generator,
-                    config.save_dir.clone(),
+                    entity_store.cloned(),
                 );
                 spawned += 1;
             }
@@ -799,6 +817,7 @@ fn drain_gen_queue(
             config.save_dir.clone(),
             instance.chunk_size,
             instance.shape.clone(),
+            entity_store.cloned(),
         );
     }
 
