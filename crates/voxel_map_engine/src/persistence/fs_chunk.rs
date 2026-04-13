@@ -1,10 +1,12 @@
+use std::fs;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use bevy::prelude::*;
 use persistence::{PersistenceError, Store};
 
-use super::{CHUNK_SAVE_VERSION, ChunkFileEnvelope};
+use super::{CHUNK_SAVE_VERSION, ChunkFileEnvelope, ZSTD_COMPRESSION_LEVEL, chunk_file_path};
 
 /// Filesystem-backed store for chunk terrain data.
 ///
@@ -17,12 +19,32 @@ pub struct FsChunkStore {
 
 impl Store<IVec3, ChunkFileEnvelope> for FsChunkStore {
     fn save(&self, key: &IVec3, value: &ChunkFileEnvelope) -> Result<(), PersistenceError> {
-        super::save_chunk(&self.map_dir, *key, value.chunk_size, &value.data)
-            .map_err(PersistenceError::Serialize)
+        let path = chunk_file_path(&self.map_dir, *key);
+        fs::create_dir_all(path.parent().expect("chunk path has parent"))
+            .map_err(|e| PersistenceError::Serialize(format!("mkdir terrain: {e}")))?;
+
+        let bytes = bincode::serialize(value)
+            .map_err(|e| PersistenceError::Serialize(format!("serialize chunk: {e}")))?;
+
+        let tmp_path = path.with_extension("bin.tmp");
+        let file = fs::File::create(&tmp_path)
+            .map_err(|e| PersistenceError::Serialize(format!("create tmp: {e}")))?;
+        let mut encoder = zstd::Encoder::new(file, ZSTD_COMPRESSION_LEVEL)
+            .map_err(|e| PersistenceError::Serialize(format!("zstd encoder: {e}")))?;
+        encoder
+            .write_all(&bytes)
+            .map_err(|e| PersistenceError::Serialize(format!("write chunk: {e}")))?;
+        encoder
+            .finish()
+            .map_err(|e| PersistenceError::Serialize(format!("zstd finish: {e}")))?;
+
+        fs::rename(&tmp_path, &path)
+            .map_err(|e| PersistenceError::Serialize(format!("atomic rename: {e}")))?;
+        Ok(())
     }
 
     fn load(&self, key: &IVec3) -> Result<Option<ChunkFileEnvelope>, PersistenceError> {
-        let path = super::chunk_file_path(&self.map_dir, *key);
+        let path = chunk_file_path(&self.map_dir, *key);
         if !path.exists() {
             return Ok(None);
         }

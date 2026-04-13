@@ -770,8 +770,8 @@ If persistence section mentions removed functions.
 
 ### Verification
 #### Automated
-- [ ] `cargo check-all` passes with no dead-code warnings
-- [ ] `cargo test --workspace` passes
+- [x] `cargo check-all` passes with no dead-code warnings
+- [x] `cargo test --workspace` passes
 
 #### Manual
 - [ ] Full repeat of Phase 4 verification

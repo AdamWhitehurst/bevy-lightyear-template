@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use avian3d::prelude::{ColliderDisabled, Position, RigidBodyDisabled};
@@ -29,7 +29,7 @@ use voxel_map_engine::prelude::{
 
 use crate::persistence::fs_map_entities::FsMapEntitiesStore;
 use crate::persistence::fs_map_meta::FsMapMetaStore;
-use crate::persistence::{load_entities, load_map_meta, map_save_dir, MapMeta, WorldSavePath};
+use crate::persistence::{map_save_dir, MapMeta, WorldSavePath};
 use persistence::{PendingStoreOps, StoreBackend};
 use protocol::map::{MapSaveTarget, SavedEntity, SavedEntityKind};
 use protocol::terrain::TerrainDef;
@@ -37,10 +37,9 @@ use protocol::vox_model::VoxModelRegistry;
 use protocol::world_object::{apply_object_components, WorldObjectDefRegistry};
 use protocol::{AppState, RespawnPoint, TerrainDefRegistry};
 use voxel_map_engine::config::WorldObjectSpawn;
-use voxel_map_engine::persistence as chunk_persist;
 use voxel_map_engine::persistence::fs_chunk::FsChunkStore;
 use voxel_map_engine::persistence::fs_chunk_entities::FsChunkEntitiesStore;
-use voxel_map_engine::persistence::ChunkFileEnvelope;
+use voxel_map_engine::persistence::{ChunkFileEnvelope, CHUNK_SAVE_VERSION};
 
 /// Plugin managing server-side voxel map functionality.
 pub struct ServerMapPlugin;
@@ -398,7 +397,7 @@ fn enqueue_dirty_chunks(instance: &mut VoxelMapInstance, pending_saves: &mut Pen
             pending_saves.queue.push_back(lifecycle::PendingSave {
                 position: chunk_pos,
                 envelope: ChunkFileEnvelope {
-                    version: chunk_persist::CHUNK_SAVE_VERSION,
+                    version: CHUNK_SAVE_VERSION,
                     chunk_size,
                     data: chunk_data.clone(),
                 },
@@ -419,7 +418,7 @@ fn save_dirty_chunks_flush(
     for chunk_pos in dirty {
         if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
             let envelope = ChunkFileEnvelope {
-                version: chunk_persist::CHUNK_SAVE_VERSION,
+                version: CHUNK_SAVE_VERSION,
                 chunk_size,
                 data: chunk_data.clone(),
             };
@@ -533,12 +532,16 @@ fn collect_entities_by_map(
 /// which doesn't yet use the async store lifecycle.
 fn load_map_entities_sync(
     commands: &mut Commands,
-    save_path: &WorldSavePath,
+    map_dir: &Arc<PathBuf>,
     map_id: &MapInstanceId,
 ) -> usize {
-    let map_dir = map_save_dir(&save_path.0, map_id);
-    let entities = match load_entities(&map_dir) {
-        Ok(entities) => entities,
+    use persistence::Store;
+    let store = FsMapEntitiesStore {
+        map_dir: map_dir.clone(),
+    };
+    let entities: Vec<SavedEntity> = match store.load(&()) {
+        Ok(Some(entities)) => entities,
+        Ok(None) => return 0,
         Err(e) => {
             warn!("Failed to load entities for {map_id:?}: {e}");
             return 0;
@@ -1342,7 +1345,7 @@ fn spawn_homebase(
 
     registry.insert(map_id.clone(), entity);
 
-    let entity_count = load_map_entities_sync(commands, save_path, map_id);
+    let entity_count = load_map_entities_sync(commands, &map_dir, map_id);
     if entity_count > 0 {
         trace!("Loaded {entity_count} entities for homebase-{owner}");
     }
@@ -1352,8 +1355,12 @@ fn spawn_homebase(
 }
 
 /// Loads the seed for a homebase from saved metadata, falling back to `seed_from_id`.
-fn load_homebase_seed(map_dir: &Path, owner: u64) -> u64 {
-    match load_map_meta(map_dir) {
+fn load_homebase_seed(map_dir: &Arc<PathBuf>, owner: u64) -> u64 {
+    use persistence::Store;
+    let store = FsMapMetaStore {
+        map_dir: map_dir.clone(),
+    };
+    match store.load(&()) {
         Ok(Some(meta)) => {
             trace!(
                 "Loading homebase-{owner} from saved metadata (seed={})",

@@ -1,8 +1,6 @@
 pub mod fs_chunk;
 pub mod fs_chunk_entities;
 
-use std::fs;
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
@@ -12,7 +10,7 @@ use crate::config::WorldObjectSpawn;
 use crate::types::ChunkData;
 
 pub const CHUNK_SAVE_VERSION: u32 = 4;
-const ZSTD_COMPRESSION_LEVEL: i32 = 3;
+pub(crate) const ZSTD_COMPRESSION_LEVEL: i32 = 3;
 
 /// Versioned envelope wrapping chunk data on disk.
 ///
@@ -33,104 +31,6 @@ pub fn chunk_file_path(map_dir: &Path, chunk_pos: IVec3) -> PathBuf {
     ))
 }
 
-/// Save chunk data to a compressed file. Uses atomic write via tmp+rename.
-pub fn save_chunk(
-    map_dir: &Path,
-    chunk_pos: IVec3,
-    chunk_size: u32,
-    data: &ChunkData,
-) -> Result<(), String> {
-    let path = chunk_file_path(map_dir, chunk_pos);
-    fs::create_dir_all(path.parent().expect("chunk path has parent"))
-        .map_err(|e| format!("mkdir terrain: {e}"))?;
-
-    let envelope = ChunkFileEnvelope {
-        version: CHUNK_SAVE_VERSION,
-        chunk_size,
-        data: data.clone(),
-    };
-    let bytes = bincode::serialize(&envelope).map_err(|e| format!("serialize chunk: {e}"))?;
-
-    let tmp_path = path.with_extension("bin.tmp");
-    let file = fs::File::create(&tmp_path).map_err(|e| format!("create tmp: {e}"))?;
-    let mut encoder = zstd::Encoder::new(file, ZSTD_COMPRESSION_LEVEL)
-        .map_err(|e| format!("zstd encoder: {e}"))?;
-    encoder
-        .write_all(&bytes)
-        .map_err(|e| format!("write chunk: {e}"))?;
-    encoder.finish().map_err(|e| format!("zstd finish: {e}"))?;
-
-    fs::rename(&tmp_path, &path).map_err(|e| format!("atomic rename: {e}"))?;
-    Ok(())
-}
-
-/// Load chunk data from disk, validating the envelope's `chunk_size` against
-/// the caller's expected value. Returns `None` if the file does not exist.
-pub fn load_chunk(
-    map_dir: &Path,
-    chunk_pos: IVec3,
-    expected_chunk_size: u32,
-) -> Result<Option<ChunkData>, String> {
-    let path = chunk_file_path(map_dir, chunk_pos);
-    if !path.exists() {
-        return Ok(None);
-    }
-
-    let file = fs::File::open(&path).map_err(|e| format!("open chunk: {e}"))?;
-    let mut decoder = zstd::Decoder::new(file).map_err(|e| format!("zstd decoder: {e}"))?;
-    let mut bytes = Vec::new();
-    decoder
-        .read_to_end(&mut bytes)
-        .map_err(|e| format!("read chunk: {e}"))?;
-
-    let envelope: ChunkFileEnvelope =
-        bincode::deserialize(&bytes).map_err(|e| format!("deserialize chunk: {e}"))?;
-
-    if envelope.version != CHUNK_SAVE_VERSION {
-        return Err(format!(
-            "chunk version mismatch: expected {CHUNK_SAVE_VERSION}, got {}",
-            envelope.version
-        ));
-    }
-
-    if envelope.chunk_size != expected_chunk_size {
-        return Err(format!(
-            "chunk_size mismatch at {chunk_pos:?}: expected {expected_chunk_size}, got {}",
-            envelope.chunk_size
-        ));
-    }
-
-    Ok(Some(envelope.data))
-}
-
-/// Delete a saved chunk file if it exists.
-pub fn delete_chunk(map_dir: &Path, chunk_pos: IVec3) -> Result<(), String> {
-    let path = chunk_file_path(map_dir, chunk_pos);
-    if path.exists() {
-        fs::remove_file(&path).map_err(|e| format!("delete chunk: {e}"))?;
-    }
-    Ok(())
-}
-
-/// List all chunk positions that have saved files in the terrain directory.
-pub fn list_saved_chunks(map_dir: &Path) -> Result<Vec<IVec3>, String> {
-    let terrain_dir = map_dir.join("terrain");
-    if !terrain_dir.exists() {
-        return Ok(Vec::new());
-    }
-
-    let mut positions = Vec::new();
-    for entry in fs::read_dir(&terrain_dir).map_err(|e| format!("read_dir: {e}"))? {
-        let entry = entry.map_err(|e| format!("dir entry: {e}"))?;
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if let Some(pos) = parse_chunk_filename(&name) {
-            positions.push(pos);
-        }
-    }
-    Ok(positions)
-}
-
 /// Parse a chunk filename like `chunk_1_-2_3.bin` into an `IVec3`.
 pub fn parse_chunk_filename(name: &str) -> Option<IVec3> {
     let name = name.strip_prefix("chunk_")?.strip_suffix(".bin")?;
@@ -143,13 +43,13 @@ pub fn parse_chunk_filename(name: &str) -> Option<IVec3> {
     Some(IVec3::new(x, y, z))
 }
 
-const ENTITY_SAVE_VERSION: u32 = 2;
+pub(crate) const ENTITY_SAVE_VERSION: u32 = 2;
 
 /// Versioned envelope wrapping per-chunk entity spawn data on disk.
 #[derive(Serialize, Deserialize)]
-struct EntityFileEnvelope {
-    version: u32,
-    spawns: Vec<WorldObjectSpawn>,
+pub(crate) struct EntityFileEnvelope {
+    pub version: u32,
+    pub spawns: Vec<WorldObjectSpawn>,
 }
 
 /// File path for per-chunk entity data.
@@ -160,116 +60,80 @@ pub fn entity_file_path(map_dir: &Path, chunk_pos: IVec3) -> PathBuf {
     ))
 }
 
-/// Save per-chunk entity spawns to a compressed file. Uses atomic write via tmp+rename.
-pub fn save_chunk_entities(
-    map_dir: &Path,
-    chunk_pos: IVec3,
-    spawns: &[WorldObjectSpawn],
-) -> Result<(), String> {
-    let path = entity_file_path(map_dir, chunk_pos);
-    fs::create_dir_all(path.parent().expect("entity path has parent"))
-        .map_err(|e| format!("mkdir entities: {e}"))?;
-
-    let envelope = EntityFileEnvelope {
-        version: ENTITY_SAVE_VERSION,
-        spawns: spawns.to_vec(),
-    };
-    let bytes = bincode::serialize(&envelope).map_err(|e| format!("serialize entities: {e}"))?;
-
-    let tmp_path = path.with_extension("bin.tmp");
-    let file = fs::File::create(&tmp_path).map_err(|e| format!("create tmp: {e}"))?;
-    let mut encoder = zstd::Encoder::new(file, ZSTD_COMPRESSION_LEVEL)
-        .map_err(|e| format!("zstd encoder: {e}"))?;
-    encoder
-        .write_all(&bytes)
-        .map_err(|e| format!("write entities: {e}"))?;
-    encoder.finish().map_err(|e| format!("zstd finish: {e}"))?;
-
-    fs::rename(&tmp_path, &path).map_err(|e| format!("atomic rename: {e}"))?;
-    Ok(())
-}
-
-/// Load per-chunk entity spawns from disk. Returns `None` if the file does not exist.
-pub fn load_chunk_entities(
-    map_dir: &Path,
-    chunk_pos: IVec3,
-) -> Result<Option<Vec<WorldObjectSpawn>>, String> {
-    let path = entity_file_path(map_dir, chunk_pos);
-    if !path.exists() {
-        return Ok(None);
-    }
-
-    let file = fs::File::open(&path).map_err(|e| format!("open entities: {e}"))?;
-    let mut decoder = zstd::Decoder::new(file).map_err(|e| format!("zstd decoder: {e}"))?;
-    let mut bytes = Vec::new();
-    decoder
-        .read_to_end(&mut bytes)
-        .map_err(|e| format!("read entities: {e}"))?;
-
-    let envelope: EntityFileEnvelope =
-        bincode::deserialize(&bytes).map_err(|e| format!("deserialize entities: {e}"))?;
-
-    if envelope.version != ENTITY_SAVE_VERSION {
-        return Err(format!(
-            "entity version mismatch: expected {ENTITY_SAVE_VERSION}, got {}",
-            envelope.version
-        ));
-    }
-
-    Ok(Some(envelope.spawns))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::types::{ChunkStatus, WorldVoxel};
+    use persistence::Store;
+    use std::sync::Arc;
+
+    use fs_chunk::FsChunkStore;
+    use fs_chunk_entities::FsChunkEntitiesStore;
 
     /// Padded chunk volume for the default `chunk_size=16`, used by tests.
     const PADDED_VOLUME_16: usize = 18 * 18 * 18;
 
+    fn test_chunk_store(dir: &Path) -> FsChunkStore {
+        FsChunkStore {
+            map_dir: Arc::new(dir.to_path_buf()),
+        }
+    }
+
+    fn test_entity_store(dir: &Path) -> FsChunkEntitiesStore {
+        FsChunkEntitiesStore {
+            map_dir: Arc::new(dir.to_path_buf()),
+        }
+    }
+
     #[test]
     fn save_load_chunk_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
+        let store = test_chunk_store(dir.path());
         let pos = IVec3::new(1, -2, 3);
         let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         voxels[100] = WorldVoxel::Solid(5);
         let chunk = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
+        let envelope = ChunkFileEnvelope {
+            version: CHUNK_SAVE_VERSION,
+            chunk_size: 16,
+            data: chunk.clone(),
+        };
 
-        save_chunk(dir.path(), pos, 16, &chunk).unwrap();
-        let loaded = load_chunk(dir.path(), pos, 16)
-            .unwrap()
-            .expect("chunk should exist");
-        assert_eq!(loaded.voxels.to_voxels(), chunk.voxels.to_voxels());
+        store.save(&pos, &envelope).unwrap();
+        let loaded = store.load(&pos).unwrap().expect("chunk should exist");
+        assert_eq!(loaded.data.voxels.to_voxels(), chunk.voxels.to_voxels());
     }
 
     #[test]
     fn load_nonexistent_chunk_returns_none() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(load_chunk(dir.path(), IVec3::ZERO, 16).unwrap().is_none());
+        let store = test_chunk_store(dir.path());
+        assert!(store.load(&IVec3::ZERO).unwrap().is_none());
     }
 
     #[test]
     fn save_chunk_creates_directories() {
         let dir = tempfile::tempdir().unwrap();
         let map_dir = dir.path().join("deep/nested/map");
+        let store = test_chunk_store(&map_dir);
         let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
-        save_chunk(
-            &map_dir,
-            IVec3::ZERO,
-            16,
-            &ChunkData::from_voxels(&voxels, ChunkStatus::Full),
-        )
-        .unwrap();
+        let envelope = ChunkFileEnvelope {
+            version: CHUNK_SAVE_VERSION,
+            chunk_size: 16,
+            data: ChunkData::from_voxels(&voxels, ChunkStatus::Full),
+        };
+        store.save(&IVec3::ZERO, &envelope).unwrap();
         assert!(map_dir.join("terrain").exists());
     }
 
     #[test]
     fn corrupt_chunk_file_returns_error() {
         let dir = tempfile::tempdir().unwrap();
+        let store = test_chunk_store(dir.path());
         let path = chunk_file_path(dir.path(), IVec3::ZERO);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(&path, b"not valid data").unwrap();
-        assert!(load_chunk(dir.path(), IVec3::ZERO, 16).is_err());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"not valid data").unwrap();
+        assert!(store.load(&IVec3::ZERO).is_err());
     }
 
     #[test]
@@ -302,71 +166,24 @@ mod tests {
     }
 
     #[test]
-    fn list_saved_chunks_empty_dir() {
-        let dir = tempfile::tempdir().unwrap();
-        assert!(list_saved_chunks(dir.path()).unwrap().is_empty());
-    }
-
-    #[test]
-    fn list_saved_chunks_with_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
-        let chunk = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
-        let positions = [IVec3::new(0, 0, 0), IVec3::new(1, -1, 2)];
-        for &pos in &positions {
-            save_chunk(dir.path(), pos, 16, &chunk).unwrap();
-        }
-        let mut found = list_saved_chunks(dir.path()).unwrap();
-        found.sort_by_key(|p| (p.x, p.y, p.z));
-        let mut expected = positions.to_vec();
-        expected.sort_by_key(|p| (p.x, p.y, p.z));
-        assert_eq!(found, expected);
-    }
-
-    #[test]
-    fn delete_chunk_removes_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
-        save_chunk(
-            dir.path(),
-            IVec3::ZERO,
-            16,
-            &ChunkData::from_voxels(&voxels, ChunkStatus::Full),
-        )
-        .unwrap();
-        assert!(chunk_file_path(dir.path(), IVec3::ZERO).exists());
-        delete_chunk(dir.path(), IVec3::ZERO).unwrap();
-        assert!(!chunk_file_path(dir.path(), IVec3::ZERO).exists());
-    }
-
-    #[test]
-    fn delete_nonexistent_chunk_is_ok() {
-        let dir = tempfile::tempdir().unwrap();
-        delete_chunk(dir.path(), IVec3::ZERO).unwrap();
-    }
-
-    #[test]
     fn chunk_data_zstd_compression_reduces_size() {
         let dir = tempfile::tempdir().unwrap();
-        // Use a mixed chunk so the palettized representation is large enough
-        // for compression to actually reduce size (uniform chunks serialize
-        // to only ~24 bytes, smaller than zstd framing overhead).
+        let store = test_chunk_store(dir.path());
         let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
         for i in 0..100 {
             voxels[i] = WorldVoxel::Solid((i % 5) as u8);
         }
         let chunk = ChunkData::from_voxels(&voxels, ChunkStatus::Full);
-        save_chunk(dir.path(), IVec3::ZERO, 16, &chunk).unwrap();
-
-        let path = chunk_file_path(dir.path(), IVec3::ZERO);
-        let compressed_size = fs::metadata(&path).unwrap().len();
-        let raw_size = bincode::serialize(&ChunkFileEnvelope {
+        let envelope = ChunkFileEnvelope {
             version: CHUNK_SAVE_VERSION,
             chunk_size: 16,
-            data: chunk,
-        })
-        .unwrap()
-        .len() as u64;
+            data: chunk.clone(),
+        };
+        store.save(&IVec3::ZERO, &envelope).unwrap();
+
+        let path = chunk_file_path(dir.path(), IVec3::ZERO);
+        let compressed_size = std::fs::metadata(&path).unwrap().len();
+        let raw_size = bincode::serialize(&envelope).unwrap().len() as u64;
 
         assert!(
             compressed_size < raw_size / 2,
@@ -400,33 +217,31 @@ mod tests {
     #[test]
     fn save_load_chunk_entities_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
+        let store = test_entity_store(dir.path());
         let pos = IVec3::new(3, -1, 7);
         let spawns = sample_spawns();
 
-        save_chunk_entities(dir.path(), pos, &spawns).unwrap();
-        let loaded = load_chunk_entities(dir.path(), pos)
-            .unwrap()
-            .expect("entities should exist");
+        store.save(&pos, &spawns).unwrap();
+        let loaded = store.load(&pos).unwrap().expect("entities should exist");
         assert_spawns_eq(&spawns, &loaded);
     }
 
     #[test]
     fn load_nonexistent_entities_returns_none() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(
-            load_chunk_entities(dir.path(), IVec3::ZERO)
-                .unwrap()
-                .is_none()
-        );
+        let store = test_entity_store(dir.path());
+        assert!(store.load(&IVec3::ZERO).unwrap().is_none());
     }
 
     #[test]
     fn empty_entities_save_load() {
         let dir = tempfile::tempdir().unwrap();
+        let store = test_entity_store(dir.path());
         let spawns: Vec<WorldObjectSpawn> = Vec::new();
 
-        save_chunk_entities(dir.path(), IVec3::ZERO, &spawns).unwrap();
-        let loaded = load_chunk_entities(dir.path(), IVec3::ZERO)
+        store.save(&IVec3::ZERO, &spawns).unwrap();
+        let loaded = store
+            .load(&IVec3::ZERO)
             .unwrap()
             .expect("entities file should exist");
         assert!(loaded.is_empty());
