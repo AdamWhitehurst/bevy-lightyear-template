@@ -733,7 +733,7 @@ Poll system for chunk ops (same pattern as Phase 3 §8). Verify `handle_complete
 
 ### Verification
 #### Automated
-- [ ] `cargo check-all` passes
+- [x] `cargo check-all` passes
 
 #### Manual
 - [ ] `cargo server` — delete world dir, start, walk around, observe "chunk generated" vs "chunk loaded" in logs

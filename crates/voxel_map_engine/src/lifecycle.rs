@@ -4,22 +4,24 @@ use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
 #[allow(unused_imports)]
 use tracy_client::plot;
 
 use crate::chunk::VoxelChunk;
-use crate::config::{MapDimensions, VoxelGenerator, VoxelMapConfig};
+use crate::config::{MapDimensions, VoxelGenerator, VoxelMapConfig, WorldObjectSpawn};
 use crate::generation::{
     GEN_BATCH_SIZE, PendingChunks, PendingEntitySpawns, build_surface_height_map,
     spawn_features_task, spawn_mesh_task, spawn_terrain_batch,
 };
 use crate::instance::VoxelMapInstance;
 use crate::meshing::mesh_chunk_greedy;
+use crate::persistence::ChunkFileEnvelope;
+use crate::persistence::fs_chunk::FsChunkStore;
 use crate::persistence::fs_chunk_entities::FsChunkEntitiesStore;
 use crate::propagator::TicketLevelPropagator;
 use crate::ticket::{ChunkTicket, TicketType, chunk_to_column, column_to_chunks};
 use crate::types::{ChunkStatus, FillType};
+use persistence::{PendingStoreOps, StoreBackend};
 
 /// Per-frame time budget for chunk pipeline work on a single map.
 /// Reset at the start of each frame by `update_chunks`.
@@ -137,46 +139,21 @@ pub struct PendingRemeshes {
     tasks: Vec<RemeshTask>,
 }
 
-/// Queued chunk saves awaiting async I/O.
+/// Queued chunk saves awaiting dispatch to the persistence store.
 #[derive(Component, Default)]
 pub struct PendingSaves {
-    /// Chunks waiting to be saved (not yet spawned as tasks). FIFO order.
-    queue: VecDeque<PendingSave>,
-    /// In-flight async save tasks.
-    tasks: Vec<Task<()>>,
+    /// Chunks waiting to be saved. FIFO order.
+    pub queue: VecDeque<PendingSave>,
 }
 
 /// A single chunk save request waiting in the queue.
-struct PendingSave {
-    position: IVec3,
-    chunk_size: u32,
-    data: crate::types::ChunkData,
-    save_dir: PathBuf,
-}
-
-impl PendingSaves {
-    /// Enqueue a chunk for async saving.
-    pub fn enqueue(
-        &mut self,
-        position: IVec3,
-        chunk_size: u32,
-        data: crate::types::ChunkData,
-        save_dir: PathBuf,
-    ) {
-        self.queue.push_back(PendingSave {
-            position,
-            chunk_size,
-            data,
-            save_dir,
-        });
-    }
+pub struct PendingSave {
+    pub position: IVec3,
+    pub envelope: ChunkFileEnvelope,
 }
 
 /// Maximum save tasks drained from queue per frame.
 const MAX_SAVE_SPAWNS_PER_FRAME: usize = 16;
-
-/// Maximum concurrent in-flight save tasks.
-const MAX_PENDING_SAVE_TASKS: usize = 32;
 
 /// Tracks which chunks have in-flight work to prevent overlapping gen/remesh.
 #[derive(Component, Default)]
@@ -345,15 +322,10 @@ pub(crate) fn update_chunks(
         &mut PendingSaves,
         &mut ChunkWorkTracker,
     )>,
-    entity_store_query: Query<
-        Option<
-            &persistence::StoreBackend<
-                IVec3,
-                Vec<crate::config::WorldObjectSpawn>,
-                FsChunkEntitiesStore,
-            >,
-        >,
-    >,
+    store_query: Query<(
+        Option<&StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>>,
+        Option<&StoreBackend<IVec3, ChunkFileEnvelope, FsChunkStore>>,
+    )>,
     ticket_query: Query<(Entity, &ChunkTicket, &GlobalTransform)>,
     mut tick: Local<u32>,
     mut ticket_cache: Local<HashMap<Entity, CachedTicket>>,
@@ -388,14 +360,7 @@ pub(crate) fn update_chunks(
         budget.reset();
 
         for &col in &diff.unloaded {
-            remove_column_chunks(
-                &mut instance,
-                &mut pending_saves,
-                col,
-                config.save_dir.as_deref(),
-                y_min,
-                y_max,
-            );
+            remove_column_chunks(&mut instance, &mut pending_saves, col, y_min, y_max);
         }
         for &(col, level) in &diff.loaded {
             if is_column_within_bounds(col, dimensions.bounds) {
@@ -418,21 +383,20 @@ pub(crate) fn update_chunks(
                 y_min,
                 y_max,
             );
-            let entity_store = entity_store_query
+            let (entity_store, chunk_store) = store_query
                 .get(map_entity)
-                .ok()
-                .flatten()
-                .map(|sb| &sb.0);
+                .map(|(es, cs)| (es.map(|sb| &sb.0), cs.map(|sb| &sb.0)))
+                .unwrap_or((None, None));
             drain_gen_queue(
                 &mut instance,
                 &mut pending,
                 &mut gen_queue,
                 &mut tracker,
-                config,
                 dimensions,
                 generator,
                 &budget,
                 entity_store,
+                chunk_store,
             );
         }
 
@@ -545,27 +509,27 @@ fn collect_tickets(
 }
 
 /// Remove all chunk data for a column being unloaded.
-/// Dirty chunks are enqueued into `pending_saves` rather than fire-and-forget.
+/// Dirty chunks are enqueued into `pending_saves` for async persistence.
 fn remove_column_chunks(
     instance: &mut VoxelMapInstance,
     pending_saves: &mut PendingSaves,
     col: IVec2,
-    save_dir: Option<&std::path::Path>,
     y_min: i32,
     y_max: i32,
 ) {
     let _span = info_span!("remove_column_chunks").entered();
+    let chunk_size = instance.chunk_size;
     for chunk_pos in column_to_chunks(col, (y_min, y_max)) {
         if instance.dirty_chunks.remove(&chunk_pos) {
-            if let Some(dir) = save_dir {
-                if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
-                    pending_saves.queue.push_back(PendingSave {
-                        position: chunk_pos,
-                        chunk_size: instance.chunk_size,
+            if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
+                pending_saves.queue.push_back(PendingSave {
+                    position: chunk_pos,
+                    envelope: ChunkFileEnvelope {
+                        version: crate::persistence::CHUNK_SAVE_VERSION,
+                        chunk_size,
                         data: chunk_data.clone(),
-                        save_dir: dir.to_path_buf(),
-                    });
-                }
+                    },
+                });
             }
         }
         instance.remove_chunk_data(chunk_pos);
@@ -573,46 +537,28 @@ fn remove_column_chunks(
     instance.chunk_levels.remove(&col);
 }
 
-/// Drain pending save queue: poll completed tasks, spawn new ones within budget.
-pub fn drain_pending_saves(mut map_query: Query<&mut PendingSaves>) {
-    let pool = AsyncComputeTaskPool::get();
-    for mut pending in &mut map_query {
-        let mut i = 0;
-        while i < pending.tasks.len() {
-            if check_ready(&mut pending.tasks[i]).is_some() {
-                let _ = pending.tasks.swap_remove(i);
-            } else {
-                i += 1;
-            }
-        }
+/// Drain pending save queue into the map entity's chunk store ops.
+pub fn drain_pending_saves(
+    mut map_query: Query<(
+        &mut PendingSaves,
+        &StoreBackend<IVec3, ChunkFileEnvelope, FsChunkStore>,
+        &mut PendingStoreOps<IVec3, ChunkFileEnvelope>,
+    )>,
+) {
+    for (mut pending, chunk_store, mut chunk_ops) in &mut map_query {
+        chunk_ops.poll();
 
         let mut spawned = 0;
-        while !pending.queue.is_empty()
-            && pending.tasks.len() < MAX_PENDING_SAVE_TASKS
-            && spawned < MAX_SAVE_SPAWNS_PER_FRAME
-        {
+        while !pending.queue.is_empty() && spawned < MAX_SAVE_SPAWNS_PER_FRAME {
             let save = pending.queue.pop_front().unwrap();
-            let task = pool.spawn(async move {
-                if let Err(e) = crate::persistence::save_chunk(
-                    &save.save_dir,
-                    save.position,
-                    save.chunk_size,
-                    &save.data,
-                ) {
-                    error!("Failed to save chunk at {:?}: {e}", save.position);
-                }
-            });
-            pending.tasks.push(task);
+            chunk_ops.spawn_save(&chunk_store.0, save.position, save.envelope);
             spawned += 1;
         }
 
         plot!("save_queue_depth", pending.queue.len() as f64);
-        plot!("save_tasks_in_flight", pending.tasks.len() as f64);
         plot!("saves_spawned_this_frame", spawned as f64);
 
-        let stop_reason = if pending.tasks.len() >= MAX_PENDING_SAVE_TASKS {
-            StopReason::InFlightCap
-        } else if spawned >= MAX_SAVE_SPAWNS_PER_FRAME {
+        let stop_reason = if spawned >= MAX_SAVE_SPAWNS_PER_FRAME {
             StopReason::HardCap
         } else {
             StopReason::Completed
@@ -671,11 +617,11 @@ fn drain_gen_queue(
     pending: &mut PendingChunks,
     gen_queue: &mut GenQueue,
     tracker: &mut ChunkWorkTracker,
-    config: &VoxelMapConfig,
     dimensions: &MapDimensions,
     generator: &VoxelGenerator,
     budget: &ChunkWorkBudget,
     entity_store: Option<&FsChunkEntitiesStore>,
+    chunk_store: Option<&FsChunkStore>,
 ) {
     let _span = info_span!("drain_gen_queue").entered();
 
@@ -745,9 +691,8 @@ fn drain_gen_queue(
                         pending,
                         std::mem::take(&mut terrain_batch),
                         generator,
-                        config.save_dir.clone(),
-                        instance.chunk_size,
                         instance.shape.clone(),
+                        chunk_store.cloned(),
                         entity_store.cloned(),
                     );
                     terrain_batch = Vec::with_capacity(GEN_BATCH_SIZE);
@@ -814,9 +759,8 @@ fn drain_gen_queue(
             pending,
             terrain_batch,
             generator,
-            config.save_dir.clone(),
-            instance.chunk_size,
             instance.shape.clone(),
+            chunk_store.cloned(),
             entity_store.cloned(),
         );
     }

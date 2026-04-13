@@ -1,3 +1,4 @@
+pub mod fs_chunk;
 pub mod fs_chunk_entities;
 
 use std::fs;
@@ -10,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::WorldObjectSpawn;
 use crate::types::ChunkData;
 
-const CHUNK_SAVE_VERSION: u32 = 4;
+pub const CHUNK_SAVE_VERSION: u32 = 4;
 const ZSTD_COMPRESSION_LEVEL: i32 = 3;
 
 /// Versioned envelope wrapping chunk data on disk.
@@ -18,10 +19,10 @@ const ZSTD_COMPRESSION_LEVEL: i32 = 3;
 /// `chunk_size` records the map's edge length at save time so load-time
 /// validation can reject data authored under a different configuration.
 #[derive(Serialize, Deserialize)]
-struct ChunkFileEnvelope {
-    version: u32,
-    chunk_size: u32,
-    data: ChunkData,
+pub struct ChunkFileEnvelope {
+    pub version: u32,
+    pub chunk_size: u32,
+    pub data: ChunkData,
 }
 
 /// Returns the file path for a chunk at the given position within a map directory.

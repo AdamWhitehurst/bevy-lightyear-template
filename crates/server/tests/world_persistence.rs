@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use server::map::save_dirty_chunks_sync;
 use server::persistence::{
     load_entities, load_map_meta, map_save_dir, save_entities, save_map_meta, MapMeta,
 };
@@ -11,6 +10,18 @@ use protocol::MapInstanceId;
 
 /// Padded chunk volume for the default `chunk_size=16`, used by tests.
 const PADDED_VOLUME_16: usize = 18 * 18 * 18;
+
+/// Save all dirty chunks from an instance to disk synchronously.
+fn save_dirty_chunks_sync(instance: &mut VoxelMapInstance, map_dir: &std::path::Path) {
+    let chunk_size = instance.chunk_size;
+    let dirty: Vec<IVec3> = instance.dirty_chunks.drain().collect();
+    for chunk_pos in dirty {
+        if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
+            chunk_persist::save_chunk(map_dir, chunk_pos, chunk_size, chunk_data)
+                .expect("save chunk in test");
+        }
+    }
+}
 
 #[test]
 fn terrain_persists_across_server_restart() {

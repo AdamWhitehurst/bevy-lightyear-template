@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use bevy::log::info_span;
@@ -9,6 +8,7 @@ use ndshape::{RuntimeShape, Shape};
 use crate::config::{SurfaceHeightMap, VoxelGenerator, VoxelGeneratorImpl, WorldObjectSpawn};
 use crate::meshing::mesh_chunk_greedy;
 use crate::palette::PalettedChunk;
+use crate::persistence::fs_chunk::FsChunkStore;
 use crate::persistence::fs_chunk_entities::FsChunkEntitiesStore;
 use crate::types::{ChunkData, ChunkStatus, FillType, WorldVoxel};
 
@@ -45,9 +45,8 @@ pub fn spawn_terrain_batch(
     pending: &mut PendingChunks,
     positions: Vec<IVec3>,
     generator: &VoxelGenerator,
-    save_dir: Option<PathBuf>,
-    chunk_size: u32,
     shape: RuntimeShape<u32, 3>,
+    chunk_store: Option<FsChunkStore>,
     entity_store: Option<FsChunkEntitiesStore>,
 ) {
     let generator = Arc::clone(&generator.0);
@@ -58,9 +57,11 @@ pub fn spawn_terrain_batch(
         positions
             .into_iter()
             .map(|pos| {
-                if let Some(ref dir) = save_dir {
-                    match crate::persistence::load_chunk(dir, pos, chunk_size) {
-                        Ok(Some(chunk_data)) => {
+                if let Some(ref store) = chunk_store {
+                    use persistence::Store;
+                    match store.load(&pos) {
+                        Ok(Some(envelope)) => {
+                            let chunk_data = envelope.data;
                             let mesh = if chunk_data.fill_type == FillType::Empty {
                                 None
                             } else {

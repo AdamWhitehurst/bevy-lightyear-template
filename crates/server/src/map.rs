@@ -38,7 +38,9 @@ use protocol::world_object::{apply_object_components, WorldObjectDefRegistry};
 use protocol::{AppState, RespawnPoint, TerrainDefRegistry};
 use voxel_map_engine::config::WorldObjectSpawn;
 use voxel_map_engine::persistence as chunk_persist;
+use voxel_map_engine::persistence::fs_chunk::FsChunkStore;
 use voxel_map_engine::persistence::fs_chunk_entities::FsChunkEntitiesStore;
+use voxel_map_engine::persistence::ChunkFileEnvelope;
 
 /// Plugin managing server-side voxel map functionality.
 pub struct ServerMapPlugin;
@@ -132,6 +134,10 @@ fn init_overworld_entity(
                 map_dir: map_dir.clone(),
             }),
             PendingStoreOps::<IVec3, Vec<WorldObjectSpawn>>::default(),
+            StoreBackend::new(FsChunkStore {
+                map_dir: map_dir.clone(),
+            }),
+            PendingStoreOps::<IVec3, ChunkFileEnvelope>::default(),
         ))
         .id();
 
@@ -354,12 +360,12 @@ fn save_dirty_chunks_debounced(
         mut entity_ops,
     ) in &mut map_query
     {
-        let Some(map_dir) = config.save_dir.as_deref() else {
+        if config.save_dir.is_none() {
             trace!("save_dirty_chunks_debounced: no save_dir for {map_id:?}, skipping");
             continue;
-        };
+        }
 
-        enqueue_dirty_chunks(&mut instance, &mut pending_saves, map_dir);
+        enqueue_dirty_chunks(&mut instance, &mut pending_saves);
 
         let spawn_points: Vec<Vec3> = respawn_query
             .iter()
@@ -383,39 +389,44 @@ fn save_dirty_chunks_debounced(
     dirty_state.first_dirty_time = None;
 }
 
-/// Drain dirty chunks from an instance into the async `PendingSaves` queue.
-pub fn enqueue_dirty_chunks(
+/// Drain dirty chunks from an instance into the `PendingSaves` queue.
+fn enqueue_dirty_chunks(instance: &mut VoxelMapInstance, pending_saves: &mut PendingSaves) {
+    let chunk_size = instance.chunk_size;
+    let dirty: Vec<IVec3> = instance.dirty_chunks.drain().collect();
+    for chunk_pos in dirty {
+        if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
+            pending_saves.queue.push_back(lifecycle::PendingSave {
+                position: chunk_pos,
+                envelope: ChunkFileEnvelope {
+                    version: chunk_persist::CHUNK_SAVE_VERSION,
+                    chunk_size,
+                    data: chunk_data.clone(),
+                },
+            });
+        }
+    }
+}
+
+/// Flush all dirty chunks through the store. Blocks until complete.
+/// Used during shutdown where we must guarantee persistence before exit.
+fn save_dirty_chunks_flush(
     instance: &mut VoxelMapInstance,
-    pending_saves: &mut PendingSaves,
-    map_dir: &Path,
+    chunk_store: &StoreBackend<IVec3, ChunkFileEnvelope, FsChunkStore>,
+    chunk_ops: &mut PendingStoreOps<IVec3, ChunkFileEnvelope>,
 ) {
     let chunk_size = instance.chunk_size;
     let dirty: Vec<IVec3> = instance.dirty_chunks.drain().collect();
     for chunk_pos in dirty {
         if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
-            pending_saves.enqueue(
-                chunk_pos,
+            let envelope = ChunkFileEnvelope {
+                version: chunk_persist::CHUNK_SAVE_VERSION,
                 chunk_size,
-                chunk_data.clone(),
-                map_dir.to_path_buf(),
-            );
+                data: chunk_data.clone(),
+            };
+            chunk_ops.spawn_save(&chunk_store.0, chunk_pos, envelope);
         }
     }
-}
-
-/// Synchronously flush all dirty chunks to disk. Used only during shutdown
-/// where we must guarantee persistence before the process exits.
-pub fn save_dirty_chunks_sync(instance: &mut VoxelMapInstance, map_dir: &Path) {
-    let chunk_size = instance.chunk_size;
-    let dirty: Vec<IVec3> = instance.dirty_chunks.drain().collect();
-    for chunk_pos in dirty {
-        if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
-            if let Err(e) = chunk_persist::save_chunk(map_dir, chunk_pos, chunk_size, chunk_data) {
-                error!("Failed to save chunk at {chunk_pos}: {e}");
-                instance.dirty_chunks.insert(chunk_pos);
-            }
-        }
-    }
+    chunk_ops.flush();
 }
 
 pub fn save_world_on_shutdown(
@@ -428,6 +439,8 @@ pub fn save_world_on_shutdown(
         &mut PendingStoreOps<(), MapMeta>,
         &StoreBackend<(), Vec<SavedEntity>, FsMapEntitiesStore>,
         &mut PendingStoreOps<(), Vec<SavedEntity>>,
+        &StoreBackend<IVec3, ChunkFileEnvelope, FsChunkStore>,
+        &mut PendingStoreOps<IVec3, ChunkFileEnvelope>,
     )>,
     dirty_state: Res<WorldDirtyState>,
     entity_query: Query<(
@@ -447,16 +460,16 @@ pub fn save_world_on_shutdown(
 
     // Dirty chunks only need saving when edits occurred
     if dirty_state.is_dirty {
-        for (mut instance, config, _, _, _, _, _) in &mut map_query {
-            let Some(map_dir) = config.save_dir.as_deref() else {
+        for (mut instance, config, _, _, _, _, _, chunk_store, mut chunk_ops) in &mut map_query {
+            if config.save_dir.is_none() {
                 continue;
-            };
-            save_dirty_chunks_sync(&mut instance, map_dir);
+            }
+            save_dirty_chunks_flush(&mut instance, chunk_store, &mut chunk_ops);
         }
     }
 
     // Meta and entities are always saved — their state is independent of voxel edits
-    for (_, config, map_id, meta_store, mut meta_ops, entity_store, mut entity_ops) in
+    for (_, config, map_id, meta_store, mut meta_ops, entity_store, mut entity_ops, _, _) in
         &mut map_query
     {
         if config.save_dir.is_none() {
@@ -1260,7 +1273,7 @@ fn spawn_homebase(
     terrain_registry: &TerrainDefRegistry,
     type_registry: &AppTypeRegistry,
 ) -> (Entity, MapTransitionParams) {
-    let map_dir = map_save_dir(&save_path.0, map_id);
+    let map_dir = Arc::new(map_save_dir(&save_path.0, map_id));
 
     let seed = load_homebase_seed(&map_dir, owner);
 
@@ -1275,7 +1288,7 @@ fn spawn_homebase(
     let spawning_distance = bounds_to_spawning_distance(bounds.unwrap_or(IVec3::ONE));
 
     let mut config = VoxelMapConfig::new(seed, 0, spawning_distance, true);
-    config.save_dir = Some(map_dir);
+    config.save_dir = Some(map_dir.as_ref().clone());
 
     let instance = VoxelMapInstance::new(dimensions.tree_height, dimensions.chunk_size);
     let shape = instance.shape.clone();
@@ -1296,6 +1309,22 @@ fn spawn_homebase(
             Homebase { owner },
             Transform::default(),
             map_id.clone(),
+            StoreBackend::new(FsMapMetaStore {
+                map_dir: map_dir.clone(),
+            }),
+            PendingStoreOps::<(), MapMeta>::default(),
+            StoreBackend::new(FsMapEntitiesStore {
+                map_dir: map_dir.clone(),
+            }),
+            PendingStoreOps::<(), Vec<SavedEntity>>::default(),
+            StoreBackend::new(FsChunkEntitiesStore {
+                map_dir: map_dir.clone(),
+            }),
+            PendingStoreOps::<IVec3, Vec<WorldObjectSpawn>>::default(),
+            StoreBackend::new(FsChunkStore {
+                map_dir: map_dir.clone(),
+            }),
+            PendingStoreOps::<IVec3, ChunkFileEnvelope>::default(),
         ))
         .id();
 
