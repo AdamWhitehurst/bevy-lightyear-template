@@ -153,6 +153,81 @@ pub fn evict_chunk_entities(
     }
 }
 
+/// Collect all living chunk entities grouped by `(map_entity, chunk_pos)`.
+fn collect_chunk_entities(
+    entity_query: &Query<(
+        &ChunkEntityRef,
+        &WorldObjectId,
+        &Position,
+        Option<&ActiveTransformation>,
+        Option<&protocol::Health>,
+    )>,
+) -> HashMap<(Entity, IVec3), Vec<WorldObjectSpawn>> {
+    let mut by_chunk: HashMap<(Entity, IVec3), Vec<WorldObjectSpawn>> = HashMap::new();
+    for (chunk_ref, obj_id, pos, active_transform, health) in entity_query {
+        by_chunk
+            .entry((chunk_ref.map_entity, chunk_ref.chunk_pos))
+            .or_default()
+            .push(WorldObjectSpawn {
+                object_id: obj_id.0.clone(),
+                position: Vec3::from(pos.0),
+                persisted_components: serialize_persisted(active_transform, health),
+            });
+    }
+    by_chunk
+}
+
+/// Save collected chunk entities to their stores (async, no flush).
+fn save_chunk_entities_to_stores(
+    by_chunk: HashMap<(Entity, IVec3), Vec<WorldObjectSpawn>>,
+    store_query: &mut Query<(
+        &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
+        &mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>,
+    )>,
+) {
+    for ((map_entity, chunk_pos), spawns) in by_chunk {
+        let Ok((store, mut ops)) = store_query.get_mut(map_entity) else {
+            continue;
+        };
+        ops.spawn_save(&store.0, chunk_pos, spawns);
+    }
+}
+
+/// Periodically saves all loaded chunk entities to disk.
+///
+/// Uses its own debounce timer independent of the voxel dirty state,
+/// ensuring entity-only changes (e.g. placed objects without voxel edits)
+/// are persisted even if the chunk is never evicted.
+pub fn save_chunk_entities_periodic(
+    time: Res<Time>,
+    mut last_save: Local<f64>,
+    entity_query: Query<(
+        &ChunkEntityRef,
+        &WorldObjectId,
+        &Position,
+        Option<&ActiveTransformation>,
+        Option<&protocol::Health>,
+    )>,
+    mut store_query: Query<(
+        &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
+        &mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>,
+    )>,
+) {
+    const CHUNK_ENTITY_SAVE_INTERVAL: f64 = 5.0;
+
+    let now = time.elapsed_secs_f64();
+    if now - *last_save < CHUNK_ENTITY_SAVE_INTERVAL {
+        return;
+    }
+    *last_save = now;
+
+    let by_chunk = collect_chunk_entities(&entity_query);
+    if by_chunk.is_empty() {
+        return;
+    }
+    save_chunk_entities_to_stores(by_chunk, &mut store_query);
+}
+
 /// On server shutdown, saves entity files for all loaded chunks.
 ///
 /// Ensures destroyed entities (no longer in the query) are excluded from
@@ -175,23 +250,8 @@ pub fn save_all_chunk_entities_on_exit(
         return;
     }
     exit_reader.clear();
-    let mut by_chunk: HashMap<(Entity, IVec3), Vec<WorldObjectSpawn>> = HashMap::new();
-    for (chunk_ref, obj_id, pos, active_transform, health) in &entity_query {
-        by_chunk
-            .entry((chunk_ref.map_entity, chunk_ref.chunk_pos))
-            .or_default()
-            .push(WorldObjectSpawn {
-                object_id: obj_id.0.clone(),
-                position: Vec3::from(pos.0),
-                persisted_components: serialize_persisted(active_transform, health),
-            });
-    }
-    for ((map_entity, chunk_pos), spawns) in by_chunk {
-        let Ok((store, mut ops)) = store_query.get_mut(map_entity) else {
-            continue;
-        };
-        ops.spawn_save(&store.0, chunk_pos, spawns);
-    }
+    let by_chunk = collect_chunk_entities(&entity_query);
+    save_chunk_entities_to_stores(by_chunk, &mut store_query);
     for (_, mut ops) in &mut store_query {
         ops.flush();
     }

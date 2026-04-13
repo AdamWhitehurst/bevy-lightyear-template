@@ -641,6 +641,7 @@ impl Plugin for ServerMapPlugin {
                     crate::chunk_entities::evict_chunk_entities
                         .after(lifecycle::despawn_out_of_range_chunks),
                     poll_chunk_entity_ops,
+                    crate::chunk_entities::save_chunk_entities_periodic,
                 ),
             )
             .add_systems(
