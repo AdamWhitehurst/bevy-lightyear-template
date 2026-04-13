@@ -18,6 +18,7 @@ use std::time::Duration;
 fn main() {
     App::new()
         .add_plugins(MinimalPlugins)
+        .add_plugins(bevy::app::TerminalCtrlCHandlerPlugin)
         .add_plugins(bevy::state::app::StatesPlugin)
         .add_plugins(bevy::log::LogPlugin::default())
         .add_plugins(bevy::asset::AssetPlugin {
