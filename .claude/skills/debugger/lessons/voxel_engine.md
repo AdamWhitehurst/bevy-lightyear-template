@@ -17,3 +17,11 @@
 **Fix:** `handle_completed_chunk` gracefully handles missing chunk data for Features results (returns early with a trace log). The same race can affect Mesh stage results but those carry `chunk_data: Some(...)` so they insert data for an unloaded column — currently harmless but worth noting.
 
 **Pattern:** Any async task pipeline with in-place updates (no data payload in result) must guard against the target being removed while the task runs. Either cancel tasks on unload, or handle missing targets at poll time.
+
+## Gated Systems Can Starve Shared Infrastructure Consumers
+
+When a system populates shared state (propagator sources, caches, counters) but is gated behind a resource/condition, ungated consumers of that state will see empty/uninitialized values. Check whether each consumer of shared per-frame state has its data source active in all execution contexts (server vs client, different app states, etc).
+
+## Lightyear Room Removal Is Not Instantaneous
+
+Deferred `commands.trigger(RoomEvent)` for room membership changes means lightyear may replicate entities from the old room in the same or subsequent frames after the removal is triggered. Any client-side cleanup of foreign entities must account for late arrivals, not just entities present at cleanup time.

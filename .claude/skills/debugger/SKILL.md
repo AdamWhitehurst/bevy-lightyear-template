@@ -257,4 +257,4 @@ After fix is verified:
 ## Lessons Index
 
 - `lessons/lightyear.md` — Lightyear entity architecture, stuck inputs, tracy instrumentation
-- `lessons/voxel_engine.md` — ChunkWorkBudget starvation when `ChunkGenerationEnabled` is absent (clients)
+- `lessons/voxel_engine.md` — ChunkWorkBudget starvation, gated system consumer starvation, lightyear room removal timing
