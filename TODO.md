@@ -1,14 +1,38 @@
 # TODO
-- 
-- bevy-lightyear-template:
+
+## Planning
+
+- [ ] Persistence
+  - [x] abstract persistence to separate systems
+  - [x] Filesystem Backends
+  - [ ] NosterBackend
+    - [ ] nostr saving of maps using editable nostr event + blossom blob storage
+    - [ ] nostr prefetching, caching of chunks into fs
+      - NostrBackend queries nearby
+- [ ] NostrClient for clients and server
+  - [ ] manages keys
+  - [ ] manages nostr relays
+  - [ ] can read/post/update/delete events
+  - [ ] login + ui
+  - [ ] new keys + ui
+  - [ ] server discovery + ui
+  - [ ] map ownership tied to nostr identities. Overworld = server's, Homebase = client's
+- [ ] Nostr Node/Relay? May not be needed if can just use publicly available ones
+
+- [ ] Singleplayer
+  - [ ] Persistence
+
+---
+
+
+## Considering
+
+- Expose, split bevy-lightyear-template:
   - built-in claude qrspi skills
-- abstract persistence systems that listen for data events
-- skills: component design, system design, networking, physics knowledge
+  - stand-alone modules
+- agent skills: component design, system design, networking, physics knowledge
 - dampen player stats by distance from spawn?
-- user will run `cargo server` and `cargo client` for validation
 - update world object system on hot reload by first remove WorldObjectId's components using old loaded Def, load new Def, insert_if_new(...) ?
-- /spec:update - test on adding tracing > output txt file
-- /spec:find-rules
 - client --autoconnect flag
 - stream ron assets to web clients on request
 - bevi-inspector-egui
@@ -21,8 +45,7 @@
 - Singleplayer
 - Stats and Buffs
 - Npc interaction authoring via asset file writing
-- /spec:commit - submit commit
-- NPCs (world objects?)
+- NPCs
 - Inventory/Item system
 - animation creation still
 - animation editor ui
