@@ -5,21 +5,21 @@ nurturing their creatures in a personal home-base.
 
 ## Core Fantasy
 
-**Players become proud parents of unique creatures they've raised from scratch.**
+**Players grow unique creatures they've raised from scratch.**
 
-Your brawlers aren't just avatars; they're creatures with personalities, genetics, alignments, and legacies. You care for them in your home-base, take
+Your characters aren't just avatars; they have personalities, genetics, alignments, and legacies. You care for them in your home-base, take
 them into the overworld to explore and quest, challenge other players to duels, and compete in arenas, races, and other challenges. Every action
-shapes who your brawlers become.
+shapes who your characters become.
 
 ## Design Pillars
 
 ### 1. Living Home-Base
 
-- Personal space where all your brawlers live together
+- Personal space where all your characters live together
 - Control a floating "god hand" to interact: feed, pet, pick up, give toys
-- Encourage brawlers to play together, form relationships, and mate
+- Encourage characters to play together, form relationships, and mate
 - Customize with furnishings, toys, and collectibles found in the world
-- Watch brawlers interact autonomously when you're not directing them
+- Watch characters interact autonomously when you're not directing them
 
 ### 2. Open-World Exploration
 
@@ -37,7 +37,7 @@ shapes who your brawlers become.
 
 ### 4. Meaningful Progression
 
-- Brawlers evolve through training, breeding, and moral choices
+- characters evolve through training, breeding, and moral choices
 - Stats unlock abilities (stat requirements for moves)
 - Appearance changes based on stat focus and alignment
 - Multi-generational inheritance creates legacy
@@ -61,13 +61,13 @@ shapes who your brawlers become.
 | **Collection**     | Gather items within time/space constraints                    |
 | **Bounty Hunting** | Capture or kill wanted criminals/lost pets; affects alignment |
 
-## Brawler Systems
+## character Systems
 
 ### Stats & Abilities
 
 - **Stat Grades** (E→S): Persist through generations, determine growth potential
 - **Stat Requirements**: Abilities have minimum stat thresholds to equip
-- **Training**: Stat focus through activities shapes brawler's strengths
+- **Training**: Stat focus through activities shapes character's strengths
 
 ### Alignment
 
@@ -75,14 +75,14 @@ shapes who your brawlers become.
   - Killing shifts toward evil
   - Capturing criminals shifts toward good
   - Bounty hunting choices have lasting moral consequences
-- **Appearance Changes**: Alignment visually transforms brawlers over time
+- **Appearance Changes**: Alignment visually transforms characters over time
 
 ### Genetics & Breeding
 
 - **Genotypes**: Stats inherited from parents with slight mutation
 - **Phenotypes**: Appearance inherited with variation
-- **Relationships**: Brawlers form bonds, leading to mating when encouraged
-- **Offspring**: New brawlers carrying genetic legacy of their lineage
+- **Relationships**: characters form bonds, leading to mating when encouraged
+- **Offspring**: New characters carrying genetic legacy of their lineage
 
 ### Appearance Evolution
 
@@ -98,7 +98,7 @@ shapes who your brawlers become.
 
 - Private instance per player
 - God-hand control mode for caretaking
-- Brawlers roam and interact autonomously
+- characters roam and interact autonomously
 - Editable: place furnishings, toys, decorations
 - Portal/exit to overworld
 
@@ -128,7 +128,7 @@ shapes who your brawlers become.
 **Session Flow:**
 
 ```
-Launch → Visit home-base → Care for brawlers → Enter overworld
+Launch → Visit home-base → Care for characters → Enter overworld
 → Quest/explore/duel → Enter challenge stage → Earn rewards
 → Return home with loot → Customize base → Repeat
 ```
@@ -136,7 +136,7 @@ Launch → Visit home-base → Care for brawlers → Enter overworld
 **Long-term Loop:**
 
 ```
-Raise brawlers → Train stats → Shape alignment → Breed offspring
+Raise characters → Train stats → Shape alignment → Breed offspring
 → Generations improve → Unlock better abilities → Climb ranks
 ```
 
@@ -144,9 +144,9 @@ Raise brawlers → Train stats → Shape alignment → Breed offspring
 
 | System          | Core Loop                                        |
 | --------------- | ------------------------------------------------ |
-| **Home-Base**   | Care → Relationships → Breeding → New brawlers   |
+| **Home-Base**   | Care → Relationships → Breeding → New characters   |
 | **Overworld**   | Explore → Quest → Duel → Collect                 |
-| **Challenges**  | Compete → Earn rewards → Improve brawlers        |
+| **Challenges**  | Compete → Earn rewards → Improve characters        |
 | **Progression** | Train → Evolve appearance → Inherit to offspring |
 
 ## Inspirations
@@ -163,7 +163,7 @@ Raise brawlers → Train stats → Shape alignment → Breed offspring
 
 A player should feel:
 
-- **Attachment** to brawlers they've raised and bred across generations
+- **Attachment** to characters they've raised and bred across generations
 - **Pride** in their home-base and unique creature builds
 - **Agency** in shaping alignment through moral choices
 - **Variety** from different challenge types beyond just fighting
@@ -171,8 +171,8 @@ A player should feel:
 
 ## Design Decisions
 
-1. **Lifespan**: Activity-based (~80% from playing with that brawler, ~20% from overall session time). Idle aging only accrues while player is online,
+1. **Lifespan**: Activity-based (~80% from playing with that character, ~20% from overall session time). Idle aging only accrues while player is online,
    not logged out.
 2. **Permadeath**: Optional "hardcore" mode—leave flexibility for both retirement and deletion.
-3. **Economy**: Items tradeable; brawlers are not.
+3. **Economy**: Items tradeable; characters are not.
 4. **Monetization**: Cosmetic-only, no progression shortcuts.

@@ -14,8 +14,7 @@
   - Do not omit necessary details that affect accuracy or correctness.
   - Use the minimum words needed to be precise and unambiguous.
   - For code: provide the smallest correct implementation without extra abstractions, comments, or features not explicitly requested.
-- **[HIGHEST]** You are an intelligent engineer speaking to engineers. It is sufficient to describe something plainly. DON'T exaggerate, brag, or
-  sound like a salesman. DON'T make up information that you are not certain about.
+- **[HIGHEST]** You are an intelligent engineer speaking to engineers. It is sufficient to describe something plainly. DON'T exaggerate, brag, or sound like a salesman. DON'T make up information that you are not certain about.
 - DON'T BE SYCOPHANTIC. You should be skeptical and cautious. When uncertain: STOP and request feedback from user.
 - **[HIGH]** NEVER lie. NEVER fabricate information. NEVER make untrue statements.
 
@@ -51,14 +50,8 @@
 
 ## Verification Rules
 
-- **[HIGH]** After implementing asset loading or any runtime feature, MUST verify it actually works at runtime (e.g. `cargo server` or `cargo client`)
+- **[HIGH]** After changing code, it MUST verify that it actually works at runtime. This includes automated tests like `cargo check-all` and `cargo test-all`. If manual verification is required (`cargo client` and `cargo server` testing), prompt user how to test.
   -- compilation alone is insufficient.
-
-## Context-Specific Rules and Documents
-
-- **[HIGH]** Read and follow any documents that are relevant to your task. CRITICAL: Follow any rules that they stipulate
-- `VISION.md` -- High-level outline of the game. Provides guidance, expectations for features and how they integrate
-- `doc/dependency-search.md` -- How to search dependencies
 
 ## Inline Annotations (`%%`)
 
