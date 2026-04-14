@@ -22,7 +22,7 @@ pub struct ServerGameplayPlugin;
 impl Plugin for ServerGameplayPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(handle_connected);
-        app.add_systems(OnEnter(AppState::Ready), spawn_dummy_target);
+        // app.add_systems(OnEnter(AppState::Ready), spawn_dummy_target);
         app.add_systems(
             Update,
             validate_respawn_points.run_if(any_with_component::<MapLoadState>.and(
@@ -83,26 +83,26 @@ fn sync_ability_manifest(defs: Option<Res<AbilityDefs>>, mut last_len: Local<usi
     }
 }
 
-fn spawn_dummy_target(mut commands: Commands, registry: Res<MapRegistry>) {
-    commands.spawn((
-        Name::new("DummyTarget"),
-        Position(Vec3::new(10.0, 5.0, 0.0)),
-        Rotation::default(),
-        Replicate::to_clients(NetworkTarget::All),
-        NetworkVisibility,
-        PredictionTarget::to_clients(NetworkTarget::All),
-        CharacterPhysicsBundle::default(),
-        ColorComponent(css::GRAY.into()),
-        CharacterMarker,
-        CharacterType::Humanoid,
-        MapInstanceId::Overworld,
-        Health::new(100.0),
-        RespawnTimerConfig::default(),
-        ChunkTicket::npc(registry.get(&MapInstanceId::Overworld)),
-        DummyTarget,
-    ));
-}
-
+// fn spawn_dummy_target(mut commands: Commands, registry: Res<MapRegistry>) {
+//     commands.spawn((
+//         Name::new("DummyTarget"),
+//         Position(Vec3::new(10.0, 5.0, 0.0)),
+//         Rotation::default(),
+//         Replicate::to_clients(NetworkTarget::All),
+//         NetworkVisibility,
+//         PredictionTarget::to_clients(NetworkTarget::All),
+//         CharacterPhysicsBundle::default(),
+//         ColorComponent(css::GRAY.into()),
+//         CharacterMarker,
+//         CharacterType::Humanoid,
+//         MapInstanceId::Overworld,
+//         Health::new(100.0),
+//         RespawnTimerConfig::default(),
+//         ChunkTicket::npc(registry.get(&MapInstanceId::Overworld)),
+//         DummyTarget,
+//     ));
+// }
+//
 fn handle_character_movement(
     time: Res<Time>,
     spatial_query: SpatialQuery,
