@@ -2,17 +2,14 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use avian3d::prelude::{ColliderDisabled, Position, RigidBodyDisabled};
+use avian3d::prelude::Position;
 use bevy::app::AppExit;
 use bevy::prelude::*;
 use lightyear::prelude::{
-    ControlledBy, DisableRollback, MessageReceiver, MessageSender, NetworkVisibility, RemoteId,
-    Room, RoomEvent, RoomTarget, ServerMultiMessageSender,
+    ControlledBy, MessageReceiver, MessageSender, NetworkVisibility, RemoteId, Room, RoomEvent,
+    RoomTarget, ServerMultiMessageSender,
 };
-use protocol::map::{
-    MapChannel, MapSwitchTarget, MapTransitionEnd, MapTransitionReady, MapTransitionStart,
-    PlayerMapSwitchRequest,
-};
+use protocol::map::{MapSwitchTarget, MapTransitionStart, PlayerMapSwitchRequest};
 use protocol::{
     CharacterMarker, ChunkChannel, ChunkDataSync, MapInstanceId, MapRegistry, PendingTransition,
     SectionBlocksUpdate, UnloadColumn, VoxelChannel, VoxelEditAck, VoxelEditBroadcast,
@@ -646,7 +643,7 @@ impl Plugin for ServerMapPlugin {
                     push_chunks_to_clients,
                     save_dirty_chunks_debounced,
                     handle_map_switch_requests.run_if(resource_exists::<TerrainDefRegistry>),
-                    handle_map_transition_ready,
+                    crate::transition::complete_map_transition,
                     protocol::attach_chunk_colliders,
                     crate::chunk_entities::spawn_chunk_entities
                         .after(lifecycle::poll_chunk_tasks)
@@ -1073,6 +1070,7 @@ pub fn handle_map_switch_requests(
     // system's param validation doesn't panic in test apps that skip terrain loading.
     terrain_registry: Option<Res<TerrainDefRegistry>>,
     type_registry: Res<AppTypeRegistry>,
+    respawn_query: Query<(&Position, &MapInstanceId), With<protocol::RespawnPoint>>,
 ) {
     let Some(terrain_registry) = terrain_registry else {
         trace!("handle_map_switch_requests: TerrainDefRegistry not loaded yet, skipping");
@@ -1104,7 +1102,7 @@ pub fn handle_map_switch_requests(
                 continue;
             }
 
-            execute_server_transition(
+            crate::transition::start_map_transition(
                 &mut commands,
                 player_entity,
                 client_entity,
@@ -1117,6 +1115,7 @@ pub fn handle_map_switch_requests(
                 &*save_path,
                 &*terrain_registry,
                 &*type_registry,
+                &respawn_query,
             );
         }
     }
@@ -1133,99 +1132,19 @@ fn resolve_switch_target(target: &MapSwitchTarget, client_id_bits: u64) -> MapIn
 }
 
 /// Seed, generation_version, and bounds for a map transition message.
-struct MapTransitionParams {
-    seed: u64,
-    generation_version: u32,
-    bounds: Option<IVec3>,
-    chunk_size: u32,
-    column_y_range: (i32, i32),
-}
-
-#[allow(clippy::too_many_arguments)]
-fn execute_server_transition(
-    commands: &mut Commands,
-    player_entity: Entity,
-    client_entity: Entity,
-    current_map_id: &MapInstanceId,
-    target_map_id: &MapInstanceId,
-    registry: &mut MapRegistry,
-    room_registry: &mut RoomRegistry,
-    map_params_query: &Query<(&VoxelMapConfig, &MapDimensions)>,
-    senders: &mut Query<&mut MessageSender<MapTransitionStart>>,
-    save_path: &WorldSavePath,
-    terrain_registry: &TerrainDefRegistry,
-    type_registry: &AppTypeRegistry,
-) {
-    trace!("Transitioning player {player_entity:?} from {current_map_id:?} to {target_map_id:?}");
-
-    commands.entity(player_entity).insert((
-        DisableRollback,
-        ColliderDisabled,
-        RigidBodyDisabled,
-        PendingTransition(target_map_id.clone()),
-    ));
-
-    let old_room = room_registry.get_or_create(current_map_id, commands);
-    let new_room = room_registry.get_or_create(target_map_id, commands);
-
-    commands.trigger(RoomEvent {
-        room: old_room,
-        target: RoomTarget::RemoveEntity(player_entity),
-    });
-    commands.trigger(RoomEvent {
-        room: old_room,
-        target: RoomTarget::RemoveSender(client_entity),
-    });
-    commands.trigger(RoomEvent {
-        room: new_room,
-        target: RoomTarget::AddEntity(player_entity),
-    });
-    commands.trigger(RoomEvent {
-        room: new_room,
-        target: RoomTarget::AddSender(client_entity),
-    });
-
-    commands.entity(player_entity).insert(target_map_id.clone());
-
-    let (map_entity, params) = ensure_map_exists(
-        commands,
-        target_map_id,
-        registry,
-        map_params_query,
-        save_path,
-        terrain_registry,
-        type_registry,
-    );
-    commands
-        .entity(player_entity)
-        .insert(ChunkTicket::player(map_entity));
-
-    let spawn_position = crate::gameplay::DEFAULT_SPAWN_POS;
-    commands.entity(player_entity).insert((
-        avian3d::prelude::Position(spawn_position),
-        avian3d::prelude::LinearVelocity(Vec3::ZERO),
-    ));
-
-    let mut sender = senders
-        .get_mut(client_entity)
-        .expect("Client entity must have MessageSender<MapTransitionStart>");
-    sender.send::<MapChannel>(MapTransitionStart {
-        target: target_map_id.clone(),
-        seed: params.seed,
-        generation_version: params.generation_version,
-        bounds: params.bounds,
-        spawn_position,
-        chunk_size: params.chunk_size,
-        column_y_range: params.column_y_range,
-        readiness_radius: protocol::transition::TRANSITION_READINESS_RADIUS,
-    });
+pub struct MapTransitionParams {
+    pub seed: u64,
+    pub generation_version: u32,
+    pub bounds: Option<IVec3>,
+    pub chunk_size: u32,
+    pub column_y_range: (i32, i32),
 }
 
 /// Returns the map entity and transition params. If the map already exists,
 /// reads params from its `VoxelMapConfig`/`MapDimensions`. If newly spawned,
 /// derives them from the terrain def (the entity isn't queryable yet via commands).
 #[allow(clippy::too_many_arguments)]
-fn ensure_map_exists(
+pub fn ensure_map_exists(
     commands: &mut Commands,
     map_id: &MapInstanceId,
     registry: &mut MapRegistry,
@@ -1373,42 +1292,6 @@ fn load_homebase_seed(map_dir: &Arc<PathBuf>, owner: u64) -> u64 {
             let seed = seed_from_id(owner);
             trace!("Creating new homebase-{owner} (seed={seed})");
             seed
-        }
-    }
-}
-
-pub fn handle_map_transition_ready(
-    mut commands: Commands,
-    mut receivers: Query<(Entity, &mut MessageReceiver<MapTransitionReady>)>,
-    mut end_senders: Query<&mut MessageSender<MapTransitionEnd>>,
-    controlled_query: Query<
-        (Entity, &ControlledBy),
-        (With<CharacterMarker>, With<PendingTransition>),
-    >,
-) {
-    for (client_entity, mut receiver) in &mut receivers {
-        for _ready in receiver.receive() {
-            let Some((player_entity, _)) = controlled_query
-                .iter()
-                .find(|(_, ctrl)| ctrl.owner == client_entity)
-            else {
-                warn!("Received MapTransitionReady but no transitioning player for client {client_entity:?}");
-                continue;
-            };
-
-            trace!("Client confirmed transition ready for player {player_entity:?}, unfreezing");
-
-            commands.entity(player_entity).remove::<(
-                RigidBodyDisabled,
-                ColliderDisabled,
-                DisableRollback,
-                PendingTransition,
-            )>();
-
-            let mut sender = end_senders
-                .get_mut(client_entity)
-                .expect("Client entity must have MessageSender<MapTransitionEnd>");
-            sender.send::<MapChannel>(MapTransitionEnd);
         }
     }
 }

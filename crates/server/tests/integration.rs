@@ -1,8 +1,8 @@
 use ::client::map::handle_map_transition_start;
 use ::client::network::{ClientNetworkConfig, ClientNetworkPlugin, ClientTransport};
 use ::server::map::{
-    flush_voxel_broadcasts, handle_map_switch_requests, handle_map_transition_ready,
-    handle_voxel_edit_requests, PendingVoxelBroadcasts, RoomRegistry, WorldDirtyState,
+    flush_voxel_broadcasts, handle_map_switch_requests, handle_voxel_edit_requests,
+    PendingVoxelBroadcasts, RoomRegistry, WorldDirtyState,
 };
 use ::server::network::{ServerNetworkConfig, ServerNetworkPlugin, ServerTransport};
 use ::server::persistence::WorldSavePath;
@@ -847,7 +847,10 @@ fn add_server_map_systems(stepper: &mut CrossbeamTestStepper) {
     stepper.server_app.init_resource::<WorldSavePath>();
     stepper.server_app.add_systems(
         Update,
-        (handle_map_switch_requests, handle_map_transition_ready),
+        (
+            handle_map_switch_requests,
+            ::server::transition::complete_map_transition,
+        ),
     );
 }
 
@@ -1151,7 +1154,10 @@ fn server_and_client_spawn_matching_homebase_configs() {
     server_app.init_resource::<WorldSavePath>();
     server_app.add_systems(
         Update,
-        (handle_map_switch_requests, handle_map_transition_ready),
+        (
+            handle_map_switch_requests,
+            ::server::transition::complete_map_transition,
+        ),
     );
     insert_test_terrain_defs(&mut server_app);
     server_app.finish();
