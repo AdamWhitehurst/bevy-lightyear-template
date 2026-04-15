@@ -192,7 +192,7 @@ readiness_radius: protocol::transition::TRANSITION_READINESS_RADIUS,
 - [x] `cargo test-all` passes
 
 #### Manual
-- [ ] No runtime behavior change. Existing transition still works.
+- [x] No runtime behavior change. Existing transition still works.
 
 ---
 
@@ -251,8 +251,8 @@ app.add_systems(
 
 ### Verification
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test-all` passes
+- [x] `cargo check-all` passes
+- [x] `cargo test-all` passes
 
 #### Manual
 - [ ] `cargo server` + `cargo client` — chunks mesh closest-first around player. Transition between maps: chunks near spawn mesh first.

@@ -173,7 +173,7 @@ pub struct GenQueue {
 }
 
 /// Cached state for a single ticket, used to detect changes.
-pub(crate) struct CachedTicket {
+pub struct CachedTicket {
     column: IVec2,
     map_entity: Entity,
     ticket_type: TicketType,
@@ -306,7 +306,7 @@ pub fn ensure_pending_chunks(
     }
 }
 
-/// Collect tickets, propagate levels, and spawn/remove chunks based on the diff.
+/// Propagate levels and spawn/remove chunks based on the diff.
 pub(crate) fn update_chunks(
     mut map_query: Query<(
         Entity,
@@ -326,13 +326,9 @@ pub(crate) fn update_chunks(
         Option<&StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>>,
         Option<&StoreBackend<IVec3, ChunkFileEnvelope, FsChunkStore>>,
     )>,
-    ticket_query: Query<(Entity, &ChunkTicket, &GlobalTransform)>,
     mut tick: Local<u32>,
-    mut ticket_cache: Local<HashMap<Entity, CachedTicket>>,
 ) {
     *tick += 1;
-
-    collect_tickets(&mut map_query, &ticket_query, &mut ticket_cache);
 
     for (
         map_entity,
@@ -411,8 +407,12 @@ pub(crate) fn update_chunks(
 }
 
 /// Detect stale and changed tickets, updating propagator sources accordingly.
-fn collect_tickets(
-    map_query: &mut Query<(
+///
+/// Runs unconditionally (not gated on `ChunkGenerationEnabled`) so that
+/// client-side propagators have source positions for distance-based remesh
+/// priority even when chunk generation is disabled.
+pub fn collect_tickets(
+    mut map_query: Query<(
         Entity,
         &mut VoxelMapInstance,
         &VoxelMapConfig,
@@ -426,8 +426,8 @@ fn collect_tickets(
         &mut PendingSaves,
         &mut ChunkWorkTracker,
     )>,
-    ticket_query: &Query<(Entity, &ChunkTicket, &GlobalTransform)>,
-    ticket_cache: &mut HashMap<Entity, CachedTicket>,
+    ticket_query: Query<(Entity, &ChunkTicket, &GlobalTransform)>,
+    mut ticket_cache: Local<HashMap<Entity, CachedTicket>>,
 ) {
     let _span = info_span!("collect_tickets").entered();
 

@@ -47,6 +47,7 @@ impl Plugin for VoxelPlugin {
             Update,
             (
                 lifecycle::ensure_pending_chunks,
+                lifecycle::collect_tickets,
                 (lifecycle::update_chunks, lifecycle::poll_chunk_tasks).run_if(generation_enabled),
                 lifecycle::reset_chunk_budgets.run_if(not(generation_enabled)),
                 lifecycle::despawn_out_of_range_chunks,
