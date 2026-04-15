@@ -131,8 +131,11 @@ fn attach_chunk_ticket_to_player(
     >,
 ) {
     for (entity, map_id) in &players {
+        let Some(&map_entity) = registry.0.get(map_id) else {
+            trace!("attach_chunk_ticket_to_player: map {map_id:?} not yet registered, expected during transition");
+            continue;
+        };
         trace!("Attaching ChunkTicket to player {entity:?} on map {map_id:?}");
-        let map_entity = registry.get(map_id);
         commands
             .entity(entity)
             .insert(ChunkTicket::player(map_entity));
