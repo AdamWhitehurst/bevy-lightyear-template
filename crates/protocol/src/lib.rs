@@ -153,7 +153,7 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::Bidirectional);
 
         // Map instance identity
-        app.register_component::<MapInstanceId>();
+        app.register_component::<MapInstanceId>().add_prediction();
 
         // World objects — static, no prediction needed
         app.register_component::<world_object::WorldObjectId>();

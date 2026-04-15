@@ -67,7 +67,7 @@ fn handle_new_character(
         trace!(?entity, "Adding physics to predicted character");
         commands
             .entity(entity)
-            .insert((CharacterPhysicsBundle::default(), MapInstanceId::Overworld));
+            .insert(CharacterPhysicsBundle::default());
     }
 }
 
