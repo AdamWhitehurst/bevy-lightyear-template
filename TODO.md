@@ -27,6 +27,7 @@
 
 ## Considering
 
+- Social system that hooks into dialogue system
 - Expose, split bevy-lightyear-template:
   - built-in claude qrspi skills
   - stand-alone modules
