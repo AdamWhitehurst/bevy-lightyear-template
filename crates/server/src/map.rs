@@ -1217,6 +1217,7 @@ fn execute_server_transition(
         spawn_position,
         chunk_size: params.chunk_size,
         column_y_range: params.column_y_range,
+        readiness_radius: protocol::transition::TRANSITION_READINESS_RADIUS,
     });
 }
 

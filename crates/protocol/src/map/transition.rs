@@ -29,6 +29,7 @@ pub struct MapTransitionStart {
     pub spawn_position: Vec3,
     pub chunk_size: u32,
     pub column_y_range: (i32, i32),
+    pub readiness_radius: u32,
 }
 
 /// Client tells server that chunks are loaded and it's ready

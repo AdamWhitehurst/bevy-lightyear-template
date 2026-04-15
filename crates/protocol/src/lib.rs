@@ -16,6 +16,7 @@ pub mod map;
 pub mod physics;
 pub mod reflect_loader;
 pub mod terrain;
+pub mod transition;
 pub mod vox_model;
 pub mod world_object;
 
@@ -46,6 +47,7 @@ pub use map::{
     VoxelEditReject, VoxelEditRequest, VoxelType,
 };
 pub use terrain::{TerrainDefRegistry, TerrainPlugin};
+pub use transition::{MapTransitionEntity, TransitionPlugin};
 pub use vox_model::{VoxModelAsset, VoxModelPlugin, VoxModelRegistry};
 pub use world_object::{WorldObjectDefRegistry, WorldObjectId, WorldObjectPlugin};
 
@@ -231,6 +233,7 @@ impl Plugin for SharedGameplayPlugin {
         app.add_plugins(terrain::TerrainPlugin);
         app.add_plugins(world_object::WorldObjectPlugin);
         app.add_plugins(vox_model::VoxModelPlugin);
+        app.add_plugins(TransitionPlugin);
 
         app.add_plugins(lightyear::avian3d::plugin::LightyearAvianPlugin {
             replication_mode: lightyear::avian3d::plugin::AvianReplicationMode::Position,
