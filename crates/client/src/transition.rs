@@ -36,6 +36,7 @@ pub fn receive_transition_entities(
 
 /// Main state machine driver. Evaluates phase gates, advances phase.
 pub fn update_transition_state(
+    mut commands: Commands,
     mut state: ResMut<ClientTransitionState>,
     registry: Res<MapRegistry>,
     map_query: Query<(&VoxelMapInstance, &ChunkWorkTracker, &Children)>,
@@ -44,6 +45,7 @@ pub fn update_transition_state(
     manager_query: Query<&MessageManager, With<Client>>,
     entity_exists: Query<Entity>,
     mut next_transition: ResMut<NextState<MapTransitionState>>,
+    player_query: Query<Entity, (With<Predicted>, With<protocol::CharacterMarker>)>,
 ) {
     match state.phase {
         TransitionPhase::Idle => return,
@@ -88,6 +90,17 @@ pub fn update_transition_state(
         }
 
         TransitionPhase::Complete => {
+            // Unfreeze player entities (lightyear may recreate predicted
+            // entity during transition, so iterate all matches)
+            for entity in &player_query {
+                commands.entity(entity).remove::<(
+                    avian3d::prelude::RigidBodyDisabled,
+                    avian3d::prelude::ColliderDisabled,
+                    DisableRollback,
+                    protocol::PendingTransition,
+                    protocol::TransitionReadySent,
+                )>();
+            }
             next_transition.set(MapTransitionState::Playing);
             state.reset();
             trace!("Transition: Complete -> Idle");
