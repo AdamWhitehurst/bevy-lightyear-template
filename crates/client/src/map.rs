@@ -438,24 +438,24 @@ pub fn handle_map_transition_start(
                 transition.chunk_size
             );
 
-            let player = player_query
-                .single()
-                .expect("Predicted player must exist when receiving MapTransitionStart");
-
             // Despawn all maps except the transition target. We cannot rely on
             // the player's MapInstanceId because lightyear may replicate the new
             // value before this message arrives.
             despawn_all_maps_except(&mut commands, &mut *registry, &transition.target);
             despawn_foreign_world_objects(&mut commands, &world_objects, &transition.target);
 
-            commands.entity(player).insert((
-                RigidBodyDisabled,
-                ColliderDisabled,
-                DisableRollback,
-                PendingTransition(transition.target.clone()),
-                Position(transition.spawn_position),
-                LinearVelocity(Vec3::ZERO),
-            ));
+            // Freeze player if one exists. Lightyear may temporarily despawn the
+            // predicted entity during re-prediction, so the player is optional.
+            if let Ok(player) = player_query.single() {
+                commands.entity(player).insert((
+                    RigidBodyDisabled,
+                    ColliderDisabled,
+                    DisableRollback,
+                    PendingTransition(transition.target.clone()),
+                    Position(transition.spawn_position),
+                    LinearVelocity(Vec3::ZERO),
+                ));
+            }
 
             if !registry.0.contains_key(&transition.target) {
                 let def_name = terrain_def_name(&transition.target);
@@ -477,9 +477,11 @@ pub fn handle_map_transition_start(
             }
 
             let map_entity = registry.get(&transition.target);
-            commands
-                .entity(player)
-                .insert(ChunkTicket::map_transition(map_entity));
+            if let Ok(player) = player_query.single() {
+                commands
+                    .entity(player)
+                    .insert(ChunkTicket::map_transition(map_entity));
+            }
 
             transition_state.begin(&transition);
             prediction_state.pending.clear();
