@@ -902,8 +902,8 @@ app.add_systems(
 
 ### Verification
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test-all` passes
+- [x] `cargo check-all` passes
+- [x] `cargo test-all` passes
 
 #### Manual
 - [ ] `cargo server` + `cargo client` — fresh connect: loading screen, spatial readiness, player on solid terrain.

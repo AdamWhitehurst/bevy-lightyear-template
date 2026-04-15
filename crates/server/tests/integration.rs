@@ -1,5 +1,5 @@
-use ::client::map::handle_map_transition_start;
 use ::client::network::{ClientNetworkConfig, ClientNetworkPlugin, ClientTransport};
+use ::client::transition::on_transition_start_received;
 use ::server::map::{
     flush_voxel_broadcasts, handle_map_switch_requests, handle_voxel_edit_requests,
     PendingVoxelBroadcasts, RoomRegistry, WorldDirtyState,
@@ -1133,7 +1133,7 @@ fn duplicate_switch_request_ignored() {
 
 /// Both the server and the client App spawn homebase map entities through their real systems.
 /// Server: handle_map_switch_requests → ensure_map_exists → VoxelMapInstance::homebase()
-/// Client: handle_map_transition_start → spawn_map_instance
+/// Client: on_transition_start_received → spawn_map_from_transition
 /// Then verify both produce identical VoxelMapConfig (seed, bounds, tree_height).
 #[test]
 fn server_and_client_spawn_matching_homebase_configs() {
@@ -1175,7 +1175,7 @@ fn server_and_client_spawn_matching_homebase_configs() {
     client_app.add_sub_state::<MapTransitionState>();
     client_app.init_resource::<MapRegistry>();
     client_app.init_resource::<::client::map::VoxelPredictionState>();
-    client_app.add_systems(Update, handle_map_transition_start);
+    client_app.add_systems(Update, on_transition_start_received);
     insert_test_terrain_defs(&mut client_app);
     client_app.finish();
     client_app.cleanup();
@@ -1297,7 +1297,7 @@ fn server_and_client_spawn_matching_homebase_configs() {
         .entity_mut(client_of_entity)
         .insert(RemoteId(PeerId::Netcode(TEST_CLIENT_ID)));
 
-    // Predicted player required by handle_map_transition_start
+    // Predicted player required by on_transition_start_received
     // Must include MapInstanceId to match the system's query
     client_app.world_mut().spawn((
         CharacterMarker,

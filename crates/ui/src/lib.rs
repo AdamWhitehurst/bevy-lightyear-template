@@ -484,10 +484,9 @@ fn map_switch_button_interaction(
         ),
     >,
     mut senders: Query<&mut MessageSender<PlayerMapSwitchRequest>>,
-    transition_state: Res<State<MapTransitionState>>,
-    mut next_transition: ResMut<NextState<MapTransitionState>>,
+    client_transition: Res<protocol::transition::ClientTransitionState>,
 ) {
-    if *transition_state.get() == MapTransitionState::Transitioning {
+    if client_transition.phase != protocol::transition::TransitionPhase::Idle {
         return;
     }
 
@@ -511,9 +510,7 @@ fn map_switch_button_interaction(
                 target: target.clone(),
             });
         }
-
-        // Show loading screen immediately — don't wait for server response
-        next_transition.set(MapTransitionState::Transitioning);
+        // Loading screen now appears when MapTransitionStart arrives from server
     }
 }
 

@@ -357,6 +357,11 @@ fn handle_connected(
     registry: Res<MapRegistry>,
     mut room_registry: ResMut<crate::map::RoomRegistry>,
     respawn_query: Query<(&Position, &MapInstanceId), With<RespawnPoint>>,
+    map_params_query: Query<(
+        &voxel_map_engine::prelude::VoxelMapConfig,
+        &voxel_map_engine::prelude::MapDimensions,
+    )>,
+    mut start_senders: Query<&mut MessageSender<protocol::map::MapTransitionStart>>,
 ) {
     let client_entity = trigger.entity;
     let peer_id = remote_id_query
@@ -382,7 +387,7 @@ fn handle_connected(
         .map(|(p, _)| p.0)
         .unwrap_or(DEFAULT_SPAWN_POS);
 
-    commands
+    let character_entity = commands
         .spawn((
             Name::new("Character"),
             PlayerId(peer_id),
@@ -408,11 +413,36 @@ fn handle_connected(
             AbilityCooldowns::default(),
             ChunkTicket::player(registry.get(&MapInstanceId::Overworld)),
             ClientChunkVisibility::default(),
-        ));
+        ))
+        .id();
 
+    // Phase 2 (complete_map_transition) will AddSender when client reports ready
     let room = room_registry.get_or_create(&MapInstanceId::Overworld, &mut commands);
-    commands.trigger(RoomEvent {
-        room,
-        target: RoomTarget::AddSender(client_entity),
+    commands
+        .entity(character_entity)
+        .insert(protocol::transition::TransitionPending {
+            client_entity,
+            target_map_id: MapInstanceId::Overworld,
+            new_room: room,
+            relocated_entities: vec![character_entity],
+        });
+
+    // Send MapTransitionStart so client enters the transition state machine
+    let map_entity = registry.get(&MapInstanceId::Overworld);
+    let (config, dimensions) = map_params_query
+        .get(map_entity)
+        .expect("Overworld map must have VoxelMapConfig and MapDimensions");
+    let mut sender = start_senders
+        .get_mut(client_entity)
+        .expect("Client entity must have MessageSender<MapTransitionStart>");
+    sender.send::<protocol::map::MapChannel>(protocol::map::MapTransitionStart {
+        target: MapInstanceId::Overworld,
+        seed: config.seed,
+        generation_version: config.generation_version,
+        bounds: dimensions.bounds,
+        spawn_position: spawn_pos,
+        chunk_size: dimensions.chunk_size,
+        column_y_range: dimensions.column_y_range,
+        readiness_radius: protocol::transition::TRANSITION_READINESS_RADIUS,
     });
 }

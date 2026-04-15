@@ -1,12 +1,14 @@
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 use lightyear::prelude::client::*;
+use protocol::transition::ClientTransitionState;
 use ui::*;
 
 fn ui_test_app() -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin);
+    app.init_resource::<ClientTransitionState>();
     app.add_plugins(UiPlugin);
     app.world_mut()
         .spawn((Name::new("Test Client"), Client::default()));

@@ -1,12 +1,19 @@
-use avian3d::prelude::Collider;
+use std::sync::Arc;
+
+use avian3d::prelude::{Collider, ColliderDisabled, LinearVelocity, Position, RigidBodyDisabled};
 use bevy::prelude::*;
 use lightyear::prelude::*;
 use protocol::map::*;
 use protocol::transition::*;
-use protocol::MapRegistry;
+use protocol::world_object::WorldObjectId;
+use protocol::{
+    CharacterMarker, MapInstanceId, MapRegistry, PendingTransition, TerrainDefRegistry,
+};
 use ui::state::MapTransitionState;
 use voxel_map_engine::lifecycle::ChunkWorkTracker;
 use voxel_map_engine::prelude::*;
+
+use crate::map::VoxelPredictionState;
 
 /// Receives MapTransitionEnd, sets end_received flag.
 pub fn receive_transition_end(
@@ -31,6 +38,164 @@ pub fn receive_transition_entities(
             trace!("Received MapTransitionEntity entity={:?}", msg.entity);
             state.pending_entities.push(msg.entity);
         }
+    }
+}
+
+/// Handles MapTransitionStart for both initial connect and mid-game.
+/// Shows loading screen, despawns old maps, clears prediction state,
+/// freezes player (if exists), spawns new VoxelMapInstance, starts state machine.
+pub fn on_transition_start_received(
+    mut commands: Commands,
+    mut receivers: Query<&mut MessageReceiver<MapTransitionStart>>,
+    mut registry: ResMut<MapRegistry>,
+    terrain_registry: Res<TerrainDefRegistry>,
+    player_query: Query<Entity, (With<Predicted>, With<CharacterMarker>, With<Controlled>)>,
+    world_objects: Query<(Entity, &MapInstanceId), With<WorldObjectId>>,
+    mut transition_state: ResMut<ClientTransitionState>,
+    mut prediction_state: ResMut<VoxelPredictionState>,
+    mut next_transition: ResMut<NextState<MapTransitionState>>,
+) {
+    for mut receiver in &mut receivers {
+        for transition in receiver.receive() {
+            trace!(
+                "MapTransitionStart target={:?} chunk_size={}",
+                transition.target,
+                transition.chunk_size
+            );
+
+            // Show loading screen
+            next_transition.set(MapTransitionState::Transitioning);
+
+            // Clear prediction state
+            prediction_state.pending.clear();
+
+            // Despawn old maps (no-op on initial connect)
+            despawn_all_maps_except(&mut commands, &mut registry, &transition.target);
+            despawn_foreign_world_objects(&mut commands, &world_objects, &transition.target);
+
+            // Freeze player if one exists (mid-game only)
+            if let Ok(player) = player_query.single() {
+                commands.entity(player).insert((
+                    RigidBodyDisabled,
+                    ColliderDisabled,
+                    DisableRollback,
+                    PendingTransition(transition.target.clone()),
+                    Position(transition.spawn_position),
+                    LinearVelocity(Vec3::ZERO),
+                ));
+            }
+
+            // Spawn new VoxelMapInstance if not already in registry
+            if !registry.0.contains_key(&transition.target) {
+                let map_entity =
+                    spawn_map_from_transition(&mut commands, &transition, &terrain_registry);
+                registry.insert(transition.target.clone(), map_entity);
+            }
+
+            let map_entity = registry.get(&transition.target);
+
+            // Update ChunkTicket on player if exists
+            if let Ok(player) = player_query.single() {
+                commands
+                    .entity(player)
+                    .insert(ChunkTicket::map_transition(map_entity));
+            }
+            // On initial connect, no player exists yet. The server's ChunkTicket
+            // on the server-side character entity drives chunk sending via
+            // push_chunks_to_clients. Client doesn't need a local ChunkTicket
+            // to receive chunks.
+
+            // Start state machine
+            transition_state.begin(&transition);
+        }
+    }
+}
+
+/// Spawn a client-side VoxelMapInstance from a MapTransitionStart message.
+fn spawn_map_from_transition(
+    commands: &mut Commands,
+    transition: &MapTransitionStart,
+    terrain_registry: &TerrainDefRegistry,
+) -> Entity {
+    let def_name = terrain_def_name(&transition.target);
+    let terrain_def = terrain_registry
+        .get(def_name)
+        .expect("terrain def must be loaded");
+    let dimensions = terrain_def
+        .map_dimensions()
+        .expect("terrain def must contain MapDimensions");
+
+    let padded = dimensions.padded_size();
+    let generator = VoxelGenerator(Arc::new(FlatGenerator {
+        chunk_size: dimensions.chunk_size,
+        shape: RuntimeShape::<u32, 3>::new([padded, padded, padded]),
+    }));
+
+    let spawning_distance = dimensions
+        .bounds
+        .map(|b| b.max_element().max(1) as u32)
+        .unwrap_or(10);
+    let config = VoxelMapConfig::new(transition.seed, 0, spawning_distance, false);
+
+    let entity = commands
+        .spawn((
+            VoxelMapInstance::new(dimensions.tree_height, dimensions.chunk_size),
+            config,
+            dimensions.clone(),
+            generator,
+            Transform::default(),
+            transition.target.clone(),
+        ))
+        .id();
+
+    trace!(
+        "Spawned client map instance for {:?}: {entity:?}",
+        transition.target
+    );
+    entity
+}
+
+fn terrain_def_name(map_id: &MapInstanceId) -> &'static str {
+    match map_id {
+        MapInstanceId::Overworld => "overworld",
+        MapInstanceId::Homebase { .. } => "homebase",
+    }
+}
+
+/// Despawn all map entities except the transition target.
+fn despawn_all_maps_except(
+    commands: &mut Commands,
+    registry: &mut MapRegistry,
+    keep: &MapInstanceId,
+) {
+    let to_remove: Vec<(MapInstanceId, Entity)> = registry
+        .0
+        .iter()
+        .filter(|(id, _)| *id != keep)
+        .map(|(id, &entity)| (id.clone(), entity))
+        .collect();
+    for (map_id, map_entity) in to_remove {
+        trace!("Despawning map {map_id:?} entity {map_entity:?}");
+        registry.0.remove(&map_id);
+        commands.entity(map_entity).despawn();
+    }
+}
+
+/// Despawn replicated world objects that don't belong to the transition target map.
+fn despawn_foreign_world_objects(
+    commands: &mut Commands,
+    world_objects: &Query<(Entity, &MapInstanceId), With<WorldObjectId>>,
+    keep: &MapInstanceId,
+) {
+    let mut count = 0;
+    for (entity, map_id) in world_objects {
+        if map_id != keep {
+            commands.entity(entity).despawn();
+            count += 1;
+        }
+    }
+    if count > 0 {
+        trace!("Despawned {count} world objects from previous map");
     }
 }
 
@@ -188,12 +353,14 @@ impl Plugin for ClientTransitionPlugin {
         app.add_systems(
             Update,
             (
+                on_transition_start_received,
                 receive_transition_end,
                 receive_transition_entities,
                 update_transition_state,
             )
                 .chain()
-                .run_if(in_state(ClientState::InGame)),
+                .run_if(in_state(ClientState::InGame))
+                .run_if(resource_exists::<TerrainDefRegistry>),
         );
     }
 }

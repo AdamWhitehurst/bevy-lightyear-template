@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 use lightyear::prelude::client::*;
 use lightyear::prelude::{Controlled, Predicted};
+use protocol::transition::ClientTransitionState;
 use protocol::*;
 use std::time::Duration;
 use ui::*;
@@ -11,6 +12,7 @@ fn test_ui_plugin_initializes_state() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin);
+    app.init_resource::<ClientTransitionState>();
     app.add_plugins(UiPlugin);
 
     app.update();
@@ -25,6 +27,7 @@ fn test_main_menu_spawns_buttons() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin);
+    app.init_resource::<ClientTransitionState>();
     app.add_plugins(UiPlugin);
 
     app.update();
@@ -53,6 +56,7 @@ fn test_connect_button_triggers_state_transition() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin);
+    app.init_resource::<ClientTransitionState>();
     app.add_plugins(UiPlugin);
 
     // Setup dummy client entity (needed for Connecting state)
@@ -88,6 +92,7 @@ fn test_ingame_state_spawns_hud() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin);
+    app.init_resource::<ClientTransitionState>();
     app.add_plugins(UiPlugin);
 
     // Setup dummy client entity (needed for button interactions)
@@ -128,6 +133,7 @@ fn test_disconnection_returns_to_main_menu() {
         tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
     });
     app.add_plugins(ProtocolPlugin);
+    app.init_resource::<ClientTransitionState>();
     app.add_plugins(UiPlugin);
 
     // Setup client entity
@@ -164,6 +170,7 @@ fn test_connecting_state_spawns_cancel_button() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin);
+    app.init_resource::<ClientTransitionState>();
     app.add_plugins(UiPlugin);
 
     // Setup dummy client entity (needed for Connecting state)
@@ -194,6 +201,7 @@ fn ingame_hud_spawns_map_switch_button() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin);
+    app.init_resource::<ClientTransitionState>();
     app.add_plugins(UiPlugin);
 
     app.world_mut()
@@ -219,6 +227,7 @@ fn map_switch_button_label_shows_homebase_when_on_overworld() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin);
+    app.init_resource::<ClientTransitionState>();
     app.add_plugins(UiPlugin);
 
     app.world_mut()
@@ -255,6 +264,7 @@ fn map_switch_button_label_shows_overworld_when_on_homebase() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin);
+    app.init_resource::<ClientTransitionState>();
     app.add_plugins(UiPlugin);
 
     app.world_mut()
@@ -291,6 +301,7 @@ fn test_state_cleanup() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin);
+    app.init_resource::<ClientTransitionState>();
     app.add_plugins(UiPlugin);
 
     // Setup dummy client entity (needed for Connecting state)

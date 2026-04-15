@@ -1,21 +1,14 @@
-use std::sync::Arc;
-
-use avian3d::prelude::{ColliderDisabled, LinearVelocity, Position, RigidBodyDisabled};
 use bevy::{prelude::*, window::PrimaryWindow};
 use leafwing_input_manager::prelude::*;
-use lightyear::prelude::{Controlled, DisableRollback, MessageReceiver, MessageSender, Predicted};
-use protocol::map::{MapChannel, MapTransitionEnd, MapTransitionReady, MapTransitionStart};
-use protocol::world_object::WorldObjectId;
+use lightyear::prelude::{Controlled, MessageReceiver, MessageSender, Predicted};
 use protocol::{
-    AppState, CharacterMarker, ChunkDataSync, MapInstanceId, MapRegistry, PendingTransition,
-    PlayerActions, SectionBlocksUpdate, TerrainDefRegistry, TransitionReadySent, UnloadColumn,
-    VoxelChannel, VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
+    CharacterMarker, ChunkDataSync, MapInstanceId, MapRegistry, PlayerActions, SectionBlocksUpdate,
+    UnloadColumn, VoxelChannel, VoxelEditAck, VoxelEditBroadcast, VoxelEditReject,
+    VoxelEditRequest, VoxelType,
 };
-use ui::MapTransitionState;
 use voxel_map_engine::prelude::{
-    chunk_to_column, column_to_chunks, ChunkData, ChunkStatus, ChunkTicket, FlatGenerator,
-    MapDimensions, RuntimeShape, VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin,
-    VoxelWorld, WorldVoxel,
+    chunk_to_column, column_to_chunks, ChunkData, ChunkStatus, ChunkTicket, MapDimensions,
+    VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
 };
 
 const RAYCAST_MAX_DISTANCE: f32 = 100.0;
@@ -54,28 +47,19 @@ impl Plugin for ClientMapPlugin {
         app.add_plugins(VoxelPlugin)
             .init_resource::<MapRegistry>()
             .init_resource::<VoxelPredictionState>()
-            .add_systems(OnEnter(AppState::Ready), spawn_overworld)
-            // Transition handler must flush before chunk sync runs, otherwise
-            // chunk sync sees the old ChunkTicket/map entity and applies
-            // messages to the wrong (about-to-be-despawned) map.
             .add_systems(
                 Update,
                 (
-                    handle_map_transition_start,
-                    ApplyDeferred,
-                    (
-                        attach_chunk_ticket_to_player,
-                        handle_voxel_broadcasts,
-                        handle_section_blocks_update,
-                        handle_voxel_edit_ack,
-                        handle_voxel_edit_reject,
-                        handle_chunk_data_sync,
-                        handle_unload_column,
-                        protocol::attach_chunk_colliders,
-                    )
-                        .run_if(in_state(ui::ClientState::InGame)),
+                    attach_chunk_ticket_to_player,
+                    handle_voxel_broadcasts,
+                    handle_section_blocks_update,
+                    handle_voxel_edit_ack,
+                    handle_voxel_edit_reject,
+                    handle_chunk_data_sync,
+                    handle_unload_column,
+                    protocol::attach_chunk_colliders,
                 )
-                    .chain(),
+                    .run_if(in_state(ui::ClientState::InGame)),
             )
             .add_systems(
                 PostUpdate,
@@ -84,42 +68,6 @@ impl Plugin for ClientMapPlugin {
                     .after(TransformSystems::Propagate),
             );
     }
-}
-
-/// Resource tracking the primary overworld map entity.
-#[derive(Resource)]
-pub struct OverworldMap(pub Entity);
-
-fn spawn_overworld(
-    mut commands: Commands,
-    mut registry: ResMut<MapRegistry>,
-    terrain_registry: Res<TerrainDefRegistry>,
-) {
-    let terrain_def = terrain_registry
-        .get("overworld")
-        .expect("overworld.terrain.ron must be loaded by AppState::Ready");
-    let dimensions = terrain_def
-        .map_dimensions()
-        .expect("overworld.terrain.ron must contain MapDimensions");
-
-    let config = VoxelMapConfig::new(0, 0, 2, false);
-
-    let padded = dimensions.padded_size();
-    let map = commands
-        .spawn((
-            VoxelMapInstance::new(dimensions.tree_height, dimensions.chunk_size),
-            config,
-            dimensions.clone(),
-            VoxelGenerator(Arc::new(FlatGenerator {
-                chunk_size: dimensions.chunk_size,
-                shape: RuntimeShape::<u32, 3>::new([padded, padded, padded]),
-            })),
-            Transform::default(),
-            MapInstanceId::Overworld,
-        ))
-        .id();
-    commands.insert_resource(OverworldMap(map));
-    registry.insert(MapInstanceId::Overworld, map);
 }
 
 fn attach_chunk_ticket_to_player(
@@ -409,249 +357,6 @@ fn handle_voxel_edit_reject(
             prediction_state
                 .pending
                 .retain(|p| p.sequence != reject.sequence);
-        }
-    }
-}
-
-pub fn handle_map_transition_start(
-    mut commands: Commands,
-    mut receivers: Query<&mut MessageReceiver<MapTransitionStart>>,
-    mut registry: ResMut<MapRegistry>,
-    // Option<Res<_>> here so tests without a loaded terrain registry don't
-    // panic on param validation; the map-transition path expects the registry
-    // at runtime and asserts on it in the spawn block below.
-    terrain_registry: Option<Res<TerrainDefRegistry>>,
-    player_query: Query<Entity, (With<Predicted>, With<CharacterMarker>, With<Controlled>)>,
-    world_objects: Query<(Entity, &MapInstanceId), With<WorldObjectId>>,
-    mut transition_state: ResMut<protocol::transition::ClientTransitionState>,
-    mut prediction_state: ResMut<VoxelPredictionState>,
-) {
-    let Some(terrain_registry) = terrain_registry else {
-        trace!("handle_map_transition_start: TerrainDefRegistry not loaded yet, skipping");
-        return;
-    };
-    for mut receiver in &mut receivers {
-        for transition in receiver.receive() {
-            trace!(
-                "recv MapTransitionStart target={:?} chunk_size={}",
-                transition.target,
-                transition.chunk_size
-            );
-
-            // Despawn all maps except the transition target. We cannot rely on
-            // the player's MapInstanceId because lightyear may replicate the new
-            // value before this message arrives.
-            despawn_all_maps_except(&mut commands, &mut *registry, &transition.target);
-            despawn_foreign_world_objects(&mut commands, &world_objects, &transition.target);
-
-            // Freeze player if one exists. Lightyear may temporarily despawn the
-            // predicted entity during re-prediction, so the player is optional.
-            if let Ok(player) = player_query.single() {
-                commands.entity(player).insert((
-                    RigidBodyDisabled,
-                    ColliderDisabled,
-                    DisableRollback,
-                    PendingTransition(transition.target.clone()),
-                    Position(transition.spawn_position),
-                    LinearVelocity(Vec3::ZERO),
-                ));
-            }
-
-            if !registry.0.contains_key(&transition.target) {
-                let def_name = terrain_def_name(&transition.target);
-                let terrain_def = terrain_registry
-                    .get(def_name)
-                    .expect("terrain def must be loaded");
-                let dimensions = terrain_def
-                    .map_dimensions()
-                    .expect("terrain def must contain MapDimensions");
-                let generator = generator_for_map(&transition.target, &dimensions);
-                let map_entity = spawn_map_instance(
-                    &mut commands,
-                    &transition.target,
-                    transition.seed,
-                    &dimensions,
-                    generator,
-                );
-                registry.insert(transition.target.clone(), map_entity);
-            }
-
-            let map_entity = registry.get(&transition.target);
-            if let Ok(player) = player_query.single() {
-                commands
-                    .entity(player)
-                    .insert(ChunkTicket::map_transition(map_entity));
-            }
-
-            transition_state.begin(&transition);
-            prediction_state.pending.clear();
-        }
-    }
-}
-
-fn terrain_def_name(map_id: &MapInstanceId) -> &'static str {
-    match map_id {
-        MapInstanceId::Overworld => "overworld",
-        MapInstanceId::Homebase { .. } => "homebase",
-    }
-}
-
-/// Despawn replicated world objects that don't belong to the transition target map.
-///
-/// Lightyear's room-based visibility relies on `ReplicableRootEntities` to iterate
-/// entities for despawn processing. Due to Bevy's non-recursive command flush,
-/// most entities are not in this set when the buffer runs, so lightyear never
-/// sends despawn messages for them. This client-side cleanup handles the gap.
-fn despawn_foreign_world_objects(
-    commands: &mut Commands,
-    world_objects: &Query<(Entity, &MapInstanceId), With<WorldObjectId>>,
-    keep: &MapInstanceId,
-) {
-    let mut count = 0;
-    for (entity, map_id) in world_objects {
-        if map_id != keep {
-            commands.entity(entity).despawn();
-            count += 1;
-        }
-    }
-    if count > 0 {
-        trace!("Despawned {count} world objects from previous map");
-    }
-}
-
-/// Despawn all map entities except the transition target.
-///
-/// The player's replicated `MapInstanceId` may already reflect the new map
-/// (lightyear replication can arrive before the transition message), so we
-/// cannot use it to identify the old map. Instead, despawn everything that
-/// isn't the target.
-fn despawn_all_maps_except(
-    commands: &mut Commands,
-    registry: &mut MapRegistry,
-    keep: &MapInstanceId,
-) {
-    let to_remove: Vec<(MapInstanceId, Entity)> = registry
-        .0
-        .iter()
-        .filter(|(id, _)| *id != keep)
-        .map(|(id, &entity)| (id.clone(), entity))
-        .collect();
-    for (map_id, map_entity) in to_remove {
-        trace!("Despawning map {map_id:?} entity {map_entity:?}");
-        registry.0.remove(&map_id);
-        commands.entity(map_entity).despawn();
-    }
-}
-
-fn generator_for_map(map_id: &MapInstanceId, dimensions: &MapDimensions) -> VoxelGenerator {
-    let padded = dimensions.padded_size();
-    let flat = || FlatGenerator {
-        chunk_size: dimensions.chunk_size,
-        shape: RuntimeShape::<u32, 3>::new([padded, padded, padded]),
-    };
-    match map_id {
-        MapInstanceId::Overworld => VoxelGenerator(Arc::new(flat())),
-        MapInstanceId::Homebase { .. } => VoxelGenerator(Arc::new(flat())),
-    }
-}
-
-fn spawn_map_instance(
-    commands: &mut Commands,
-    map_id: &MapInstanceId,
-    seed: u64,
-    dimensions: &MapDimensions,
-    generator: VoxelGenerator,
-) -> Entity {
-    let spawning_distance = dimensions
-        .bounds
-        .map(|b| b.max_element().max(1) as u32)
-        .unwrap_or(10);
-
-    let config = VoxelMapConfig::new(seed, 0, spawning_distance, false);
-
-    let entity = commands
-        .spawn((
-            VoxelMapInstance::new(dimensions.tree_height, dimensions.chunk_size),
-            config,
-            dimensions.clone(),
-            generator,
-            Transform::default(),
-            map_id.clone(),
-        ))
-        .id();
-
-    trace!("Spawned client map instance for {map_id:?}: {entity:?}");
-    entity
-}
-
-/// Checks if the client has received chunks for the transition target map.
-/// The transition is "ready" when at least one chunk has been received from the server.
-pub fn check_transition_chunks_loaded(
-    mut commands: Commands,
-    player_query: Query<
-        (Entity, &PendingTransition),
-        (
-            With<Predicted>,
-            With<CharacterMarker>,
-            Without<TransitionReadySent>,
-        ),
-    >,
-    registry: Res<MapRegistry>,
-    map_query: Query<&VoxelMapInstance>,
-    mut senders: Query<&mut MessageSender<MapTransitionReady>>,
-) {
-    let Ok((player, pending)) = player_query.single() else {
-        return;
-    };
-    let map_entity = registry.get(&pending.0);
-
-    let Ok(instance) = map_query.get(map_entity) else {
-        trace!("check_transition_chunks_loaded: no VoxelMapInstance on map entity yet");
-        return;
-    };
-
-    if instance.chunk_levels.is_empty() {
-        return;
-    }
-
-    trace!(
-        "Transition chunks loaded for {:?} ({} columns), sending ready to server",
-        pending.0,
-        instance.chunk_levels.len()
-    );
-
-    commands.entity(player).insert(TransitionReadySent);
-
-    for mut sender in &mut senders {
-        sender.send::<MapChannel>(MapTransitionReady);
-    }
-}
-
-pub fn handle_map_transition_end(
-    mut commands: Commands,
-    mut receivers: Query<&mut MessageReceiver<MapTransitionEnd>>,
-    // Don't require PendingTransition — lightyear may recreate the predicted
-    // entity during transition, losing client-only components.
-    player_query: Query<Entity, (With<Predicted>, With<CharacterMarker>)>,
-    mut next_transition: ResMut<NextState<MapTransitionState>>,
-) {
-    for mut receiver in &mut receivers {
-        for _end in receiver.receive() {
-            trace!("Received MapTransitionEnd, resuming play");
-
-            // Unfreeze all predicted characters — lightyear may recreate the
-            // predicted entity during transition, so there can be 0-2 matches.
-            for player in &player_query {
-                commands.entity(player).remove::<(
-                    RigidBodyDisabled,
-                    ColliderDisabled,
-                    DisableRollback,
-                    PendingTransition,
-                    TransitionReadySent,
-                )>();
-            }
-
-            next_transition.set(MapTransitionState::Playing);
         }
     }
 }
