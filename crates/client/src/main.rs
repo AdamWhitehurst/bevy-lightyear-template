@@ -2,6 +2,7 @@ pub mod diagnostics;
 pub mod gameplay;
 pub mod map;
 pub mod network;
+pub mod transition;
 pub mod world_object;
 
 use avian3d::prelude::PhysicsDebugPlugin;
@@ -48,6 +49,7 @@ fn main() {
         .insert_resource(ui_config) // Override default UiClientConfig
         .add_plugins(ClientGameplayPlugin)
         .add_plugins(ClientMapPlugin)
+        .add_plugins(transition::ClientTransitionPlugin)
         .add_plugins(RenderPlugin)
         .add_plugins(UiPlugin)
         .add_plugins(PhysicsDebugPlugin::default())

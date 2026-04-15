@@ -255,7 +255,7 @@ app.add_systems(
 - [x] `cargo test-all` passes
 
 #### Manual
-- [ ] `cargo server` + `cargo client` — chunks mesh closest-first around player. Transition between maps: chunks near spawn mesh first.
+- [x] `cargo server` + `cargo client` — chunks mesh closest-first around player. Transition between maps: chunks near spawn mesh first.
 
 ---
 
@@ -523,8 +523,8 @@ Register in `UiPlugin` with `.run_if(in_state(MapTransitionState::Transitioning)
 
 ### Verification
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test-all` passes
+- [x] `cargo check-all` passes
+- [x] `cargo test-all` passes
 
 #### Manual
 - [ ] `cargo server` + `cargo client` — mid-game transition: loading screen stays up until nearby terrain is meshed+collidered. Shows phase name and chunk counts.

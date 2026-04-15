@@ -51,6 +51,7 @@ impl CrossbeamTestStepper {
             tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
         });
         server_app.add_plugins(ProtocolPlugin);
+        server_app.add_plugins(protocol::TransitionPlugin);
         server_app.add_plugins(lightyear::prelude::RoomPlugin);
 
         // Setup client app
@@ -60,6 +61,7 @@ impl CrossbeamTestStepper {
             tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
         });
         client_app.add_plugins(ProtocolPlugin);
+        client_app.add_plugins(protocol::TransitionPlugin);
 
         // Setup manual time control (finish/cleanup deferred to init() so tests
         // can add plugins between new() and init())
@@ -243,6 +245,7 @@ fn test_client_server_udp_connection() {
         tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
     });
     server_app.add_plugins(ProtocolPlugin);
+    server_app.add_plugins(protocol::TransitionPlugin);
     server_app.add_plugins(ServerNetworkPlugin {
         config: ServerNetworkConfig {
             transports: vec![ServerTransport::Udp { port: TEST_PORT }],
@@ -259,6 +262,7 @@ fn test_client_server_udp_connection() {
         tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
     });
     client_app.add_plugins(ProtocolPlugin);
+    client_app.add_plugins(protocol::TransitionPlugin);
     client_app.add_plugins(ClientNetworkPlugin {
         config: ClientNetworkConfig {
             client_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
@@ -347,6 +351,7 @@ fn test_client_server_plugin_initialization() {
         tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
     });
     server_app.add_plugins(ProtocolPlugin);
+    server_app.add_plugins(protocol::TransitionPlugin);
     server_app.add_plugins(ServerNetworkPlugin {
         config: ServerNetworkConfig {
             transports: vec![ServerTransport::Crossbeam {
@@ -366,6 +371,7 @@ fn test_client_server_plugin_initialization() {
         tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
     });
     client_app.add_plugins(ProtocolPlugin);
+    client_app.add_plugins(protocol::TransitionPlugin);
     client_app.add_plugins(ClientNetworkPlugin {
         config: ClientNetworkConfig {
             client_addr: SocketAddr::from(([127, 0, 0, 1], 0)),
@@ -452,6 +458,7 @@ fn test_crossbeam_reconnection() {
     server_app.add_plugins(MinimalPlugins);
     server_app.add_plugins(ServerPlugins { tick_duration });
     server_app.add_plugins(ProtocolPlugin);
+    server_app.add_plugins(protocol::TransitionPlugin);
     server_app.add_plugins(lightyear::prelude::RoomPlugin);
     server_app.finish();
     server_app.cleanup();
@@ -503,6 +510,7 @@ fn test_crossbeam_reconnection() {
         client_app.add_plugins(MinimalPlugins);
         client_app.add_plugins(ClientPlugins { tick_duration });
         client_app.add_plugins(ProtocolPlugin);
+        client_app.add_plugins(protocol::TransitionPlugin);
         client_app.finish();
         client_app.cleanup();
         client_app.insert_resource(TimeUpdateStrategy::ManualInstant(current_time));
@@ -1136,6 +1144,7 @@ fn server_and_client_spawn_matching_homebase_configs() {
         tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
     });
     server_app.add_plugins(ProtocolPlugin);
+    server_app.add_plugins(protocol::TransitionPlugin);
     server_app.add_plugins(lightyear::prelude::RoomPlugin);
     server_app.init_resource::<MapRegistry>();
     server_app.init_resource::<RoomRegistry>();
@@ -1155,9 +1164,11 @@ fn server_and_client_spawn_matching_homebase_configs() {
         tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
     });
     client_app.add_plugins(ProtocolPlugin);
+    client_app.add_plugins(protocol::TransitionPlugin);
     client_app.insert_state(ClientState::InGame);
     client_app.add_sub_state::<MapTransitionState>();
     client_app.init_resource::<MapRegistry>();
+    client_app.init_resource::<::client::map::VoxelPredictionState>();
     client_app.add_systems(Update, handle_map_transition_start);
     insert_test_terrain_defs(&mut client_app);
     client_app.finish();

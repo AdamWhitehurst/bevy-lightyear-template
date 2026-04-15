@@ -52,6 +52,12 @@ impl Plugin for UiPlugin {
             OnEnter(MapTransitionState::Transitioning),
             setup_transition_loading_screen,
         );
+        app.add_systems(
+            Update,
+            update_loading_screen_text
+                .run_if(in_state(MapTransitionState::Transitioning))
+                .run_if(resource_exists::<protocol::transition::ClientTransitionState>),
+        );
 
         // State transition systems
         app.add_systems(
@@ -539,6 +545,10 @@ fn update_map_switch_button_label(
     }
 }
 
+/// Marker for the loading screen text entity.
+#[derive(Component)]
+struct LoadingScreenText;
+
 fn setup_transition_loading_screen(mut commands: Commands) {
     commands
         .spawn((
@@ -555,6 +565,7 @@ fn setup_transition_loading_screen(mut commands: Commands) {
         ))
         .with_children(|parent| {
             parent.spawn((
+                LoadingScreenText,
                 Text::new("Loading..."),
                 TextFont {
                     font_size: 48.0,
@@ -563,4 +574,21 @@ fn setup_transition_loading_screen(mut commands: Commands) {
                 TextColor(Color::WHITE),
             ));
         });
+}
+
+fn update_loading_screen_text(
+    state: Res<protocol::transition::ClientTransitionState>,
+    mut text_query: Query<&mut Text, With<LoadingScreenText>>,
+) {
+    let Ok(mut text) = text_query.single_mut() else {
+        return;
+    };
+    let phase_name = match state.phase {
+        protocol::transition::TransitionPhase::Cleanup => "Cleanup",
+        protocol::transition::TransitionPhase::Loading => "Loading",
+        protocol::transition::TransitionPhase::Ready => "Syncing",
+        protocol::transition::TransitionPhase::Complete
+        | protocol::transition::TransitionPhase::Idle => "Loading",
+    };
+    *text = Text::new(format!("{phase_name}..."));
 }

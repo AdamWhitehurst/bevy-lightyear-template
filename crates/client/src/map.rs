@@ -82,11 +82,6 @@ impl Plugin for ClientMapPlugin {
                 handle_voxel_input
                     .run_if(in_state(ui::ClientState::InGame))
                     .after(TransformSystems::Propagate),
-            )
-            .add_systems(
-                Update,
-                (check_transition_chunks_loaded, handle_map_transition_end)
-                    .run_if(in_state(MapTransitionState::Transitioning)),
             );
     }
 }
@@ -425,6 +420,8 @@ pub fn handle_map_transition_start(
     terrain_registry: Option<Res<TerrainDefRegistry>>,
     player_query: Query<Entity, (With<Predicted>, With<CharacterMarker>, With<Controlled>)>,
     world_objects: Query<(Entity, &MapInstanceId), With<WorldObjectId>>,
+    mut transition_state: ResMut<protocol::transition::ClientTransitionState>,
+    mut prediction_state: ResMut<VoxelPredictionState>,
 ) {
     let Some(terrain_registry) = terrain_registry else {
         trace!("handle_map_transition_start: TerrainDefRegistry not loaded yet, skipping");
@@ -480,6 +477,9 @@ pub fn handle_map_transition_start(
             commands
                 .entity(player)
                 .insert(ChunkTicket::map_transition(map_entity));
+
+            transition_state.begin(&transition);
+            prediction_state.pending.clear();
         }
     }
 }
