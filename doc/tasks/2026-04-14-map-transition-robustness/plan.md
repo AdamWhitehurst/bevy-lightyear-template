@@ -188,11 +188,19 @@ readiness_radius: protocol::transition::TRANSITION_READINESS_RADIUS,
 
 ### Verification
 #### Automated
+<<<<<<< HEAD
 - [x] `cargo check-all` passes
 - [x] `cargo test-all` passes
 
 #### Manual
 - [x] No runtime behavior change. Existing transition still works.
+=======
+- [ ] `cargo check-all` passes
+- [ ] `cargo test-all` passes
+
+#### Manual
+- [ ] No runtime behavior change. Existing transition still works.
+>>>>>>> 9b4d4251 (doc: todo)
 
 ---
 
@@ -251,11 +259,19 @@ app.add_systems(
 
 ### Verification
 #### Automated
+<<<<<<< HEAD
 - [x] `cargo check-all` passes
 - [x] `cargo test-all` passes
 
 #### Manual
 - [x] `cargo server` + `cargo client` — chunks mesh closest-first around player. Transition between maps: chunks near spawn mesh first.
+=======
+- [ ] `cargo check-all` passes
+- [ ] `cargo test-all` passes
+
+#### Manual
+- [ ] `cargo server` + `cargo client` — chunks mesh closest-first around player. Transition between maps: chunks near spawn mesh first.
+>>>>>>> 9b4d4251 (doc: todo)
 
 ---
 
@@ -523,11 +539,19 @@ Register in `UiPlugin` with `.run_if(in_state(MapTransitionState::Transitioning)
 
 ### Verification
 #### Automated
+<<<<<<< HEAD
 - [x] `cargo check-all` passes
 - [x] `cargo test-all` passes
 
 #### Manual
 - [x] `cargo server` + `cargo client` — mid-game transition: loading screen stays up until nearby terrain is meshed+collidered. Shows phase name and chunk counts.
+=======
+- [ ] `cargo check-all` passes
+- [ ] `cargo test-all` passes
+
+#### Manual
+- [ ] `cargo server` + `cargo client` — mid-game transition: loading screen stays up until nearby terrain is meshed+collidered. Shows phase name and chunk counts.
+>>>>>>> 9b4d4251 (doc: todo)
 
 ---
 
@@ -742,8 +766,13 @@ Add `pub mod transition;`.
 
 ### Verification
 #### Automated
+<<<<<<< HEAD
 - [x] `cargo check-all` passes
 - [x] `cargo test-all` passes
+=======
+- [ ] `cargo check-all` passes
+- [ ] `cargo test-all` passes
+>>>>>>> 9b4d4251 (doc: todo)
 
 #### Manual
 - [ ] `cargo server` + `cargo client` — mid-game transition uses split phases. Character despawns/respawns correctly. Initial connect still works (unchanged path).
@@ -902,8 +931,13 @@ app.add_systems(
 
 ### Verification
 #### Automated
+<<<<<<< HEAD
 - [x] `cargo check-all` passes
 - [x] `cargo test-all` passes
+=======
+- [ ] `cargo check-all` passes
+- [ ] `cargo test-all` passes
+>>>>>>> 9b4d4251 (doc: todo)
 
 #### Manual
 - [ ] `cargo server` + `cargo client` — fresh connect: loading screen, spatial readiness, player on solid terrain.
@@ -984,8 +1018,13 @@ Register in client plugin, running after the transition state machine.
 
 ### Verification
 #### Automated
+<<<<<<< HEAD
 - [x] `cargo check-all` passes
 - [x] `cargo test-all` passes
+=======
+- [ ] `cargo check-all` passes
+- [ ] `cargo test-all` passes
+>>>>>>> 9b4d4251 (doc: todo)
 
 #### Manual
 - [ ] Transition repeatedly between maps. No stale world objects or characters visible.
@@ -1024,9 +1063,15 @@ Review and update if transition architecture is documented.
 
 ### Verification
 #### Automated
+<<<<<<< HEAD
 - [x] `cargo check-all` passes
 - [x] `cargo test-all` passes
 - [x] No unused function/import warnings
+=======
+- [ ] `cargo check-all` passes
+- [ ] `cargo test-all` passes
+- [ ] No unused function/import warnings
+>>>>>>> 9b4d4251 (doc: todo)
 
 #### Manual
 - [ ] Full regression: fresh connect, overworld→homebase, homebase→overworld, rapid transitions
