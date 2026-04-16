@@ -55,10 +55,6 @@ impl RoomRegistry {
     }
 }
 
-/// Resource tracking the primary overworld map entity.
-#[derive(Resource)]
-pub struct OverworldMap(pub Entity);
-
 const DEFAULT_OVERWORLD_SEED: u64 = 999;
 const GENERATION_VERSION: u32 = 0;
 const SAVE_DEBOUNCE_SECONDS: f64 = 1.0;
@@ -137,7 +133,6 @@ fn init_overworld_entity(
         ))
         .id();
 
-    commands.insert_resource(OverworldMap(map));
     registry.insert(MapInstanceId::Overworld, map);
 }
 

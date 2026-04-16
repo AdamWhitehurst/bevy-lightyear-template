@@ -1024,9 +1024,9 @@ Review and update if transition architecture is documented.
 
 ### Verification
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test-all` passes
-- [ ] No unused function/import warnings
+- [x] `cargo check-all` passes
+- [x] `cargo test-all` passes
+- [x] No unused function/import warnings
 
 #### Manual
 - [ ] Full regression: fresh connect, overworld→homebase, homebase→overworld, rapid transitions
