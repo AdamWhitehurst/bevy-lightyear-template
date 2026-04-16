@@ -1012,9 +1012,12 @@ fn send_unsent_chunks(
                 chunk_size: instance.chunk_size,
                 data: chunk_data.voxels.clone(),
             });
+            visibility.sent_chunks.insert(chunk_pos);
+            sent += 1;
+        } else {
+            trace!("send_unsent_chunks: no MessageSender<ChunkDataSync> on client {client_entity:?}, skipping");
+            break;
         }
-        visibility.sent_chunks.insert(chunk_pos);
-        sent += 1;
     }
     sent
 }
@@ -1078,6 +1081,9 @@ pub fn handle_map_switch_requests(
     };
     for (client_entity, mut receiver) in &mut receivers {
         for request in receiver.receive() {
+            trace!(
+                "handle_map_switch_requests: received {request:?} from client {client_entity:?}"
+            );
             let (player_entity, _controlled_by, current_map_id) = controlled_query
                 .iter()
                 .find(|(_, ctrl, _)| ctrl.owner == client_entity)

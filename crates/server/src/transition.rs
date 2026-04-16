@@ -118,6 +118,7 @@ pub fn complete_map_transition(
 ) {
     for (client_entity, mut receiver) in &mut receivers {
         for _ready in receiver.receive() {
+            trace!("complete_map_transition: received MapTransitionReady from {client_entity:?}");
             let Some((player_entity, pending)) = transition_query
                 .iter()
                 .find(|(_, p)| p.client_entity == client_entity)

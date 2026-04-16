@@ -204,7 +204,8 @@ pub fn update_transition_state(
     mut commands: Commands,
     mut state: ResMut<ClientTransitionState>,
     registry: Res<MapRegistry>,
-    map_query: Query<(&VoxelMapInstance, &ChunkWorkTracker, &Children)>,
+    instance_query: Query<(&VoxelMapInstance, Option<&ChunkWorkTracker>, &MapDimensions)>,
+    children_query: Query<&Children>,
     chunk_query: Query<(&VoxelChunk, Has<Collider>), With<Mesh3d>>,
     mut ready_senders: Query<&mut MessageSender<MapTransitionReady>>,
     manager_query: Query<&MessageManager, With<Client>>,
@@ -221,17 +222,25 @@ pub fn update_transition_state(
                 return;
             };
             let Some(&map_entity) = registry.0.get(target) else {
-                return; // Map not yet spawned
+                trace!("Cleanup: target map {target:?} not yet in registry");
+                return;
             };
-            if map_query.get(map_entity).is_err() {
-                return; // VoxelMapInstance not yet on entity
+            if instance_query.get(map_entity).is_err() {
+                trace!("Cleanup: map entity {map_entity:?} missing VoxelMapInstance");
+                return;
             }
             trace!("Transition: Cleanup -> Loading");
             state.phase = TransitionPhase::Loading;
         }
 
         TransitionPhase::Loading => {
-            if !check_spatial_readiness(&state, &registry, &map_query, &chunk_query) {
+            if !check_spatial_readiness(
+                &state,
+                &registry,
+                &instance_query,
+                &children_query,
+                &chunk_query,
+            ) {
                 return;
             }
             for mut sender in &mut ready_senders {
@@ -275,30 +284,56 @@ pub fn update_transition_state(
 
 /// Check that all columns within Chebyshev radius of spawn have loaded data,
 /// no pending remesh work, and meshed chunks have colliders.
+///
+/// Queries are split so each gate only blocks on the components it needs:
+/// - VoxelMapInstance: always present after spawn
+/// - ChunkWorkTracker: added by ensure_pending_chunks (1 frame after spawn)
+/// - Children: added when first chunk mesh entity is spawned (requires full pipeline)
 fn check_spatial_readiness(
     state: &ClientTransitionState,
     registry: &MapRegistry,
-    map_query: &Query<(&VoxelMapInstance, &ChunkWorkTracker, &Children)>,
+    instance_query: &Query<(&VoxelMapInstance, Option<&ChunkWorkTracker>, &MapDimensions)>,
+    children_query: &Query<&Children>,
     chunk_query: &Query<(&VoxelChunk, Has<Collider>), With<Mesh3d>>,
 ) -> bool {
     let Some(target) = state.target_map.as_ref() else {
+        trace!("spatial_readiness: no target_map");
         return false;
     };
     let Some(&map_entity) = registry.0.get(target) else {
+        trace!("spatial_readiness: target {target:?} not in registry");
         return false;
     };
-    let Ok((instance, tracker, children)) = map_query.get(map_entity) else {
+    let Ok((instance, tracker, dimensions)) = instance_query.get(map_entity) else {
+        trace!("spatial_readiness: {map_entity:?} missing VoxelMapInstance");
+        return false;
+    };
+    let Some(tracker) = tracker else {
+        trace!("spatial_readiness: {map_entity:?} missing ChunkWorkTracker, waiting for voxel engine init");
         return false;
     };
 
     let radius = state.readiness_radius as i32;
     let (y_min, y_max) = state.column_y_range;
+    let bounds = dimensions.bounds;
 
     for dx in -radius..=radius {
         for dz in -radius..=radius {
             let col = IVec2::new(state.spawn_column.x + dx, state.spawn_column.y + dz);
 
+            // Skip columns outside the map's finite bounds -- the server
+            // never generates data for them (is_column_within_bounds).
+            if let Some(b) = bounds {
+                if col.x.abs() >= b.x || col.y.abs() >= b.z {
+                    continue;
+                }
+            }
+
             if !instance.chunk_levels.contains_key(&col) {
+                trace!(
+                    "spatial_readiness: column {col} not in chunk_levels (have {} cols)",
+                    instance.chunk_levels.len()
+                );
                 return false;
             }
 
@@ -306,20 +341,31 @@ fn check_spatial_readiness(
                 let pos = IVec3::new(col.x, y, col.y);
                 if instance.chunks_needing_remesh.contains(&pos) || tracker.remeshing.contains(&pos)
                 {
+                    trace!("spatial_readiness: chunk {pos} still pending remesh/in-flight");
                     return false;
                 }
             }
         }
     }
 
+    // Mesh entities (Children) must exist before we declare readiness --
+    // they are the physical terrain the player stands on.
+    let Ok(children) = children_query.get(map_entity) else {
+        trace!("spatial_readiness: no mesh children yet, waiting for mesh pipeline");
+        return false;
+    };
+
     // Verify VoxelChunk children within radius have Collider.
-    // Uses VoxelChunk.position (chunk-space IVec3) directly.
     for child in children.iter() {
         if let Ok((chunk, has_collider)) = chunk_query.get(child) {
             let chunk_col = IVec2::new(chunk.position.x, chunk.position.z);
             let dx = (chunk_col.x - state.spawn_column.x).abs();
             let dz = (chunk_col.y - state.spawn_column.y).abs();
             if dx <= radius && dz <= radius && !has_collider {
+                trace!(
+                    "spatial_readiness: chunk at {:?} within radius missing Collider",
+                    chunk.position
+                );
                 return false;
             }
         }
@@ -350,17 +396,32 @@ pub struct ClientTransitionPlugin;
 impl Plugin for ClientTransitionPlugin {
     fn build(&self, app: &mut App) {
         use ui::state::ClientState;
+        let in_game = in_state(ClientState::InGame);
+        // Transition handler must flush before chunk sync runs so the
+        // newly spawned map entity is in the registry. Without this,
+        // ChunkDataSync arriving on the same frame as MapTransitionStart
+        // would be silently dropped (registry lookup fails) and the
+        // server never re-sends them.
         app.add_systems(
             Update,
             (
-                on_transition_start_received,
-                receive_transition_end,
-                receive_transition_entities,
-                update_transition_state,
+                on_transition_start_received.run_if(resource_exists::<TerrainDefRegistry>),
+                ApplyDeferred,
+                (
+                    crate::map::handle_chunk_data_sync,
+                    crate::map::handle_unload_column,
+                    crate::map::attach_chunk_ticket_to_player,
+                    protocol::attach_chunk_colliders,
+                ),
+                (
+                    receive_transition_end,
+                    receive_transition_entities,
+                    update_transition_state,
+                )
+                    .chain(),
             )
                 .chain()
-                .run_if(in_state(ClientState::InGame))
-                .run_if(resource_exists::<TerrainDefRegistry>),
+                .run_if(in_game),
         );
     }
 }

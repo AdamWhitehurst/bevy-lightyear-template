@@ -47,17 +47,18 @@ impl Plugin for ClientMapPlugin {
         app.add_plugins(VoxelPlugin)
             .init_resource::<MapRegistry>()
             .init_resource::<VoxelPredictionState>()
+            // handle_chunk_data_sync, handle_unload_column,
+            // attach_chunk_ticket_to_player, and attach_chunk_colliders are
+            // registered in ClientTransitionPlugin's chain (after
+            // on_transition_start_received + ApplyDeferred) to guarantee
+            // the map entity is in the registry before chunk sync runs.
             .add_systems(
                 Update,
                 (
-                    attach_chunk_ticket_to_player,
                     handle_voxel_broadcasts,
                     handle_section_blocks_update,
                     handle_voxel_edit_ack,
                     handle_voxel_edit_reject,
-                    handle_chunk_data_sync,
-                    handle_unload_column,
-                    protocol::attach_chunk_colliders,
                 )
                     .run_if(in_state(ui::ClientState::InGame)),
             )
@@ -70,7 +71,7 @@ impl Plugin for ClientMapPlugin {
     }
 }
 
-fn attach_chunk_ticket_to_player(
+pub fn attach_chunk_ticket_to_player(
     mut commands: Commands,
     registry: Res<MapRegistry>,
     players: Query<
@@ -91,7 +92,7 @@ fn attach_chunk_ticket_to_player(
 }
 
 /// Receives chunk data from server and queues async meshing via the remesh pipeline.
-fn handle_chunk_data_sync(
+pub fn handle_chunk_data_sync(
     mut receivers: Query<&mut MessageReceiver<ChunkDataSync>>,
     mut map_query: Query<&mut VoxelMapInstance>,
     registry: Res<MapRegistry>,
@@ -135,7 +136,7 @@ fn handle_chunk_data_sync(
 /// Handle server's UnloadColumn message — remove chunk data for all chunks in the column.
 /// Mesh entity cleanup is handled by the existing `despawn_out_of_range_chunks` system
 /// which checks `chunk_levels.contains_key()`.
-fn handle_unload_column(
+pub fn handle_unload_column(
     mut receivers: Query<&mut MessageReceiver<UnloadColumn>>,
     registry: Res<MapRegistry>,
     mut map_query: Query<(&mut VoxelMapInstance, &MapDimensions)>,
