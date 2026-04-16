@@ -5,6 +5,7 @@ use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
 use protocol::world_object::{
     apply_object_components, VisualKind, WorldObjectDef, WorldObjectDefRegistry, WorldObjectId,
 };
+use protocol::{MapInstanceId, MapRegistry};
 
 /// Shared PBR material for all vox model meshes.
 ///
@@ -30,6 +31,8 @@ pub fn init_default_vox_model_material(
 pub fn on_world_object_replicated(
     query: Query<(Entity, &WorldObjectId), Added<Replicated>>,
     registry: Res<WorldObjectDefRegistry>,
+    map_registry: Res<MapRegistry>,
+    map_id_query: Query<&MapInstanceId>,
     vox_registry: Res<VoxModelRegistry>,
     vox_assets: Res<Assets<VoxModelAsset>>,
     meshes: Res<Assets<Mesh>>,
@@ -38,6 +41,14 @@ pub fn on_world_object_replicated(
     mut commands: Commands,
 ) {
     for (entity, id) in &query {
+        if let Ok(entity_mid) = map_id_query.get(entity) {
+            if !map_registry.0.contains_key(entity_mid) {
+                trace!("Despawning stale world object {entity:?} from map {entity_mid:?}");
+                commands.entity(entity).despawn();
+                continue;
+            }
+        }
+
         let Some(def) = registry.get(id) else {
             warn!("Replicated world object has unknown id: {:?}", id.0);
             continue;

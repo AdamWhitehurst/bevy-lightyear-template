@@ -42,6 +42,8 @@ fn handle_new_character(
             With<CharacterMarker>,
         ),
     >,
+    registry: Res<MapRegistry>,
+    map_ids: Query<&MapInstanceId>,
 ) {
     for (entity, is_controlled) in &confirmed_query {
         if is_controlled {
@@ -64,6 +66,13 @@ fn handle_new_character(
     }
 
     for entity in &character_query {
+        if let Ok(mid) = map_ids.get(entity) {
+            if !registry.0.contains_key(mid) {
+                trace!("Despawning stale character {entity:?} from map {mid:?}");
+                commands.entity(entity).despawn();
+                continue;
+            }
+        }
         trace!(?entity, "Adding physics to predicted character");
         commands
             .entity(entity)

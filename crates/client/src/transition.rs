@@ -391,6 +391,26 @@ fn check_entities_resolved(
     })
 }
 
+/// Per-frame safety net: despawn any Replicated entity whose MapInstanceId
+/// doesn't match any registered map. Primary defense is per-handler guards;
+/// this catches omissions. Only runs during transitions.
+pub fn cleanup_stale_map_entities(
+    mut commands: Commands,
+    registry: Res<MapRegistry>,
+    stale_query: Query<(Entity, &MapInstanceId), With<Replicated>>,
+    state: Res<ClientTransitionState>,
+) {
+    if state.phase == TransitionPhase::Idle {
+        return;
+    }
+    for (entity, mid) in &stale_query {
+        if !registry.0.contains_key(mid) {
+            trace!("Safety-net: despawning stale entity {entity:?} map {mid:?}");
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
 pub struct ClientTransitionPlugin;
 
 impl Plugin for ClientTransitionPlugin {
@@ -417,6 +437,7 @@ impl Plugin for ClientTransitionPlugin {
                     receive_transition_end,
                     receive_transition_entities,
                     update_transition_state,
+                    cleanup_stale_map_entities,
                 )
                     .chain(),
             )

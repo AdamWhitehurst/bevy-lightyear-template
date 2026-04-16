@@ -984,8 +984,8 @@ Register in client plugin, running after the transition state machine.
 
 ### Verification
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test-all` passes
+- [x] `cargo check-all` passes
+- [x] `cargo test-all` passes
 
 #### Manual
 - [ ] Transition repeatedly between maps. No stale world objects or characters visible.
