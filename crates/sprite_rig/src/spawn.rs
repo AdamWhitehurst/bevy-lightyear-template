@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use avian3d::prelude::LinearVelocity;
+use avian3d::prelude::{LinearVelocity, Position, Rotation};
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageSampler, TextureAtlasBuilder};
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
@@ -9,7 +9,7 @@ use bevy::prelude::*;
 use lightyear::prelude::*;
 use protocol::app_state::TrackedAssets;
 use protocol::billboard::sprite_rig_material::{SpriteRigBillboardExt, SpriteRigMaterial};
-use protocol::{CharacterMarker, CharacterType};
+use protocol::{transform_from_physics, CharacterMarker, CharacterType};
 
 use crate::asset::{SpriteAnchorDef, SpriteRigAsset};
 use crate::{asset::SpriteAnimSetAsset, RigRegistry};
@@ -117,7 +117,7 @@ pub fn load_rig_sprite_images(
 /// Spawns joint hierarchy and a single skinned mesh when `SpriteRig` is added.
 pub fn spawn_sprite_rigs(
     mut commands: Commands,
-    query: Query<(Entity, &SpriteRig), Added<SpriteRig>>,
+    query: Query<(Entity, &SpriteRig, Option<&Position>, Option<&Rotation>), Added<SpriteRig>>,
     rig_assets: Res<Assets<SpriteRigAsset>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
@@ -126,7 +126,7 @@ pub fn spawn_sprite_rigs(
     mut rig_mesh_cache: ResMut<RigMeshCache>,
     sprite_images: Res<SpriteImageHandles>,
 ) {
-    for (entity, sprite_rig) in &query {
+    for (entity, sprite_rig, pos, rot) in &query {
         let rig = rig_assets
             .get(&sprite_rig.0)
             .expect("SpriteRigAsset must be loaded before gameplay (AppState::Ready)");
@@ -156,7 +156,14 @@ pub fn spawn_sprite_rigs(
         let joint_root_id = commands
             .spawn((JointRoot, Name::new("JointRoot"), Transform::default()))
             .id();
-        commands.entity(entity).add_child(joint_root_id);
+        // Insert Transform matching Position so children have a parent with
+        // GlobalTransform. PhysicsTransformPlugin is disabled; lightyear's
+        // add_transform only runs in PostUpdate, after children are attached.
+        let transform = transform_from_physics(pos, rot);
+        commands
+            .entity(entity)
+            .insert((transform, Visibility::default()))
+            .add_child(joint_root_id);
 
         let (bone_map, joint_entities) =
             spawn_joints(&mut commands, joint_root_id, &sorted_bones, &slot_lookup);

@@ -68,26 +68,30 @@ pub(crate) fn spawn_health_bar(
         extension: BillboardExt {},
     });
 
-    commands.entity(entity).with_children(|parent| {
-        parent
-            .spawn((
-                HealthBarRoot,
-                Transform::from_translation(Vec3::Y * HEALTH_BAR_Y_OFFSET),
-            ))
-            .with_children(|bar| {
-                bar.spawn((
-                    Mesh3d(bg_mesh),
-                    MeshMaterial3d(bg_material),
-                    Transform::default(),
-                ));
-                bar.spawn((
-                    HealthBarForeground,
-                    Mesh3d(fg_mesh),
-                    MeshMaterial3d(fg_material),
-                    Transform::default(),
-                ));
-            });
-    });
+    commands
+        .entity(entity)
+        .insert(Visibility::default())
+        .with_children(|parent| {
+            parent
+                .spawn((
+                    HealthBarRoot,
+                    Visibility::default(),
+                    Transform::from_translation(Vec3::Y * HEALTH_BAR_Y_OFFSET),
+                ))
+                .with_children(|bar| {
+                    bar.spawn((
+                        Mesh3d(bg_mesh),
+                        MeshMaterial3d(bg_material),
+                        Transform::default(),
+                    ));
+                    bar.spawn((
+                        HealthBarForeground,
+                        Mesh3d(fg_mesh),
+                        MeshMaterial3d(fg_material),
+                        Transform::default(),
+                    ));
+                });
+        });
 }
 
 pub(crate) fn on_invulnerable_added(

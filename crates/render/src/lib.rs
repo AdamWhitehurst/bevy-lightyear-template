@@ -80,11 +80,23 @@ fn add_visual_interpolation_components(
 }
 
 /// Spawns a health bar for any entity that receives a `Health` component.
+///
+/// This observer fires synchronously when lightyear inserts `Health` in
+/// PreUpdate, before `on_world_object_replicated` has a chance to add
+/// `Transform`. We insert it here from `Position`/`Rotation` so the health
+/// bar children have a parent with `GlobalTransform`.
 fn add_health_bars(
     trigger: On<Add, Health>,
+    physics: Query<(Option<&Position>, Option<&avian3d::prelude::Rotation>)>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<BillboardMaterial>>,
 ) {
-    health_bar::spawn_health_bar(&mut commands, trigger.entity, &mut *meshes, &mut *materials);
+    let entity = trigger.entity;
+    if let Ok((pos, rot)) = physics.get(entity) {
+        commands
+            .entity(entity)
+            .insert(protocol::transform_from_physics(pos, rot));
+    }
+    health_bar::spawn_health_bar(&mut commands, entity, &mut *meshes, &mut *materials);
 }

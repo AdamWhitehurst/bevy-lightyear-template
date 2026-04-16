@@ -1,3 +1,4 @@
+use avian3d::math::AsF32;
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
@@ -253,6 +254,27 @@ impl Plugin for SharedGameplayPlugin {
 
         app.add_systems(FixedUpdate, update_facing.run_if(ready));
     }
+}
+
+/// Computes a [`Transform`] from avian [`Position`]/[`Rotation`].
+///
+/// [`PhysicsTransformPlugin`] is disabled ([`SharedGameplayPlugin`] above) —
+/// lightyear handles position↔transform sync — so `Position` does not
+/// auto-require `Transform`. Call this when attaching children that need a
+/// parent with `GlobalTransform` before lightyear's `add_transform` runs in
+/// `PostUpdate`.
+pub fn transform_from_physics(
+    pos: Option<&Position>,
+    rot: Option<&avian3d::prelude::Rotation>,
+) -> Transform {
+    let mut t = Transform::default();
+    if let Some(pos) = pos {
+        t.translation = pos.f32();
+    }
+    if let Some(rot) = rot {
+        t.rotation = rot.f32();
+    }
+    t
 }
 
 #[cfg(feature = "test_utils")]

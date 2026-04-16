@@ -1,6 +1,7 @@
-use avian3d::prelude::{Collider, ColliderConstructor};
+use avian3d::prelude::{Collider, ColliderConstructor, Position, Rotation};
 use bevy::prelude::*;
 use lightyear::prelude::Replicated;
+use protocol::transform_from_physics;
 use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
 use protocol::world_object::{
     apply_object_components, VisualKind, WorldObjectDef, WorldObjectDefRegistry, WorldObjectId,
@@ -29,7 +30,7 @@ pub fn init_default_vox_model_material(
 /// generates a trimesh collider and filters out the RON `ColliderConstructor`
 /// to prevent avian from overwriting it.
 pub fn on_world_object_replicated(
-    query: Query<(Entity, &WorldObjectId), Added<Replicated>>,
+    query: Query<(Entity, &WorldObjectId, Option<&Position>, Option<&Rotation>), Added<Replicated>>,
     registry: Res<WorldObjectDefRegistry>,
     map_registry: Res<MapRegistry>,
     map_id_query: Query<&MapInstanceId>,
@@ -40,7 +41,7 @@ pub fn on_world_object_replicated(
     default_material: Res<DefaultVoxModelMaterial>,
     mut commands: Commands,
 ) {
-    for (entity, id) in &query {
+    for (entity, id, pos, rot) in &query {
         if let Ok(entity_mid) = map_id_query.get(entity) {
             if !map_registry.0.contains_key(entity_mid) {
                 trace!("Despawning stale world object {entity:?} from map {entity_mid:?}");
@@ -63,6 +64,13 @@ pub fn on_world_object_replicated(
         if let Some(collider) = vox_collider {
             commands.entity(entity).insert(collider);
         }
+
+        // Insert Transform matching Position so children (Mesh3d) have a parent
+        // with GlobalTransform. PhysicsTransformPlugin is disabled, so Position
+        // does not auto-require Transform; lightyear's add_transform only runs
+        // in PostUpdate, after children are already attached.
+        let transform = transform_from_physics(pos, rot);
+        commands.entity(entity).insert(transform);
 
         attach_visual(
             &mut commands,
@@ -219,8 +227,11 @@ fn attach_vox_mesh(
         return;
     };
 
-    commands.entity(entity).with_child((
-        Mesh3d(mesh_handle.clone()),
-        MeshMaterial3d(default_material.0.clone()),
-    ));
+    commands
+        .entity(entity)
+        .insert(Visibility::default())
+        .with_child((
+            Mesh3d(mesh_handle.clone()),
+            MeshMaterial3d(default_material.0.clone()),
+        ));
 }
