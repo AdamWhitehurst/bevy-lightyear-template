@@ -6,6 +6,7 @@ members = [
   "crates/web",
   "crates/render",
   "crates/ui",
+  "crates/dev",
   "crates/voxel_map_engine",
   "crates/sprite_rig",
   "crates/persistence",

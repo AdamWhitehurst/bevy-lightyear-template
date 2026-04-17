@@ -9,7 +9,7 @@ file_watcher = ["bevy/file_watcher"]
 tracy = ["bevy/trace_tracy", "tracy-client/enable"]
 
 [dependencies]
-avian3d = { workspace = true, features = [ "debug-plugin" ]}
+avian3d = { workspace = true }
 bevy = { workspace = true, default-features = true }
 voxel_map_engine = { workspace = true }
 leafwing-input-manager = { workspace = true }
@@ -17,6 +17,7 @@ lightyear = { workspace = true, features = ["client", "netcode", "udp", "crossbe
 protocol = { workspace = true }
 render = { path = "../render" }
 ui = { path = "../ui" }
+dev = { path = "../dev" }
 anyhow = "1.0"
 tracy-client = { workspace = true }
 

@@ -2362,6 +2362,7 @@ dependencies = [
  "approx",
  "avian3d",
  "bevy",
+ "dev",
  "leafwing-input-manager",
  "lightyear",
  "mock_instant",
@@ -2791,6 +2792,14 @@ dependencies = [
  "quote",
  "syn",
  "unicode-xid",
+]
+
+[[package]]
+name = "dev"
+version = "0.1.0"
+dependencies = [
+ "avian3d",
+ "bevy",
 ]
 
 [[package]]
@@ -8119,6 +8128,7 @@ dependencies = [
  "bevy",
  "client",
  "console_error_panic_hook",
+ "dev",
  "getrandom 0.2.16",
  "getrandom 0.3.4",
  "lightyear",

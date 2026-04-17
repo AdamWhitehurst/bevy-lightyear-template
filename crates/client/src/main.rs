@@ -5,8 +5,8 @@ pub mod network;
 pub mod transition;
 pub mod world_object;
 
-use avian3d::prelude::PhysicsDebugPlugin;
 use bevy::prelude::*;
+use dev::DevPlugin;
 use diagnostics::ClientDiagnosticsPlugin;
 use gameplay::ClientGameplayPlugin;
 use lightyear::prelude::client::*;
@@ -52,7 +52,7 @@ fn main() {
         .add_plugins(transition::ClientTransitionPlugin)
         .add_plugins(RenderPlugin)
         .add_plugins(UiPlugin)
-        .add_plugins(PhysicsDebugPlugin::default())
+        .add_plugins(DevPlugin)
         .add_plugins(SharedDiagnosticsPlugin)
         .add_plugins(ClientDiagnosticsPlugin)
         .run();

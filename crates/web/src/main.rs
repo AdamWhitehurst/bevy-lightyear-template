@@ -1,7 +1,7 @@
-use avian3d::prelude::PhysicsDebugPlugin;
 use bevy::prelude::*;
 use client::gameplay::ClientGameplayPlugin;
 use client::map::ClientMapPlugin;
+use dev::DevPlugin;
 use lightyear::prelude::client::*;
 use protocol::*;
 use render::RenderPlugin;
@@ -38,6 +38,6 @@ fn main() {
         .add_plugins(ClientMapPlugin)
         .add_plugins(RenderPlugin)
         .add_plugins(UiPlugin)
-        .add_plugins(PhysicsDebugPlugin::default())
+        .add_plugins(DevPlugin)
         .run();
 }

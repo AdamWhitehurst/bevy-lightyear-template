@@ -50,6 +50,7 @@ protocol = { workspace = true }
 client = { path = "../client", default-features = false }
 render = { path = "../render" }
 ui = { path = "../ui" }
+dev = { path = "../dev" }
 avian3d = { workspace = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
