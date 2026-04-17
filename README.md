@@ -62,7 +62,8 @@ bevy-lightyear-template/
 │   ├── web/            # WASM client
 │   ├── render/         # 3D rendering systems
 │   ├── sprite_rig/     # 2D sprite rig animation system
-│   └── ui/             # UI components
+│   ├── ui/             # UI components
+│   └── dev/            # Development tooling (physics debug, runtime toggles)
 ├── assets/             # Game assets (ability definitions, etc.)
 ├── certificates/       # TLS certificates (generated)
 ├── scripts/            # Build and run scripts
@@ -111,6 +112,7 @@ Abilities are defined in `assets/abilities.ron` and loaded at startup. Each char
 - `2` - Ability slot 2
 - `3` - Ability slot 3
 - `4` - Ability slot 4
+- `F3` - Toggle physics debug wireframes
 
 ### Defining Abilities
 
