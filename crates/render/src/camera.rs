@@ -45,6 +45,15 @@ pub(crate) fn setup_lighting(mut commands: Commands) {
         Transform::from_translation(BASE_LIGHT_OFFSET),
         MainLight,
     ));
+
+    commands.spawn((
+        DirectionalLight {
+            illuminance: light_consts::lux::AMBIENT_DAYLIGHT,
+            shadows_enabled: true,
+            ..default()
+        },
+        Transform::default().looking_to(Vec3::new(-0.5, -1.0, -0.5), Vec3::Y),
+    ));
 }
 
 /// Handles Q/E input to rotate camera orbit by 90° increments.

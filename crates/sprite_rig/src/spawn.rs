@@ -3,15 +3,19 @@ use std::collections::HashMap;
 use avian3d::prelude::{LinearVelocity, Position, Rotation};
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageSampler, TextureAtlasBuilder};
+use bevy::light::NotShadowCaster;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
+use bevy::pbr::ExtendedMaterial;
 use bevy::prelude::*;
 use lightyear::prelude::*;
 use protocol::app_state::TrackedAssets;
+use protocol::billboard::shadow_only_material::{ShadowOnlyExt, ShadowOnlyMaterial};
 use protocol::billboard::sprite_rig_material::{SpriteRigBillboardExt, SpriteRigMaterial};
 use protocol::{transform_from_physics, CharacterMarker, CharacterType};
 
 use crate::asset::{SpriteAnchorDef, SpriteRigAsset};
+use crate::shadow_twin::ShadowTwinOf;
 use crate::{asset::SpriteAnimSetAsset, RigRegistry};
 
 /// Reference to the rig asset for this character. Triggers rig spawning.
@@ -50,6 +54,15 @@ struct RigMeshAssets {
     mesh: Handle<Mesh>,
     inverse_bindposes: Handle<SkinnedMeshInverseBindposes>,
     material: Handle<SpriteRigMaterial>,
+    shadow_parts: Vec<ShadowPartAssets>,
+}
+
+/// Shared mesh and material for a single bone's shadow twin quad, keyed by bone name
+/// so each character's twin can resolve to its own joint entity at spawn time.
+struct ShadowPartAssets {
+    bone_name: String,
+    mesh: Handle<Mesh>,
+    material: Handle<ShadowOnlyMaterial>,
 }
 
 /// Cache of rig mesh assets keyed by rig asset handle ID.
@@ -122,6 +135,7 @@ pub fn spawn_sprite_rigs(
     mut meshes: ResMut<Assets<Mesh>>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<SpriteRigMaterial>>,
+    mut shadow_materials: ResMut<Assets<ShadowOnlyMaterial>>,
     mut bindpose_assets: ResMut<Assets<SkinnedMeshInverseBindposes>>,
     mut rig_mesh_cache: ResMut<RigMeshCache>,
     sprite_images: Res<SpriteImageHandles>,
@@ -144,6 +158,7 @@ pub fn spawn_sprite_rigs(
                     &mut meshes,
                     &mut images,
                     &mut materials,
+                    &mut shadow_materials,
                     &mut bindpose_assets,
                     &sprite_images,
                 )
@@ -152,6 +167,11 @@ pub fn spawn_sprite_rigs(
         let mesh_handle = cached.mesh.clone();
         let bindpose_handle = cached.inverse_bindposes.clone();
         let material_handle = cached.material.clone();
+        let shadow_parts: Vec<(String, Handle<Mesh>, Handle<ShadowOnlyMaterial>)> = cached
+            .shadow_parts
+            .iter()
+            .map(|p| (p.bone_name.clone(), p.mesh.clone(), p.material.clone()))
+            .collect();
 
         let joint_root_id = commands
             .spawn((JointRoot, Name::new("JointRoot"), Transform::default()))
@@ -177,19 +197,51 @@ pub fn spawn_sprite_rigs(
                 joints: joint_entities,
             },
             Transform::default(),
+            NotShadowCaster,
         ));
+
+        spawn_shadow_twins(&mut commands, entity, &bone_map, &shadow_parts);
 
         commands.entity(entity).insert(BoneEntities(bone_map));
     }
 }
 
-/// Builds and caches the mesh, inverse bind poses, and material for a rig type.
+/// Spawns one shadow twin quad per visible bone as a child of the character entity.
+/// Parenting ensures twins despawn with the character (including when a lightyear
+/// Room change or disconnect removes the replicated rig). The twins live on the
+/// default render layer so `queue_shadows` includes them in the camera's shadow
+/// pass; their material discards every main-pass fragment, keeping them visually
+/// invisible while still writing alpha-masked depth into the shadow map.
+fn spawn_shadow_twins(
+    commands: &mut Commands,
+    character_entity: Entity,
+    bone_map: &HashMap<String, Entity>,
+    shadow_parts: &[(String, Handle<Mesh>, Handle<ShadowOnlyMaterial>)],
+) {
+    for (bone_name, mesh, material) in shadow_parts {
+        let joint_entity = *bone_map
+            .get(bone_name.as_str())
+            .expect("shadow part bone must exist in bone_map");
+        commands.entity(character_entity).with_child((
+            Name::new(format!("ShadowTwin[{bone_name}]")),
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(material.clone()),
+            Transform::IDENTITY,
+            Visibility::default(),
+            ShadowTwinOf(joint_entity),
+        ));
+    }
+}
+
+/// Builds and caches the mesh, inverse bind poses, material, and per-bone shadow
+/// assets for a rig type.
 fn build_rig_mesh_assets(
     sorted_bones: &[&crate::asset::BoneDef],
     slot_lookup: &HashMap<&str, SlotInfo>,
     meshes: &mut Assets<Mesh>,
     images: &mut Assets<Image>,
     materials: &mut Assets<SpriteRigMaterial>,
+    shadow_materials: &mut Assets<ShadowOnlyMaterial>,
     bindpose_assets: &mut Assets<SkinnedMeshInverseBindposes>,
     sprite_images: &SpriteImageHandles,
 ) -> RigMeshAssets {
@@ -215,11 +267,69 @@ fn build_rig_mesh_assets(
         extension: SpriteRigBillboardExt {},
     });
 
+    let shadow_parts = build_shadow_part_assets(
+        sorted_bones,
+        slot_lookup,
+        meshes,
+        shadow_materials,
+        sprite_images,
+    );
+
     RigMeshAssets {
         mesh: meshes.add(mesh),
         inverse_bindposes,
         material,
+        shadow_parts,
     }
+}
+
+/// Builds one shadow quad mesh and one alpha-masked `ShadowOnlyMaterial` per
+/// visible bone. The material's main-pass fragment discards, so the quad is
+/// invisible to the camera; its prepass and shadow pass honor the sprite
+/// texture's alpha mask to produce the silhouette shadow.
+fn build_shadow_part_assets(
+    sorted_bones: &[&crate::asset::BoneDef],
+    slot_lookup: &HashMap<&str, SlotInfo>,
+    meshes: &mut Assets<Mesh>,
+    shadow_materials: &mut Assets<ShadowOnlyMaterial>,
+    sprite_images: &SpriteImageHandles,
+) -> Vec<ShadowPartAssets> {
+    let visible_bones = collect_visible_bones(sorted_bones, slot_lookup);
+    let mut parts = Vec::with_capacity(visible_bones.len());
+
+    for (bone_def, slot_info) in &visible_bones {
+        let texture_handle = sprite_images
+            .0
+            .get(&slot_info.image_path)
+            .unwrap_or_else(|| {
+                panic!(
+                    "missing sprite image handle for shadow twin '{}'",
+                    slot_info.image_path
+                )
+            })
+            .clone();
+
+        let mesh = meshes.add(Rectangle::new(slot_info.size.x, slot_info.size.y));
+        let material = shadow_materials.add(ExtendedMaterial {
+            base: StandardMaterial {
+                base_color: Color::WHITE,
+                base_color_texture: Some(texture_handle),
+                alpha_mode: AlphaMode::Mask(0.5),
+                double_sided: true,
+                cull_mode: None,
+                ..default()
+            },
+            extension: ShadowOnlyExt {},
+        });
+
+        parts.push(ShadowPartAssets {
+            bone_name: bone_def.name.clone(),
+            mesh,
+            material,
+        });
+    }
+
+    parts
 }
 
 /// Packs all visible bone images into a single texture atlas.

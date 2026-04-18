@@ -1,7 +1,7 @@
 #![enable(implicit_some)]
 (
     bones: [
-        (name: "root",  parent: None,          default_transform: (translation: (0.0, 0.0), rotation: 0.0, scale: (1.0, 1.0))),
+        (name: "root",  parent: None,          default_transform: (translation: (0.0, -1.0), rotation: 0.0, scale: (1.0, 1.0))),
         (name: "torso", parent: Some("root"),  default_transform: (translation: (0.0, 0.5), rotation: 0.0, scale: (1.0, 1.0))),
         (name: "head",  parent: Some("torso"), default_transform: (translation: (0.0, 1.2), rotation: 0.0, scale: (1.0, 1.0))),
         (name: "arm_l", parent: Some("torso"), default_transform: (translation: (-1.2, 0.0), rotation: 0.0, scale: (1.0, 1.0))),

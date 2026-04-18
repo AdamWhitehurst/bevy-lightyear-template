@@ -1,6 +1,7 @@
 pub mod animation;
 pub mod animset;
 pub mod asset;
+pub mod shadow_twin;
 pub mod spawn;
 
 use asset::*;
@@ -13,6 +14,7 @@ pub use animation::{
     AnimBoneDefaults, BuiltAnimGraphs, BuiltAnimations, LoadedAnimHandles, LocomotionBlendWeights,
 };
 pub use animset::AnimationEventFired;
+pub use shadow_twin::ShadowTwinOf;
 pub use spawn::{
     AnimSetRef, BoneEntities, Facing, JointRoot, RigMeshCache, SpriteImageHandles, SpriteRig,
 };
@@ -52,6 +54,7 @@ impl Plugin for SpriteRigPlugin {
                 spawn::billboard_joint_roots,
                 spawn::update_facing_from_velocity,
                 spawn::apply_facing_to_rig,
+                shadow_twin::update_shadow_twins,
             )
                 .chain(),
         );
