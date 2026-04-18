@@ -11,6 +11,7 @@ Extend the `dev` crate's `DevPlugin` with six independently-toggleable `bevy-ins
 - **Run-condition gating.** Panels are added with `.run_if(panel_enabled)` rather than bare-return in their systems — keeps CLAUDE.md's "no bare return without trace" rule clean.
 - **Egui schedule.** All UI systems are added to `bevy_egui::EguiPrimaryContextPass`, matching lightyear's launcher/lobby examples.
 - **WASM F-key caveat.** Browsers intercept F5 (refresh), F11 (fullscreen), F12 (devtools). On wasm the egui top menu (mouse-clickable checkboxes) is the primary toggle path; F-keys are best-effort.
+- **Default-on for debug builds.** Each panel feature is also appended to `client`'s `[features] default = [...]` list so `cargo client` (debug) enables the inspector + all shipped panels. Release builds opt out via `cargo client --release --no-default-features --features file_watcher`. Web stays opt-in (no `default` list) to keep release WASM bundles lean.
 
 ---
 
@@ -220,8 +221,8 @@ inspector = ["dev/inspector"]
 - [x] `cargo check -p dev --features inspector --target wasm32-unknown-unknown` passes.
 
 #### Manual
-- [ ] `cargo client` (no features) — F3 still toggles physics gizmos; no egui visible.
-- [ ] `cargo client --features dev/inspector` — F3 toggles physics; F4 shows an empty top-bar labeled "Dev Inspector"; F4 again hides it.
+- [x] `cargo client` (debug, defaults = `file_watcher`, `inspector`) — F3 toggles physics; F4 shows empty top-bar "Dev Inspector"; F4 again hides it.
+- [ ] `cargo client --release --no-default-features --features file_watcher` — F3 toggles physics; F4 does nothing visible (inspector compiled out).
 
 ---
 

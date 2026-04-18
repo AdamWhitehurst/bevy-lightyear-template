@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["file_watcher"]
+default = ["file_watcher", "inspector"]
 file_watcher = ["bevy/file_watcher"]
 tracy = ["bevy/trace_tracy", "tracy-client/enable"]
 inspector = ["dev/inspector"]
