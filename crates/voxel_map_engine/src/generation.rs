@@ -186,8 +186,16 @@ pub fn build_surface_height_map<S: Shape<3, Coord = u32>>(
             for py in (1..=chunk_size).rev() {
                 let idx = shape.linearize([px, py, pz]) as usize;
                 if matches!(voxels[idx], WorldVoxel::Solid(_)) {
-                    let world_y = chunk_pos.y as f64 * chunk_size as f64 + (py - 1) as f64 + 1.0;
-                    map.set(px, pz, Some(world_y));
+                    // Only treat this as a surface if the voxel directly above is
+                    // non-solid. Otherwise terrain continues into the chunk above
+                    // and this column's "top" is merely the chunk's ceiling — the
+                    // real surface is owned by the chunk stacked on top of us.
+                    let above_idx = shape.linearize([px, py + 1, pz]) as usize;
+                    if !matches!(voxels[above_idx], WorldVoxel::Solid(_)) {
+                        let world_y =
+                            chunk_pos.y as f64 * chunk_size as f64 + (py - 1) as f64 + 1.0;
+                        map.set(px, pz, Some(world_y));
+                    }
                     break;
                 }
             }
@@ -295,6 +303,64 @@ mod tests {
             for z in 0..16u32 {
                 let h = map.at(x + 1, z + 1).unwrap();
                 assert_eq!(h, first, "height mismatch at ({x}, {z})");
+            }
+        }
+    }
+
+    /// Generate flat voxels with a configurable solid-surface Y for stacked-chunk tests.
+    fn flat_voxels_with_surface<S: Shape<3, Coord = u32>>(
+        chunk_pos: IVec3,
+        chunk_size: u32,
+        shape: &S,
+        surface_y: i32,
+    ) -> Vec<WorldVoxel> {
+        let mut voxels = vec![WorldVoxel::Air; shape.usize()];
+        for i in 0..shape.size() {
+            let [_x, y, _z] = shape.delinearize(i);
+            let world_y = chunk_pos.y * chunk_size as i32 + y as i32 - 1;
+            if world_y <= surface_y {
+                voxels[i as usize] = WorldVoxel::Solid(0);
+            }
+        }
+        voxels
+    }
+
+    #[test]
+    fn surface_height_map_skips_columns_when_terrain_continues_above() {
+        let shape = padded_shape();
+        // chunkY=-1 covers world Y -16..-1; terrain surface is at Y=5 (in chunk above).
+        // Interior is fully solid and padding at py=17 (world_y=0) is also solid.
+        let chunk_pos = IVec3::new(0, -1, 0);
+        let voxels = flat_voxels_with_surface(chunk_pos, 16, &shape, 5);
+        let palette = PalettedChunk::from_voxels(&voxels);
+        let map = build_surface_height_map(chunk_pos, &palette, 16, 18, &shape);
+
+        for x in 0..16u32 {
+            for z in 0..16u32 {
+                assert!(
+                    map.at(x + 1, z + 1).is_none(),
+                    "column ({x}, {z}) must not claim surface when terrain continues into chunk above"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn surface_height_map_reports_surface_when_terrain_terminates_in_chunk() {
+        let shape = padded_shape();
+        // chunkY=0 covers world Y 0..15; terrain terminates at Y=5 inside this chunk.
+        let chunk_pos = IVec3::ZERO;
+        let voxels = flat_voxels_with_surface(chunk_pos, 16, &shape, 5);
+        let palette = PalettedChunk::from_voxels(&voxels);
+        let map = build_surface_height_map(chunk_pos, &palette, 16, 18, &shape);
+
+        for x in 0..16u32 {
+            for z in 0..16u32 {
+                assert_eq!(
+                    map.at(x + 1, z + 1),
+                    Some(6.0),
+                    "expected top face of Y=5 (= 6.0) at column ({x}, {z})"
+                );
             }
         }
     }
