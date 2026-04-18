@@ -295,9 +295,9 @@ world-inspector = ["dev/world-inspector"]
 ### Verification
 
 #### Automated
-- [ ] `cargo check -p dev --features world-inspector` passes (native).
-- [ ] `cargo check -p dev --features world-inspector --target wasm32-unknown-unknown` passes.
-- [ ] `cargo check-all` still passes.
+- [x] `cargo check -p dev --features world-inspector` passes (native).
+- [x] `cargo check -p dev --features world-inspector --target wasm32-unknown-unknown` passes.
+- [x] `cargo check-all` still passes.
 
 #### Manual
 - [ ] `cargo client --features dev/world-inspector` — F4 shows root, F5 opens the world tree window; can drill into entities and view their components.

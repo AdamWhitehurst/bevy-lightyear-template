@@ -26,6 +26,9 @@ impl Plugin for DevPlugin {
             use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
             app.add_plugins(EguiPlugin::default())
                 .add_systems(EguiPrimaryContextPass, draw_root_menu.run_if(inspector_enabled));
+
+            #[cfg(feature = "world-inspector")]
+            app.add_plugins(panels::world_inspector::WorldInspectorPanelPlugin);
         }
     }
 }

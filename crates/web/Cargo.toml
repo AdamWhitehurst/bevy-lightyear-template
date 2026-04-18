@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [features]
 inspector = ["dev/inspector"]
+world-inspector = ["dev/world-inspector"]
 
 [dependencies]
 # Optimized Bevy features for WASM: disable unnecessary features while keeping rendering

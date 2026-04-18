@@ -5,6 +5,7 @@ edition = "2021"
 
 [features]
 inspector = ["dep:bevy_egui", "dep:bevy-inspector-egui"]
+world-inspector = ["inspector"]
 
 [dependencies]
 avian3d = { workspace = true, features = ["debug-plugin"] }
