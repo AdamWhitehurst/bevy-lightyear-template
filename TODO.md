@@ -23,6 +23,13 @@
 - [ ] Singleplayer
   - [ ] Persistence
 
+- [ ] bevi-inspector-egui
+  - [ ] DevPlugin
+  - [ ] World inspector
+  - [ ] Chunk debugger (with force-load/evict controls)
+  - [ ] Live RON editors for ability and world-object definitions with hot-reload
+  - [ ] Network entity viewer exposing Lightyear replication and interest-management state
+  - [ ] Reflected-registry-driven spawn panel
 ---
 
 
@@ -40,7 +47,6 @@
 - update world object system on hot reload by first remove WorldObjectId's components using old loaded Def, load new Def, insert_if_new(...) ?
 - client --autoconnect flag
 - stream ron assets to web clients on request
-- bevi-inspector-egui
 - wave function collapse
 - Extend voxel_map_engine to support inserting pre-authored chunks
 - composable Character templates that are loadable Asset files. Character template asset files are composed of other ron asset files
