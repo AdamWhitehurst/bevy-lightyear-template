@@ -70,7 +70,7 @@ Read `$ARGUMENTS/task.md`, `$ARGUMENTS/questions.md`, and `$ARGUMENTS/research.m
 ## Output
 
 - File written: `doc/tasks/<id>/design.md`
-- Tell the user: "Next: run `/qrspi/4_structure doc/tasks/<id>/`"
+- Tell the user: "Next: run `/qrspi:4_structure doc/tasks/<id>/`"
 
 ## Rules
 
@@ -82,4 +82,4 @@ Read `$ARGUMENTS/task.md`, `$ARGUMENTS/questions.md`, and `$ARGUMENTS/research.m
 
 ## When to Go Back
 
-If the research is missing critical information needed for design decisions — the questions missed an important area of the codebase — tell the user and suggest re-running `/qrspi/1_question` and `/qrspi/2_research` to fill the gap before proceeding with an incomplete design.
+If the research is missing critical information needed for design decisions — the questions missed an important area of the codebase — tell the user and suggest re-running `/qrspi:1_question` and `/qrspi:2_research` to fill the gap before proceeding with an incomplete design.

@@ -71,7 +71,7 @@ Read `$ARGUMENTS/design.md` and `$ARGUMENTS/research.md`.
 ## Output
 
 - File written: `doc/tasks/<id>/structure.md`
-- Tell the user: "Next: run `/qrspi/5_plan doc/tasks/<id>/`"
+- Tell the user: "Next: run `/qrspi:5_plan doc/tasks/<id>/`"
 
 ## Rules
 
@@ -83,4 +83,4 @@ Read `$ARGUMENTS/design.md` and `$ARGUMENTS/research.md`.
 
 ## When to Go Back
 
-If you discover the design missed a critical constraint or made a decision based on incorrect assumptions about the codebase, tell the user and suggest re-running `/qrspi/3_design` rather than working around a flawed design.
+If you discover the design missed a critical constraint or made a decision based on incorrect assumptions about the codebase, tell the user and suggest re-running `/qrspi:3_design` rather than working around a flawed design.

@@ -70,7 +70,7 @@ Read `$ARGUMENTS/structure.md`, `$ARGUMENTS/design.md`, and `$ARGUMENTS/research
 ## Output
 
 - File written: `doc/tasks/<id>/plan.md`
-- Tell the user: "Next: run `/qrspi/6_worktree doc/tasks/<id>/` to set up an isolated worktree, or `/qrspi/7_implement doc/tasks/<id>/` to implement in the current tree."
+- Tell the user: "Next: run `/qrspi:6_worktree doc/tasks/<id>/` to set up an isolated worktree, or `/qrspi: 7_implement doc/tasks/<id>/` to implement in the current tree."
 
 ## Rules
 
@@ -88,4 +88,4 @@ Read `$ARGUMENTS/structure.md`, `$ARGUMENTS/design.md`, and `$ARGUMENTS/research
 
 ## When to Go Back
 
-If expanding the structure reveals that a phase can't be implemented as outlined — missing information, incorrect assumptions, or a structural issue — tell the user and suggest re-running `/qrspi/4_structure` or `/qrspi/3_design` rather than writing a plan you know is flawed.
+If expanding the structure reveals that a phase can't be implemented as outlined — missing information, incorrect assumptions, or a structural issue — tell the user and suggest re-running `/qrspi:4_structure` or `/qrspi:3_design` rather than writing a plan you know is flawed.
