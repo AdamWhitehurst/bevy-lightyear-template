@@ -1,17 +1,32 @@
-//! Development-only tooling: physics debug rendering and runtime debug toggles.
+//! Development-only tooling: physics debug rendering, runtime toggles, and
+//! optional `bevy-inspector-egui` panels (behind the `inspector` Cargo feature).
 
 use avian3d::prelude::{PhysicsDebugPlugin, PhysicsGizmos};
 use bevy::gizmos::config::GizmoConfigStore;
 use bevy::prelude::*;
 
-/// Adds physics debug rendering and keybindings for toggling debug views at runtime.
+mod state;
+pub use state::{DevInspectorState, PanelFlags};
+
+#[cfg(feature = "inspector")]
+mod panels;
+
+/// Adds physics debug rendering, runtime debug toggles, and optional inspector panels.
 pub struct DevPlugin;
 
 impl Plugin for DevPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(PhysicsDebugPlugin::default())
+            .init_resource::<DevInspectorState>()
             .add_systems(Startup, hide_physics_debug)
-            .add_systems(Update, toggle_physics_debug);
+            .add_systems(Update, (toggle_physics_debug, toggle_dev_inspector));
+
+        #[cfg(feature = "inspector")]
+        {
+            use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
+            app.add_plugins(EguiPlugin::default())
+                .add_systems(EguiPrimaryContextPass, draw_root_menu.run_if(inspector_enabled));
+        }
     }
 }
 
@@ -27,4 +42,47 @@ fn toggle_physics_debug(keys: Res<ButtonInput<KeyCode>>, mut store: ResMut<Gizmo
         let (config, _) = store.config_mut::<PhysicsGizmos>();
         config.enabled = !config.enabled;
     }
+}
+
+/// Toggles the dev inspector root menu when F4 is pressed.
+fn toggle_dev_inspector(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<DevInspectorState>) {
+    if keys.just_pressed(KeyCode::F4) {
+        state.enabled = !state.enabled;
+    }
+}
+
+#[cfg(feature = "inspector")]
+fn inspector_enabled(state: Res<DevInspectorState>) -> bool {
+    state.enabled
+}
+
+#[cfg(feature = "inspector")]
+fn draw_root_menu(
+    mut state: ResMut<DevInspectorState>,
+    mut contexts: bevy_egui::EguiContexts,
+) {
+    let Ok(ctx) = contexts.ctx_mut() else {
+        // EguiContexts not yet attached to the primary window.
+        trace!("draw_root_menu: EguiContexts not ready, skipping frame");
+        return;
+    };
+    bevy_egui::egui::TopBottomPanel::top("dev_inspector_root").show(ctx, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Dev Inspector");
+            ui.separator();
+            #[cfg(feature = "world-inspector")]
+            ui.checkbox(&mut state.panels.world_inspector, "World");
+            #[cfg(feature = "spawn-panel")]
+            ui.checkbox(&mut state.panels.spawn_panel, "Spawn");
+            #[cfg(feature = "netviz")]
+            ui.checkbox(&mut state.panels.netviz, "Netviz");
+            #[cfg(feature = "chunk-debug")]
+            ui.checkbox(&mut state.panels.chunk_debugger, "Chunks");
+            #[cfg(feature = "ability-editor")]
+            ui.checkbox(&mut state.panels.ability_editor, "Abilities");
+            #[cfg(feature = "world-object-editor")]
+            ui.checkbox(&mut state.panels.world_object_editor, "Objects");
+            let _ = &mut state; // silence unused-mut when no panel features are enabled
+        });
+    });
 }

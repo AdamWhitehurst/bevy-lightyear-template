@@ -10,6 +10,9 @@ crate-type = ["cdylib", "rlib"]
 name = "web"
 path = "src/main.rs"
 
+[features]
+inspector = ["dev/inspector"]
+
 [dependencies]
 # Optimized Bevy features for WASM: disable unnecessary features while keeping rendering
 bevy = { workspace = true, default-features = false, features = [
