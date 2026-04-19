@@ -12,17 +12,19 @@
     slots: [
         (name: "torso", bone: "torso", z_order: 0.0,  default_attachment: "torso_default"),
         (name: "head",  bone: "head",  z_order: 0.003,  default_attachment: "head_default"),
-        (name: "arm_l", bone: "arm_l", z_order: -0.001, default_attachment: "arm_default"),
-        (name: "arm_r", bone: "arm_r", z_order: 0.001,  default_attachment: "arm_default"),
-        (name: "leg_l", bone: "leg_l", z_order: -0.002, default_attachment: "leg_default"),
-        (name: "leg_r", bone: "leg_r", z_order: 0.002,  default_attachment: "leg_default"),
+        (name: "arm_l", bone: "arm_l", z_order: -0.001, default_attachment: "arm_l_default"),
+        (name: "arm_r", bone: "arm_r", z_order: 0.001,  default_attachment: "arm_r_default"),
+        (name: "leg_l", bone: "leg_l", z_order: -0.002, default_attachment: "leg_l_default"),
+        (name: "leg_r", bone: "leg_r", z_order: 0.002,  default_attachment: "leg_r_default"),
     ],
     skins: {
         "default": {
             "torso_default": (image: "sprites/humanoid/torso.png", anchor: Center,       size: (2.0, 2.0)),
-            "head_default":  (image: "sprites/humanoid/head.png",  anchor: BottomCenter, size: (1.5, 1.5)),
-            "arm_default":   (image: "sprites/humanoid/arm.png",   anchor: TopCenter,    size: (0.8, 0.8)),
-            "leg_default":   (image: "sprites/humanoid/leg.png",   anchor: TopCenter,    size: (1.0, 1.0)),
+            "head_default":  (image: "sprites/humanoid/head.png",  anchor: BottomCenter, size: (3.0, 3.0)),
+            "arm_l_default":   (image: "sprites/humanoid/arm_l.png",   anchor: TopCenter,    size: (1.0, 1.0)),
+            "arm_r_default":   (image: "sprites/humanoid/arm_r.png",   anchor: TopCenter,    size: (1.0, 1.0)),
+            "leg_l_default":   (image: "sprites/humanoid/leg_l.png",   anchor: TopCenter,    size: (1.0, 1.0)),
+            "leg_r_default":   (image: "sprites/humanoid/leg_r.png",   anchor: TopCenter,    size: (1.0, 1.0)),
         },
     },
 )
