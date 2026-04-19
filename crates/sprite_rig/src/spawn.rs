@@ -487,10 +487,10 @@ fn append_quad_vertices(
     ]);
     normals.extend_from_slice(&[[0.0, 0.0, 1.0]; 4]);
     uvs.extend_from_slice(&[
-        [uv_rect.min.x, uv_rect.max.y],
         [uv_rect.max.x, uv_rect.max.y],
-        [uv_rect.max.x, uv_rect.min.y],
+        [uv_rect.min.x, uv_rect.max.y],
         [uv_rect.min.x, uv_rect.min.y],
+        [uv_rect.max.x, uv_rect.min.y],
     ]);
 
     let ji = [joint_idx, 0, 0, 0];
