@@ -5,6 +5,9 @@ use std::collections::HashMap;
 /// Defines a character's bone hierarchy, sprite slots, and skin variants.
 #[derive(Clone, Debug, Serialize, Deserialize, Asset, TypePath)]
 pub struct SpriteRigAsset {
+    /// Conversion factor from sprite image pixels to world units. A bone quad's
+    /// world size is `(image_pixels / pixels_per_unit) * attachment.scale`.
+    pub pixels_per_unit: f32,
     pub bones: Vec<BoneDef>,
     pub slots: Vec<SlotDef>,
     pub skins: HashMap<String, HashMap<String, AttachmentDef>>,
@@ -46,11 +49,14 @@ pub struct SlotDef {
 }
 
 /// A sprite image attachment for a slot.
+///
+/// The rendered quad size is `(image_pixels / rig.pixels_per_unit) * scale`.
+/// A `scale` of `(1.0, 1.0)` renders the sprite at its natural pixel size.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AttachmentDef {
     pub image: String,
     pub anchor: SpriteAnchorDef,
-    pub size: Vec2,
+    pub scale: Vec2,
 }
 
 /// Sprite anchor point.

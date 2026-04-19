@@ -145,7 +145,7 @@ pub fn spawn_sprite_rigs(
             .get(&sprite_rig.0)
             .expect("SpriteRigAsset must be loaded before gameplay (AppState::Ready)");
 
-        let slot_lookup = build_slot_lookup(rig);
+        let slot_lookup = build_slot_lookup(rig, &images, &sprite_images);
         let sorted_bones = topological_sort_bones(&rig.bones);
 
         let cached = rig_mesh_cache
@@ -580,16 +580,27 @@ fn bone_transform_from_def(
 }
 
 /// Builds a lookup from bone name to slot info from the rig's slots and default skin.
-fn build_slot_lookup(rig: &SpriteRigAsset) -> HashMap<&str, SlotInfo> {
+///
+/// Computes each slot's world-space quad size as
+/// `(image_pixels / rig.pixels_per_unit) * attachment.scale`.
+fn build_slot_lookup<'a>(
+    rig: &'a SpriteRigAsset,
+    images: &Assets<Image>,
+    sprite_images: &SpriteImageHandles,
+) -> HashMap<&'a str, SlotInfo> {
     let default_skin = rig.skins.get("default");
     let mut lookup = HashMap::new();
 
     for slot in &rig.slots {
         let attachment = default_skin.and_then(|skin| skin.get(&slot.default_attachment));
 
+        let size = attachment
+            .map(|a| attachment_world_size(a, rig.pixels_per_unit, images, sprite_images))
+            .unwrap_or(Vec2::splat(1.0));
+
         let info = SlotInfo {
             z_order: slot.z_order,
-            size: attachment.map(|a| a.size).unwrap_or(Vec2::splat(1.0)),
+            size,
             anchor: attachment.map(|a| a.anchor.clone()).unwrap_or_default(),
             image_path: attachment.map(|a| a.image.clone()).unwrap_or_default(),
         };
@@ -598,6 +609,25 @@ fn build_slot_lookup(rig: &SpriteRigAsset) -> HashMap<&str, SlotInfo> {
     }
 
     lookup
+}
+
+/// Computes an attachment's world-space quad size from its PNG pixel dimensions,
+/// the rig's pixels-per-unit, and the attachment's scale.
+fn attachment_world_size(
+    attachment: &crate::asset::AttachmentDef,
+    pixels_per_unit: f32,
+    images: &Assets<Image>,
+    sprite_images: &SpriteImageHandles,
+) -> Vec2 {
+    let handle = sprite_images
+        .0
+        .get(&attachment.image)
+        .unwrap_or_else(|| panic!("missing sprite image handle for '{}'", attachment.image));
+    let image = images
+        .get(handle)
+        .unwrap_or_else(|| panic!("sprite image not loaded for '{}'", attachment.image));
+    let pixels = Vec2::new(image.width() as f32, image.height() as f32);
+    (pixels / pixels_per_unit) * attachment.scale
 }
 
 /// Topological sort: parents before children. Simple iterative approach.
