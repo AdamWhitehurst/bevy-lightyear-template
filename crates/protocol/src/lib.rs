@@ -1,4 +1,4 @@
-use avian3d::math::AsF32;
+use avian3d::math::{AsF32, Vector};
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
@@ -249,6 +249,7 @@ impl Plugin for SharedGameplayPlugin {
                 .disable::<PhysicsInterpolationPlugin>()
                 .disable::<IslandSleepingPlugin>(),
         );
+        app.insert_resource(Gravity(Vector::Y * -19.62));
 
         let ready = in_state(AppState::Ready);
 
