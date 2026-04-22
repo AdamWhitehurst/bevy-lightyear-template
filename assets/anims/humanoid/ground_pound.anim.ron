@@ -1,0 +1,74 @@
+#![enable(implicit_some)]
+(
+    name: "ground_pound",
+    duration: 1.875,
+    looping: false,
+    bone_timelines: {
+        "torso": (
+            rotation: [
+                (time: 0.0,   value: 0.0,   curve: Linear),
+                (time: 0.75,  value: -10.0, curve: Linear),
+                (time: 0.875, value: 18.0,  curve: Linear),
+                (time: 1.375, value: 0.0,   curve: Linear),
+                (time: 1.875, value: 0.0,   curve: Linear),
+            ],
+            translation: [
+                (time: 0.0,   value: (0.0,  0.0),  curve: Linear),
+                (time: 0.75,  value: (0.0,  0.4),  curve: Linear),
+                (time: 0.875, value: (0.0, -0.3),  curve: Linear),
+                (time: 1.375, value: (0.0,  0.0),  curve: Linear),
+                (time: 1.875, value: (0.0,  0.0),  curve: Linear),
+            ],
+            scale: [],
+        ),
+        "arm_l": (
+            rotation: [
+                (time: 0.0,    value: 0.0,   curve: Linear),
+                (time: 0.375,  value: -90.0,  curve: Linear),
+                (time: 0.75,   value: -180.0, curve: Linear),
+                (time: 0.8125, value: -90.0,  curve: Linear),
+                (time: 0.875,  value: 0.0,   curve: Linear),
+            ],
+            translation: [
+                (time: 0.0,   value: (0.0,  0.0),  curve: Linear),
+                (time: 0.75,  value: (0.4,  4.2),  curve: Linear),
+                (time: 0.875, value: (0.0, -1.5),  curve: Linear),
+                (time: 1.375, value: (0.0,  0.0),  curve: Linear),
+            ],
+            scale: [],
+        ),
+        "arm_r": (
+            rotation: [
+                (time: 0.0,    value: 0.0,   curve: Linear),
+                (time: 0.375,  value: -90.0,  curve: Linear),
+                (time: 0.75,   value: -180.0, curve: Linear),
+                (time: 0.8125, value: -90.0,  curve: Linear),
+                (time: 0.875,  value: 0.0,   curve: Linear),
+                (time: 1.375,  value: 0.0,   curve: Linear),
+                (time: 1.875,  value: 0.0,   curve: Linear),
+            ],
+            translation: [
+                (time: 0.0,   value: (0.0,   0.0),  curve: Linear),
+                (time: 0.75,  value: (-0.4,  4.2),  curve: Linear),
+                (time: 0.875, value: (0.0,  -1.5),  curve: Linear),
+                (time: 1.375, value: (0.0,   0.0),  curve: Linear),
+                (time: 1.875, value: (0.0,   0.0),  curve: Linear),
+            ],
+            scale: [],
+        ),
+        "root": (
+            rotation: [],
+            translation: [
+                (time: 0.0,   value: (0.0,  0.0),  curve: Linear),
+                (time: 0.75,  value: (0.0,  0.35), curve: Linear),
+                (time: 0.875, value: (0.0, -0.35), curve: Linear),
+                (time: 1.375, value: (0.0,  0.0),  curve: Linear),
+                (time: 1.875, value: (0.0,  0.0),  curve: Linear),
+            ],
+            scale: [],
+        ),
+    },
+    events: [
+        (time: 0.875, name: "ground_pound_impact"),
+    ],
+)
