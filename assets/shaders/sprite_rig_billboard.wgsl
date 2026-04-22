@@ -30,14 +30,13 @@ fn vertex(vertex_no_morph: Vertex) -> VertexOutput {
     //   1. Strip all rotation (making quads face the screen)
     //   2. Re-apply ONLY the bone Z-rotation as screen-plane tilt
     //
-    // For combined Ry(θy) * Rz(θz), column 0 of the rotation matrix is:
-    //   (cos(θy)*cos(θz), sin(θz), -sin(θy)*cos(θz))
+    // For combined Ry(θy) * Rz(θz):
+    //   col0 = (cos θy · cos θz,  sin θz,  -sin θy · cos θz)
+    //   col1 = (-cos θy · sin θz, cos θz,   sin θy · sin θz)
     //
-    // The Y-component gives sin(θz) directly (independent of θy).
-    // |cos(θz)| = length(column0.xz) (the Y-rotation cancels out in the sum
-    // of squares: cos²(θy)*cos²(θz) + sin²(θy)*cos²(θz) = cos²(θz)).
-    //
-    // We assume bone Z-rotations stay within (-π/2, π/2) so cos(θz) > 0.
+    // col0.y is sin(θz) signed; col1.y is cos(θz) signed — both immune to θy.
+    // Using col1.y (rather than length(col0.xz)) recovers the full ±π range,
+    // so bones can rotate fully (e.g. arms raised overhead) without aliasing.
 
     var model_view = view.view_from_world * world_from_local;
 
@@ -52,10 +51,8 @@ fn vertex(vertex_no_morph: Vertex) -> VertexOutput {
     ));
     let flip = select(1.0, -1.0, det < 0.0);
 
-    // Extract bone Z-rotation, immune to parent Y-rotation.
-    let col0_xz = vec2<f32>(world_from_local[0].x, world_from_local[0].z);
-    let raw_cos = length(col0_xz);
     let raw_sin = world_from_local[0].y;
+    let raw_cos = world_from_local[1].y;
     let rot_len = sqrt(raw_cos * raw_cos + raw_sin * raw_sin);
     let sin_t = select(0.0, raw_sin / rot_len, rot_len > 0.0001);
     let cos_t = select(1.0, raw_cos / rot_len, rot_len > 0.0001);
