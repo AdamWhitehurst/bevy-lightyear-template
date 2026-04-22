@@ -17,8 +17,8 @@ pub fn apply_movement(
     player_map_id: Option<&MapInstanceId>,
     map_ids: &Query<&MapInstanceId>,
 ) {
-    const MAX_SPEED: f32 = 10.0;
-    const MAX_ACCELERATION: f32 = 40.0;
+    const MAX_SPEED: f32 = 15.0;
+    const MAX_ACCELERATION: f32 = 500.0;
 
     let max_velocity_delta_per_tick = MAX_ACCELERATION * delta_secs;
 
@@ -41,7 +41,7 @@ pub fn apply_movement(
             )
             .is_some()
         {
-            forces.apply_linear_impulse(Vec3::new(0.0, 400.0, 0.0));
+            forces.apply_linear_impulse(Vec3::new(0.0, 2000.0, 0.0));
         }
     }
 

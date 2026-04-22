@@ -249,7 +249,7 @@ impl Plugin for SharedGameplayPlugin {
                 .disable::<PhysicsInterpolationPlugin>()
                 .disable::<IslandSleepingPlugin>(),
         );
-        app.insert_resource(Gravity(Vector::Y * -19.62));
+        app.insert_resource(Gravity(Vector::Y * -9.82 * 6.0));
 
         let ready = in_state(AppState::Ready);
 
