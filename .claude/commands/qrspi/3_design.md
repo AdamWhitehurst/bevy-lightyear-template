@@ -14,11 +14,28 @@ Read `$ARGUMENTS/task.md`, `$ARGUMENTS/questions.md`, and `$ARGUMENTS/research.m
 
 ## Process
 
-1. **Read all three artifacts fully.** `task.md` tells you what we're building. `research.md` tells you what exists. Understand both before proceeding.
+1. **Read all three artifacts fully.** `task.md` tells you what we're building. `research.md` tells you what exists. Ultrathink about how to achieve the goal of the task, given the research, before proceeding.
 
 2. **Targeted exploration**: If the research revealed areas that need deeper investigation for design decisions, spawn **codebase-pattern-finder** or **codebase-analyzer** agents to examine specific patterns or approaches.
 
-3. **Present open questions and wait for answers.** Before writing anything, you MUST:
+3. **Present areas needing further research, if any, and wait for answers.** Before writing anything, attempt to identify information (about code, concepts, or otherwise) that the research does not adequately cover:
+   - Attempt to identify areas from which planning would benefit
+   - If any identified: Present research questions with reasoning why planning would benefit from the research
+   - Wait for the user to respond
+
+   Example:
+   ```
+   Before I write the design document, The design would benefit from having these research questions answered:
+
+   **Q1: [Neutral, fact-seeking question]**
+   **Why: [Why planning would benefit from researching this question]**
+
+   **Q2: ...**
+   ```
+
+   If anything is identified: Do NOT write the design document without user input.
+
+4. **Present open questions and wait for answers.** Before writing anything, you MUST:
    - List 3-5 design questions that require human judgment
    - Present options with trade-offs for each, grounded in what the research found
    - Wait for the user to respond
@@ -38,7 +55,7 @@ Read `$ARGUMENTS/task.md`, `$ARGUMENTS/questions.md`, and `$ARGUMENTS/research.m
 
    Do NOT skip this step. Do NOT write the design document without user input.
 
-4. **Write `design.md`** (~200 lines) to the artifact directory:
+5. **Write `design.md`** (~200 lines) to the artifact directory:
 
    ```markdown
    # Design Discussion
@@ -65,7 +82,7 @@ Read `$ARGUMENTS/task.md`, `$ARGUMENTS/questions.md`, and `$ARGUMENTS/research.m
    [Anything uncertain that might surface during implementation]
    ```
 
-5. **Present the design to the user** for review. Iterate until they approve.
+6. **Present the design to the user** for review. Iterate until they approve.
 
 ## Output
 
@@ -82,4 +99,4 @@ Read `$ARGUMENTS/task.md`, `$ARGUMENTS/questions.md`, and `$ARGUMENTS/research.m
 
 ## When to Go Back
 
-If the research is missing critical information needed for design decisions — the questions missed an important area of the codebase — tell the user and suggest re-running `/qrspi:1_question` and `/qrspi:2_research` to fill the gap before proceeding with an incomplete design.
+If the research is missing critical information needed for design decisions i.e. the questions missed an important area of the codebase: tell the user and suggest re-running `/qrspi:1_question` and `/qrspi:2_research` to fill the gap before proceeding with an incomplete design.
