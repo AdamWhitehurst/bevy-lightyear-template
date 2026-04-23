@@ -30,7 +30,8 @@
 - process distance sprite rigs at half the rate for performance?
 - Social system that hooks into dialogue system
 - Expose, split bevy-lightyear-template:
-  - built-in claude qrspi skills
+  - readme: how to add assets: animations, world objects, etc.
+  - readme: built-in claude qrspi skills
   - stand-alone modules
 - agent skills: component design, system design, networking, physics knowledge
 - dampen player stats by distance from spawn?
