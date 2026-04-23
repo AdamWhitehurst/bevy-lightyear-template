@@ -29,7 +29,7 @@ Read `$ARGUMENTS/questions.md`. That file is your only input.
 
 4. **Synthesize findings** into a research document. Connect findings across components. Resolve any contradictions between agent reports by reading the code yourself.
 
-5. **Write `research.md`** to the artifact directory (~300 lines max — prefer `file:line` references over lengthy explanation):
+5. **Write `research.md`** to the artifact directory:
 
    ```markdown
    # Research Findings
@@ -68,7 +68,7 @@ Read `$ARGUMENTS/questions.md`. That file is your only input.
 - Do NOT read `task.md`, any ticket, task description, or design document — only `questions.md`.
 - Every finding must include a `file:line` reference.
 - If a question can't be answered from the codebase, say so clearly.
-- Aim for ~300 lines total. Dense references over lengthy prose.
+- Dense references over lengthy prose.
 
 ## When to Go Back
 
