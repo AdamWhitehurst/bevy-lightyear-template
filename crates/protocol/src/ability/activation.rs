@@ -1,9 +1,13 @@
-use super::loader::{apply_ability_archetype, extract_phases};
+use super::loader::{
+    apply_ability_archetype, apply_ability_archetype_with_on_tick_override,
+    extract_conditional_effects, extract_on_tick_effects, extract_phases,
+};
 use super::loading::DefaultAbilitySlots;
 use super::types::{
-    AbilityAsset, AbilityCooldowns, AbilityDefs, AbilityPhase, AbilityPhases, AbilitySlots,
-    ActiveAbility, OnHitEffectDefs, OnHitEffects,
+    AbilityAsset, AbilityCooldowns, AbilityDefs, AbilityEffect, AbilityPhase, AbilityPhases,
+    AbilitySlots, ActiveAbility, Condition, OnHitEffectDefs, OnHitEffects, TickEffect,
 };
+use crate::character::IsGrounded;
 use crate::{PlayerActions, PlayerId};
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::ActionState;
@@ -47,6 +51,7 @@ pub fn ability_activation(
         &PlayerId,
     )>,
     server_query: Query<&ControlledBy>,
+    grounded_query: Query<(), With<IsGrounded>>,
 ) {
     let tick = timeline.tick();
 
@@ -72,6 +77,31 @@ pub fn ability_activation(
                 continue;
             };
             if cooldowns.is_on_cooldown(slot_idx, tick, phases.cooldown) {
+                continue;
+            }
+
+            // Evaluate ConditionalEffects against the caster's current state. If
+            // the asset declares conditions but none match, refuse the cast: no
+            // spawn, no cooldown consumption.
+            let conditional = extract_conditional_effects(asset);
+            let matched: Vec<AbilityEffect> = if let Some(ce) = conditional {
+                let grounded = grounded_query.contains(entity);
+                ce.0.iter()
+                    .filter(|c| match c.condition {
+                        Condition::Grounded => grounded,
+                        Condition::Airborne => !grounded,
+                    })
+                    .map(|c| c.effect.clone())
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            if conditional.is_some() && matched.is_empty() {
+                trace!(
+                    "Ability {:?} refused: no ConditionalEffects condition matched (entity {:?})",
+                    ability_id,
+                    entity
+                );
                 continue;
             }
 
@@ -101,7 +131,21 @@ pub fn ability_activation(
                 ))
                 .id();
 
-            apply_ability_archetype(&mut commands, entity_id, asset, registry.0.clone());
+            if conditional.is_some() {
+                let mut on_tick = extract_on_tick_effects(asset).cloned().unwrap_or_default();
+                for effect in matched {
+                    on_tick.0.push(TickEffect { tick: 0, effect });
+                }
+                apply_ability_archetype_with_on_tick_override(
+                    &mut commands,
+                    entity_id,
+                    asset,
+                    registry.0.clone(),
+                    on_tick,
+                );
+            } else {
+                apply_ability_archetype(&mut commands, entity_id, asset, registry.0.clone());
+            }
 
             if let Ok(controlled_by) = server_query.get(entity) {
                 commands.entity(entity_id).insert((

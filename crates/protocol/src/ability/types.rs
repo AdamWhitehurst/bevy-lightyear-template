@@ -325,6 +325,30 @@ pub struct OnInputEffects(pub Vec<InputEffect>);
 #[reflect(Component, Serialize, Deserialize)]
 pub struct OnHitEffectDefs(pub Vec<AbilityEffect>);
 
+/// Caster-state condition evaluated at ability activation.
+#[derive(Clone, Debug, PartialEq, Reflect, Serialize, Deserialize)]
+#[type_path = "protocol::ability"]
+pub enum Condition {
+    Grounded,
+    Airborne,
+}
+
+/// One conditional branch: if `condition` matches the caster at activation,
+/// `effect` is appended to the spawned ability's `OnTickEffects` at tick 0.
+#[derive(Clone, Debug, PartialEq, Reflect, Serialize, Deserialize)]
+#[type_path = "protocol::ability"]
+pub struct ConditionalEffect {
+    pub condition: Condition,
+    pub effect: AbilityEffect,
+}
+
+/// If present and no entry's condition matches at activation, the ability
+/// is refused (no spawn, no cooldown consumption). All matching entries fire.
+#[derive(Component, Clone, Debug, PartialEq, Reflect, Serialize, Deserialize, Default)]
+#[type_path = "protocol::ability"]
+#[reflect(Component, Serialize, Deserialize)]
+pub struct ConditionalEffects(pub Vec<ConditionalEffect>);
+
 /// A bundle of reflected components loaded from a `.ability.ron` file.
 #[derive(Asset, TypePath)]
 pub struct AbilityAsset {

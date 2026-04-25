@@ -15,9 +15,9 @@ use super::spawn::{
 };
 use super::types::AbilityDefs;
 use super::types::{
-    AbilityAsset, AbilityEffect, AbilityPhases, AbilitySlots, EffectTarget, ForceFrame,
-    InputEffect, OnEndEffects, OnHitEffectDefs, OnInputEffects, OnTickEffects, TickEffect,
-    WhileActiveEffects,
+    AbilityAsset, AbilityEffect, AbilityPhases, AbilitySlots, Condition, ConditionalEffect,
+    ConditionalEffects, EffectTarget, ForceFrame, InputEffect, OnEndEffects, OnHitEffectDefs,
+    OnInputEffects, OnTickEffects, TickEffect, WhileActiveEffects,
 };
 use crate::PlayerActions;
 use bevy::prelude::*;
@@ -42,7 +42,10 @@ impl Plugin for AbilityPlugin {
             .register_type::<AbilityEffect>()
             .register_type::<EffectTarget>()
             .register_type::<ForceFrame>()
-            .register_type::<PlayerActions>();
+            .register_type::<PlayerActions>()
+            .register_type::<Condition>()
+            .register_type::<ConditionalEffect>()
+            .register_type::<ConditionalEffects>();
 
         app.init_asset::<AbilityAsset>()
             .init_asset_loader::<AbilityAssetLoader>();

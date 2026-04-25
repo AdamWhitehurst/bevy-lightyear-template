@@ -18,7 +18,8 @@ pub use types::{
     facing_direction, AbilityAsset, AbilityBulletOf, AbilityBullets, AbilityCooldowns, AbilityDef,
     AbilityDefs, AbilityEffect, AbilityId, AbilityManifest, AbilityPhase, AbilityPhases,
     AbilityProjectileSpawn, AbilitySlots, ActiveAbility, ActiveAbilityHitboxes, ActiveBuff,
-    ActiveBuffs, ActiveShield, AoEHitbox, EffectTarget, EffectTrigger, ForceFrame, HitTargets,
-    HitboxOf, InputEffect, MeleeHitbox, OnEndEffects, OnHitEffectDefs, OnHitEffects,
-    OnInputEffects, OnTickEffects, ProjectileSpawnEffect, TickEffect, WhileActiveEffects,
+    ActiveBuffs, ActiveShield, AoEHitbox, Condition, ConditionalEffect, ConditionalEffects,
+    EffectTarget, EffectTrigger, ForceFrame, HitTargets, HitboxOf, InputEffect, MeleeHitbox,
+    OnEndEffects, OnHitEffectDefs, OnHitEffects, OnInputEffects, OnTickEffects,
+    ProjectileSpawnEffect, TickEffect, WhileActiveEffects,
 };
