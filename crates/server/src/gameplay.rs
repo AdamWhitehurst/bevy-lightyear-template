@@ -29,7 +29,14 @@ impl Plugin for ServerGameplayPlugin {
                 |query: Query<&MapLoadState>| query.iter().any(|s| *s == MapLoadState::Ready),
             )),
         );
-        app.add_systems(FixedUpdate, handle_character_movement);
+        // detect_grounded must run before handle_character_movement and
+        // ability_activation so the IsGrounded gate sees fresh state.
+        app.add_systems(
+            FixedUpdate,
+            (protocol::detect_grounded, handle_character_movement)
+                .chain()
+                .before(protocol::ability::ability_activation),
+        );
         app.add_message::<DeathEvent>();
         app.add_systems(
             FixedUpdate,

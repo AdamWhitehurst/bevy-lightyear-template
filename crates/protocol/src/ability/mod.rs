@@ -10,7 +10,7 @@ pub mod plugin;
 
 pub(crate) use spawn::spawn_sub_ability;
 
-pub use activation::{ability_action_to_slot, slot_to_ability_action};
+pub use activation::{ability_action_to_slot, ability_activation, slot_to_ability_action};
 pub use lifecycle::expire_buffs;
 pub use loading::DefaultAbilitySlots;
 pub use plugin::AbilityPlugin;

@@ -1,4 +1,4 @@
-use super::types::CharacterMarker;
+use super::types::{CharacterMarker, IsGrounded};
 use crate::map::MapInstanceId;
 use crate::PlayerActions;
 use avian3d::prelude::{forces::ForcesItem, *};
@@ -62,6 +62,46 @@ pub fn apply_movement(
     let required_acceleration = (new_ground_linear_velocity - ground_linear_velocity) / delta_secs;
 
     forces.apply_force(required_acceleration * mass.value());
+}
+
+/// Maintains the `IsGrounded` marker on character entities by ray casting
+/// downward from the capsule center each tick. Must run before
+/// `handle_character_movement` and `ability_activation` so consumers see a
+/// fresh marker.
+pub fn detect_grounded(
+    mut commands: Commands,
+    spatial_query: SpatialQuery,
+    map_ids: Query<&MapInstanceId>,
+    characters: Query<
+        (Entity, &Position, Option<&MapInstanceId>, Has<IsGrounded>),
+        With<CharacterMarker>,
+    >,
+) {
+    for (entity, position, player_map_id, has_grounded) in &characters {
+        let filter = SpatialQueryFilter::from_excluded_entities([entity]);
+        let hit = spatial_query
+            .cast_ray_predicate(
+                position.0,
+                Dir3::NEG_Y,
+                4.0,
+                false,
+                &filter,
+                &|hit_entity| match (player_map_id, map_ids.get(hit_entity).ok()) {
+                    (Some(a), Some(b)) => a == b,
+                    _ => true,
+                },
+            )
+            .is_some();
+        match (hit, has_grounded) {
+            (true, false) => {
+                commands.entity(entity).insert(IsGrounded);
+            }
+            (false, true) => {
+                commands.entity(entity).remove::<IsGrounded>();
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Update character facing direction based on movement input.

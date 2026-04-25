@@ -17,7 +17,14 @@ impl Plugin for ClientGameplayPlugin {
         let ready = in_state(AppState::Ready);
         app.add_systems(Startup, init_default_vox_model_material);
         app.add_systems(Update, handle_new_character);
-        app.add_systems(FixedUpdate, handle_character_movement);
+        // detect_grounded must run before handle_character_movement and
+        // ability_activation so the IsGrounded gate sees fresh state.
+        app.add_systems(
+            FixedUpdate,
+            (protocol::detect_grounded, handle_character_movement)
+                .chain()
+                .before(protocol::ability::ability_activation),
+        );
         app.add_systems(
             FixedPreUpdate,
             sync_camera_yaw_to_input.before(InputSystems::BufferClientInputs),

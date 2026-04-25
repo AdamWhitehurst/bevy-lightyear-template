@@ -128,3 +128,11 @@ impl Default for CharacterPhysicsBundle {
         }
     }
 }
+
+/// Local-only marker present when the character's ground ray cast hits.
+/// Toggled each FixedUpdate tick by `detect_grounded`. SparseSet storage avoids
+/// archetype churn during jumps. Not registered for replication or prediction —
+/// derived deterministically from already-replicated `Position` + colliders.
+#[derive(Component, Debug)]
+#[component(storage = "SparseSet")]
+pub struct IsGrounded;
