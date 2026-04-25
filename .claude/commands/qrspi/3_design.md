@@ -6,7 +6,7 @@ argument-hint: "doc/tasks/<id>/"
 
 # Design — Where Are We Going?
 
-Create a ~200-line design document that captures the current state, desired end state, design decisions, and patterns to follow. This is the **lowest-cost point for direction changes** — get alignment here before investing in detailed planning.
+Create a design document that captures the current state, desired end state, design decisions, and patterns to follow. This is the **lowest-cost point for direction changes** — get alignment here before investing in detailed planning. You are here to gather and propose solutions on which the human considers and possibly choose.
 
 ## Input
 
@@ -14,11 +14,9 @@ Read `$ARGUMENTS/task.md`, `$ARGUMENTS/questions.md`, and `$ARGUMENTS/research.m
 
 ## Process
 
-1. **Read all three artifacts fully.** `task.md` tells you what we're building. `research.md` tells you what exists. Ultrathink about how to achieve the goal of the task, given the research, before proceeding.
+1. **Read all three artifacts fully.** `task.md` tells you what we're building. `research.md` tells you what exists. Ultrathink about what form the solution should take, given the research, before proceeding.
 
-2. **Targeted exploration**: If the research revealed areas that need deeper investigation for design decisions, spawn **codebase-pattern-finder** or **codebase-analyzer** agents to examine specific patterns or approaches.
-
-3. **Present areas needing further research, if any, and wait for answers.** Before writing anything, attempt to identify information (about code, concepts, or otherwise) that the research does not adequately cover:
+2. **Present areas needing further research, if any, and wait for answers.** Before writing anything, attempt to identify information (about code, concepts, or otherwise) that the research does not adequately cover:
    - Attempt to identify areas from which planning would benefit
    - If any identified: Present research questions with reasoning why planning would benefit from the research
    - Wait for the user to respond
@@ -35,27 +33,45 @@ Read `$ARGUMENTS/task.md`, `$ARGUMENTS/questions.md`, and `$ARGUMENTS/research.m
 
    If anything is identified: Do NOT write the design document without user input.
 
-4. **Present open questions and wait for answers.** Before writing anything, you MUST:
-   - List 3-5 design questions that require human judgment
+3. **Present open questions and wait for answers.** Before writing anything, you MUST:
+   - Identify and isolate the key conceptual design decisions that must be made by the human
+   - Aim for ~2-5 decisions, but it depends on the scope
    - Present options with trade-offs for each, grounded in what the research found
    - Wait for the user to respond
 
    Example:
    ```
-   Before I write the design document, I need your input:
-
+   Before I write the design document, I need your input on the conceptual design:
+   These decisions define what we are building — including boundaries, interfaces, and major components. I will present options, but you choose the direction.
    **Q1: Data model approach**
-   The research shows two patterns in the codebase:
-   - Option A: [pattern from research.md] — used in [file:line], simpler but less flexible
-   - Option B: [pattern from research.md] — used in [file:line], more complex but extensible
-   Which fits this use case?
+   The research shows two patterns:
+   - Option A: ...
+   - Option B: ...
 
-   **Q2: ...**
+   Trade-offs:
+   - A: ...
+   - B: ...
+   Which direction should we take?
+
+   **Q2: System boundary definition**
+   ...
    ```
 
    Do NOT skip this step. Do NOT write the design document without user input.
 
-5. **Write `design.md`** (~200 lines) to the artifact directory:
+4. **Model the design**
+   - Design is not about writing or describing code
+   - Code may be referenced only as a way to illustrate or validate a concept
+   - Focus on:
+     - System boundaries
+     - Interfaces between components
+     - Responsibilities of each part
+   - Avoid:
+     - Function-level detail
+     - Implementation-specific logic
+     - Language-specific constructs unless they affect design constraints
+
+5. **Write a concise `design.md`** to the artifact directory:
 
    ```markdown
    # Design Discussion
@@ -91,11 +107,14 @@ Read `$ARGUMENTS/task.md`, `$ARGUMENTS/questions.md`, and `$ARGUMENTS/research.m
 
 ## Rules
 
-- ~200 lines max. This is a steering document, not a specification.
+- If you need deeper investigation of specific parts code for design decisions, spawn **codebase-pattern-finder** or **codebase-analyzer** agents to examine specific patterns or approaches.
 - Every pattern reference must cite `file:line` from the research.
-- You MUST ask questions and wait before writing. No exceptions.
+- You MUST ask questions and get approval on design designs and wait before writing. No exceptions.
 - "Patterns to Follow" is critical — call out both good and bad patterns found in the codebase.
 - "What We're NOT Doing" prevents scope creep downstream.
+- Keep the document concise. This is a steering document, not a specification.
+- When possible, present multiple candidate designs before convergence.
+- Prefer comparing clearly distinct approaches rather than minor variations.
 
 ## When to Go Back
 
