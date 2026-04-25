@@ -70,12 +70,7 @@ pub(crate) fn apply_on_hit_effects(
     on_hit: &OnHitEffects,
     victim: Entity,
     source_pos: Vec3,
-    target_query: &mut Query<(
-        &Position,
-        Option<&mut LinearVelocity>,
-        &mut Health,
-        Option<&Invulnerable>,
-    )>,
+    target_query: &mut Query<(&Position, Forces, &mut Health, Option<&Invulnerable>)>,
     shield_query: &mut Query<&mut ActiveShield>,
     buff_query: &Query<&ActiveBuffs>,
     rotation_query: &Query<&Rotation>,
@@ -111,7 +106,7 @@ pub(crate) fn apply_on_hit_effects(
                 target,
             } => {
                 let entity = resolve_on_hit_target(target, victim, on_hit);
-                if let Ok((target_pos, velocity, _, _)) = target_query.get_mut(entity) {
+                if let Ok((target_pos, mut forces, _, _)) = target_query.get_mut(entity) {
                     let world_force = resolve_force_frame(
                         *force,
                         frame,
@@ -121,11 +116,9 @@ pub(crate) fn apply_on_hit_effects(
                         entity,
                         rotation_query,
                     );
-                    if let Some(mut velocity) = velocity {
-                        velocity.0 += world_force;
-                    }
+                    forces.apply_linear_impulse(world_force);
                 } else {
-                    warn!("ApplyForce target {:?} not found", entity);
+                    warn!("ApplyForce target {:?} not a rigid body", entity);
                 }
             }
             AbilityEffect::Ability { id, target } => {

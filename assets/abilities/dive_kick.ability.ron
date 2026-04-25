@@ -7,6 +7,6 @@
     "protocol::ability::OnTickEffects": ([(tick: 0, effect: Melee())]),
     "protocol::ability::OnHitEffectDefs": ([
         Damage(amount: 14.0, target: Victim),
-        ApplyForce(force: (0.0, 0.5, 3.0), frame: RelativePosition, target: Victim),
+        ApplyForce(force: (0.0, 29.32, 175.92), frame: RelativePosition, target: Victim),
     ]),
 }

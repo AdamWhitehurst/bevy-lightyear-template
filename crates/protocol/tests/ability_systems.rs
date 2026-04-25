@@ -1064,6 +1064,27 @@ fn test_app_with_hit_detection() -> App {
     test_app()
 }
 
+/// Components required by avian's `Forces` `QueryData` so that the production
+/// `target_query` (which uses `Forces`) matches the test entity. `ComputedMass::new(1.0)`
+/// makes `apply_linear_impulse` produce velocity changes equal to the impulse.
+fn forces_components() -> (
+    avian3d::prelude::AngularVelocity,
+    avian3d::prelude::ComputedMass,
+    avian3d::prelude::ComputedAngularInertia,
+    avian3d::prelude::ComputedCenterOfMass,
+    avian3d::dynamics::integrator::VelocityIntegrationData,
+    avian3d::prelude::forces::AccumulatedLocalAcceleration,
+) {
+    (
+        avian3d::prelude::AngularVelocity::default(),
+        avian3d::prelude::ComputedMass::new(1.0),
+        avian3d::prelude::ComputedAngularInertia::default(),
+        avian3d::prelude::ComputedCenterOfMass(Vec3::ZERO),
+        avian3d::dynamics::integrator::VelocityIntegrationData::default(),
+        avian3d::prelude::forces::AccumulatedLocalAcceleration::default(),
+    )
+}
+
 fn spawn_target(world: &mut World, pos: Vec3) -> Entity {
     world
         .spawn((
@@ -1072,6 +1093,7 @@ fn spawn_target(world: &mut World, pos: Vec3) -> Entity {
             avian3d::prelude::Position(pos),
             avian3d::prelude::Rotation::default(),
             avian3d::prelude::LinearVelocity(Vec3::ZERO),
+            forces_components(),
             protocol::map::MapInstanceId::Overworld,
         ))
         .id()
@@ -1226,7 +1248,9 @@ fn shield_absorbs_damage() {
             Health::new(100.0),
             ActiveShield { remaining: 50.0 },
             avian3d::prelude::Position(Vec3::new(1.0, 0.0, 0.0)),
+            avian3d::prelude::Rotation::default(),
             avian3d::prelude::LinearVelocity(Vec3::ZERO),
+            forces_components(),
             protocol::map::MapInstanceId::Overworld,
         ))
         .id();
@@ -1316,7 +1340,9 @@ fn shield_overflow_damages_health() {
             Health::new(100.0),
             ActiveShield { remaining: 20.0 },
             avian3d::prelude::Position(Vec3::new(1.0, 0.0, 0.0)),
+            avian3d::prelude::Rotation::default(),
             avian3d::prelude::LinearVelocity(Vec3::ZERO),
+            forces_components(),
             protocol::map::MapInstanceId::Overworld,
         ))
         .id();

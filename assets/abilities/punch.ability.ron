@@ -4,7 +4,7 @@
     "protocol::ability::OnTickEffects": ([(tick: 1, effect: Melee())]),
     "protocol::ability::OnHitEffectDefs": ([
         Damage(amount: 5.0, target: Victim),
-        ApplyForce(force: (0.0, 0.9, 0.5), frame: RelativePosition, target: Victim),
+        ApplyForce(force: (0.0, 52.78, 29.32), frame: RelativePosition, target: Victim),
     ]),
     "protocol::ability::OnInputEffects": ([(action: Ability1, effect: Ability(id: "punch2", target: Caster))]),
 }

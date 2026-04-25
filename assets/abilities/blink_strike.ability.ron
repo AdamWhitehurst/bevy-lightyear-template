@@ -7,6 +7,6 @@
     ]),
     "protocol::ability::OnHitEffectDefs": ([
         Damage(amount: 18.0, target: Victim),
-        ApplyForce(force: (0.0, 1.2, 4.0), frame: RelativePosition, target: Victim),
+        ApplyForce(force: (0.0, 70.37, 234.56), frame: RelativePosition, target: Victim),
     ]),
 }

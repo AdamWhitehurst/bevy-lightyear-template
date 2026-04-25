@@ -4,6 +4,6 @@
     "protocol::ability::OnTickEffects": ([(tick: 0, effect: AreaOfEffect(radius: 7.0, duration_ticks: 6, target: Victim))]),
     "protocol::ability::OnHitEffectDefs": ([
         Damage(amount: 10.0, target: Victim),
-        ApplyForce(force: (0.0, 1.5, 8.0), frame: RelativePosition, target: Victim),
+        ApplyForce(force: (0.0, 87.96, 469.12), frame: RelativePosition, target: Victim),
     ]),
 }
