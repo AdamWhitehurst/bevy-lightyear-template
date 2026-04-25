@@ -70,7 +70,8 @@ pub(crate) fn apply_on_hit_effects(
     on_hit: &OnHitEffects,
     victim: Entity,
     source_pos: Vec3,
-    target_query: &mut Query<(&Position, Forces, &mut Health, Option<&Invulnerable>)>,
+    target_query: &mut Query<(&Position, &mut Health, Option<&Invulnerable>)>,
+    forces_query: &mut Query<Forces>,
     shield_query: &mut Query<&mut ActiveShield>,
     buff_query: &Query<&ActiveBuffs>,
     rotation_query: &Query<&Rotation>,
@@ -92,7 +93,7 @@ pub(crate) fn apply_on_hit_effects(
                     commands.entity(entity).remove::<ActiveShield>();
                 }
 
-                if let Ok((_, _, mut health, invulnerable)) = target_query.get_mut(entity) {
+                if let Ok((_, mut health, invulnerable)) = target_query.get_mut(entity) {
                     if invulnerable.is_none() && health.apply_damage(remaining_damage) {
                         death_events.write(DeathEvent { entity });
                     }
@@ -106,20 +107,25 @@ pub(crate) fn apply_on_hit_effects(
                 target,
             } => {
                 let entity = resolve_on_hit_target(target, victim, on_hit);
-                if let Ok((target_pos, mut forces, _, _)) = target_query.get_mut(entity) {
-                    let world_force = resolve_force_frame(
-                        *force,
-                        frame,
-                        source_pos,
-                        target_pos.0,
-                        on_hit.caster,
-                        entity,
-                        rotation_query,
-                    );
-                    forces.apply_linear_impulse(world_force);
-                } else {
-                    warn!("ApplyForce target {:?} not a rigid body", entity);
-                }
+                let Ok(target_pos) = target_query.get(entity).map(|(p, _, _)| p.0) else {
+                    warn!("ApplyForce target {:?} not found", entity);
+                    continue;
+                };
+                let Ok(mut forces) = forces_query.get_mut(entity) else {
+                    // Static / non-rigid-body targets (e.g. trees) take damage but
+                    // ignore knockback. Drop the impulse silently.
+                    continue;
+                };
+                let world_force = resolve_force_frame(
+                    *force,
+                    frame,
+                    source_pos,
+                    target_pos,
+                    on_hit.caster,
+                    entity,
+                    rotation_query,
+                );
+                forces.apply_linear_impulse(world_force);
             }
             AbilityEffect::Ability { id, target } => {
                 let target_entity = resolve_on_hit_target(target, victim, on_hit);
