@@ -87,7 +87,7 @@ pub(crate) fn spawn_sub_ability(
         ))
         .id();
 
-    apply_ability_archetype(commands, entity_id, asset, registry.clone());
+    apply_ability_archetype(commands, entity_id, asset, registry.clone(), Vec::new());
 
     if let Ok(controlled_by) = server_query.get(original_caster) {
         commands.entity(entity_id).insert((

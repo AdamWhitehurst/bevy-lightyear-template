@@ -1,11 +1,8 @@
-use super::loader::{
-    apply_ability_archetype, apply_ability_archetype_with_on_tick_override,
-    extract_conditional_effects, extract_on_tick_effects, extract_phases,
-};
+use super::loader::{apply_ability_archetype, extract_conditional_effects, extract_phases};
 use super::loading::DefaultAbilitySlots;
 use super::types::{
-    AbilityAsset, AbilityCooldowns, AbilityDefs, AbilityEffect, AbilityPhase, AbilityPhases,
-    AbilitySlots, ActiveAbility, Condition, OnHitEffectDefs, OnHitEffects, TickEffect,
+    AbilityAsset, AbilityCooldowns, AbilityDefs, AbilityPhase, AbilityPhases, AbilitySlots,
+    ActiveAbility, Condition, OnHitEffectDefs, OnHitEffects, TickEffect,
 };
 use crate::character::IsGrounded;
 use crate::{PlayerActions, PlayerId};
@@ -84,19 +81,22 @@ pub fn ability_activation(
             // the asset declares conditions but none match, refuse the cast: no
             // spawn, no cooldown consumption.
             let conditional = extract_conditional_effects(asset);
-            let matched: Vec<AbilityEffect> = if let Some(ce) = conditional {
+            let extra_tick_effects: Vec<TickEffect> = if let Some(ce) = conditional {
                 let grounded = grounded_query.contains(entity);
                 ce.0.iter()
                     .filter(|c| match c.condition {
                         Condition::Grounded => grounded,
                         Condition::Airborne => !grounded,
                     })
-                    .map(|c| c.effect.clone())
+                    .map(|c| TickEffect {
+                        tick: 0,
+                        effect: c.effect.clone(),
+                    })
                     .collect()
             } else {
                 Vec::new()
             };
-            if conditional.is_some() && matched.is_empty() {
+            if conditional.is_some() && extra_tick_effects.is_empty() {
                 trace!(
                     "Ability {:?} refused: no ConditionalEffects condition matched (entity {:?})",
                     ability_id,
@@ -131,21 +131,13 @@ pub fn ability_activation(
                 ))
                 .id();
 
-            if conditional.is_some() {
-                let mut on_tick = extract_on_tick_effects(asset).cloned().unwrap_or_default();
-                for effect in matched {
-                    on_tick.0.push(TickEffect { tick: 0, effect });
-                }
-                apply_ability_archetype_with_on_tick_override(
-                    &mut commands,
-                    entity_id,
-                    asset,
-                    registry.0.clone(),
-                    on_tick,
-                );
-            } else {
-                apply_ability_archetype(&mut commands, entity_id, asset, registry.0.clone());
-            }
+            apply_ability_archetype(
+                &mut commands,
+                entity_id,
+                asset,
+                registry.0.clone(),
+                extra_tick_effects,
+            );
 
             if let Ok(controlled_by) = server_query.get(entity) {
                 commands.entity(entity_id).insert((

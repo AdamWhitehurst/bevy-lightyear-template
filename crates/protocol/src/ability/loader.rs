@@ -1,4 +1,4 @@
-use super::types::{AbilityAsset, AbilityPhases, ConditionalEffects, OnTickEffects};
+use super::types::{AbilityAsset, AbilityPhases, ConditionalEffects, OnTickEffects, TickEffect};
 use bevy::asset::io::Reader;
 use bevy::asset::{AssetLoader, LoadContext};
 use bevy::ecs::reflect::ReflectComponent;
@@ -49,11 +49,16 @@ pub fn extract_on_tick_effects(asset: &AbilityAsset) -> Option<&OnTickEffects> {
 }
 
 /// Insert all reflected components from an `AbilityAsset` onto an entity.
+///
+/// `extra_tick_effects` is appended to the asset's `OnTickEffects` (or a new
+/// one if absent) and inserted as a typed overwrite after the reflected
+/// inserts. Empty for non-conditional callers.
 pub(crate) fn apply_ability_archetype(
     commands: &mut Commands,
     entity: Entity,
     asset: &AbilityAsset,
     registry: TypeRegistryArc,
+    extra_tick_effects: Vec<TickEffect>,
 ) {
     let components: Vec<Box<dyn PartialReflect>> = asset
         .components
@@ -81,51 +86,12 @@ pub(crate) fn apply_ability_archetype(
             reflect_component.insert(&mut entity_mut, component.as_ref(), &registry);
         }
     });
-}
 
-/// Like `apply_ability_archetype`, but replaces the asset's `OnTickEffects`
-/// component with `override_on_tick` during insertion. If the asset had no
-/// `OnTickEffects`, `override_on_tick` is inserted as a new component.
-pub(crate) fn apply_ability_archetype_with_on_tick_override(
-    commands: &mut Commands,
-    entity: Entity,
-    asset: &AbilityAsset,
-    registry: TypeRegistryArc,
-    override_on_tick: OnTickEffects,
-) {
-    let target_id = std::any::TypeId::of::<OnTickEffects>();
-    let mut components: Vec<Box<dyn PartialReflect>> = asset
-        .components
-        .iter()
-        .filter(|c| {
-            c.get_represented_type_info()
-                .map(|i| i.type_id() != target_id)
-                .unwrap_or(true)
-        })
-        .map(|c| {
-            c.reflect_clone()
-                .expect("ability component must be cloneable")
-                .into_partial_reflect()
-        })
-        .collect();
-    components.push(Box::new(override_on_tick).into_partial_reflect());
-
-    commands.queue(move |world: &mut World| {
-        let registry = registry.read();
-        let mut entity_mut = world.entity_mut(entity);
-        for component in &components {
-            let type_path = component.reflect_type_path();
-            let Some(registration) = registry.get_with_type_path(type_path) else {
-                warn!("Ability component type not registered: {type_path}");
-                continue;
-            };
-            let Some(reflect_component) = registration.data::<ReflectComponent>() else {
-                warn!("Type missing #[reflect(Component)]: {type_path}");
-                continue;
-            };
-            reflect_component.insert(&mut entity_mut, component.as_ref(), &registry);
-        }
-    });
+    if !extra_tick_effects.is_empty() {
+        let mut merged = extract_on_tick_effects(asset).cloned().unwrap_or_default();
+        merged.0.extend(extra_tick_effects);
+        commands.entity(entity).insert(merged);
+    }
 }
 
 /// Custom asset loader for `.ability.ron` files using reflect-based deserialization.
