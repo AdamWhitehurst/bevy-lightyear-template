@@ -4,46 +4,18 @@ use crate::PlayerActions;
 use avian3d::prelude::{forces::ForcesItem, *};
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::ActionState;
-/// Apply movement based on input direction and jump flag.
-/// Movement uses acceleration-based physics with ground detection for jumping.
+/// Apply horizontal acceleration based on movement input.
+/// Jump is now handled by the data-defined `jump` ability.
 pub fn apply_movement(
-    entity: Entity,
     mass: &ComputedMass,
     delta_secs: f32,
-    spatial_query: &SpatialQuery,
     action_state: &ActionState<PlayerActions>,
-    position: &Position,
     forces: &mut ForcesItem,
-    player_map_id: Option<&MapInstanceId>,
-    map_ids: &Query<&MapInstanceId>,
 ) {
     const MAX_SPEED: f32 = 15.0;
     const MAX_ACCELERATION: f32 = 500.0;
 
     let max_velocity_delta_per_tick = MAX_ACCELERATION * delta_secs;
-
-    if action_state.just_pressed(&PlayerActions::Jump) {
-        let ray_cast_origin = position.0;
-
-        let filter = SpatialQueryFilter::from_excluded_entities([entity]);
-
-        if spatial_query
-            .cast_ray_predicate(
-                ray_cast_origin,
-                Dir3::NEG_Y,
-                4.0,
-                false,
-                &filter,
-                &|hit_entity| match (player_map_id, map_ids.get(hit_entity).ok()) {
-                    (Some(a), Some(b)) => a == b,
-                    _ => true,
-                },
-            )
-            .is_some()
-        {
-            forces.apply_linear_impulse(Vec3::new(0.0, 2000.0, 0.0));
-        }
-    }
 
     // Horizontal movement (camera-relative)
     let move_dir = action_state

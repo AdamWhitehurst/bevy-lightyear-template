@@ -1,0 +1,10 @@
+#![enable(implicit_some)]
+{
+    "protocol::ability::AbilityPhases": (startup: 0, active: 1, recovery: 0, cooldown: 0),
+    "protocol::ability::ConditionalEffects": ([
+        (
+            condition: Grounded,
+            effect: ApplyForce(force: (0.0, 2000.0, 0.0), frame: World, target: Caster),
+        ),
+    ]),
+}

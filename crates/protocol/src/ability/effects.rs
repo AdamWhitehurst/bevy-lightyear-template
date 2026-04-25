@@ -1,8 +1,8 @@
 use super::spawn::{spawn_aoe_hitbox, spawn_melee_hitbox, spawn_sub_ability};
 use super::types::{
     AbilityAsset, AbilityDefs, AbilityEffect, AbilityPhase, ActiveAbility, ActiveShield,
-    EffectTarget, OnEndEffects, OnHitEffects, OnInputEffects, OnTickEffects, ProjectileSpawnEffect,
-    WhileActiveEffects,
+    EffectTarget, ForceFrame, OnEndEffects, OnHitEffects, OnInputEffects, OnTickEffects,
+    ProjectileSpawnEffect, WhileActiveEffects,
 };
 use crate::map::MapInstanceId;
 use crate::{PlayerActions, PlayerId};
@@ -39,7 +39,10 @@ pub fn apply_on_tick_effects(
         &ActiveAbility,
         Option<&OnHitEffects>,
     )>,
-    mut caster_query: Query<(&mut Position, &Rotation, &MapInstanceId)>,
+    mut caster_set: ParamSet<(
+        Query<(&mut Position, &Rotation, &MapInstanceId)>,
+        Query<Forces>,
+    )>,
 ) {
     let tick = timeline.tick();
     for (entity, effects, active, on_hit_effects) in &query {
@@ -54,6 +57,7 @@ pub fn apply_on_tick_effects(
             }
             match &tick_effect.effect {
                 AbilityEffect::Melee { .. } => {
+                    let caster_query = caster_set.p0();
                     spawn_melee_hitbox(
                         &mut commands,
                         entity,
@@ -67,6 +71,7 @@ pub fn apply_on_tick_effects(
                     duration_ticks,
                     ..
                 } => {
+                    let caster_query = caster_set.p0();
                     spawn_aoe_hitbox(
                         &mut commands,
                         entity,
@@ -106,7 +111,7 @@ pub fn apply_on_tick_effects(
                     );
                 }
                 AbilityEffect::Teleport { distance } => {
-                    apply_teleport(&mut caster_query, active.caster, *distance);
+                    apply_teleport(&mut caster_set.p0(), active.caster, *distance);
                 }
                 AbilityEffect::Shield { absorb } => {
                     commands
@@ -128,12 +133,59 @@ pub fn apply_on_tick_effects(
                         tick,
                     );
                 }
+                AbilityEffect::ApplyForce {
+                    force,
+                    frame,
+                    target,
+                } => {
+                    let target_entity = resolve_caster_target(target, active);
+                    let rotation = caster_set
+                        .p0()
+                        .get(target_entity)
+                        .map(|(_, r, _)| r.0)
+                        .unwrap_or_default();
+                    apply_caster_force(
+                        &mut caster_set.p1(),
+                        target_entity,
+                        rotation,
+                        *force,
+                        frame,
+                    );
+                }
                 _ => {
                     warn!("Unhandled OnTick effect: {:?}", tick_effect.effect);
                 }
             }
         }
     }
+}
+
+/// Applies an impulse to a caster-target entity. `World` and rotation-derived
+/// frames are honored; position-relative frames have no meaning when caster ==
+/// target and fall back to the raw vector with a warning.
+fn apply_caster_force(
+    forces_query: &mut Query<Forces>,
+    target_entity: Entity,
+    rotation: Quat,
+    force: Vec3,
+    frame: &ForceFrame,
+) {
+    let world_force = match frame {
+        ForceFrame::World => force,
+        ForceFrame::Caster | ForceFrame::RelativeRotation => rotation * force,
+        ForceFrame::Victim | ForceFrame::RelativePosition => {
+            warn!(
+                "ApplyForce frame {:?} not meaningful for caster target",
+                frame
+            );
+            force
+        }
+    };
+    let Ok(mut forces) = forces_query.get_mut(target_entity) else {
+        warn!("ApplyForce target {:?} not a rigid body", target_entity);
+        return;
+    };
+    forces.apply_linear_impulse(world_force);
 }
 
 pub fn apply_while_active_effects(

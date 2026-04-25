@@ -6,6 +6,6 @@
         AbilityId("speed_burst"),
         AbilityId("ground_pound"),
         AbilityId("blink_strike"),
-        None,
+        AbilityId("jump"),
     )
 )

@@ -727,8 +727,8 @@ Same pruning. Note: Phase 2 added `detect_grounded` as a separate system that ow
 ### Verification
 
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test-native` passes
+- [x] `cargo check-all` passes
+- [x] `cargo test-native` passes
 
 #### Manual (user-driven — test with `cargo server` + `cargo client`)
 - [ ] Hold/tap Space on ground → repeated jumps with same arc and cadence as the pre-Phase-5 build (compare side by side).
