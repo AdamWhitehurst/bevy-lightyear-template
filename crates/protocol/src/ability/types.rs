@@ -174,14 +174,14 @@ impl AbilityDefs {
     }
 }
 
-/// Per-character ability loadout (up to 4 slots).
+/// Per-character ability loadout (up to 5 slots; slot 4 reserved for Jump).
 #[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize, Asset, TypePath)]
 #[type_path = "protocol::ability"]
-pub struct AbilitySlots(pub [Option<AbilityId>; 4]);
+pub struct AbilitySlots(pub [Option<AbilityId>; 5]);
 
 impl Default for AbilitySlots {
     fn default() -> Self {
-        Self([None, None, None, None])
+        Self([None, None, None, None, None])
     }
 }
 
@@ -218,13 +218,13 @@ impl MapEntities for ActiveAbility {
 /// Per-slot cooldown tracking.
 #[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AbilityCooldowns {
-    pub last_used: [Option<Tick>; 4],
+    pub last_used: [Option<Tick>; 5],
 }
 
 impl Default for AbilityCooldowns {
     fn default() -> Self {
         Self {
-            last_used: [None; 4],
+            last_used: [None; 5],
         }
     }
 }

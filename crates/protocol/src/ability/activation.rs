@@ -14,19 +14,20 @@ use lightyear::prelude::{
 };
 use tracy_client::Client as TracyClient;
 
-const ABILITY_ACTIONS: [PlayerActions; 4] = [
+const ABILITY_ACTIONS: [PlayerActions; 5] = [
     PlayerActions::Ability1,
     PlayerActions::Ability2,
     PlayerActions::Ability3,
     PlayerActions::Ability4,
+    PlayerActions::Jump,
 ];
 
-/// Maps a `PlayerActions` ability variant to a slot index (0-3).
+/// Maps a `PlayerActions` ability variant to a slot index (0-4).
 pub fn ability_action_to_slot(action: &PlayerActions) -> Option<usize> {
     ABILITY_ACTIONS.iter().position(|a| a == action)
 }
 
-/// Maps a slot index (0-3) to its corresponding `PlayerActions` variant.
+/// Maps a slot index (0-4) to its corresponding `PlayerActions` variant.
 pub fn slot_to_ability_action(slot: usize) -> Option<PlayerActions> {
     ABILITY_ACTIONS.get(slot).copied()
 }

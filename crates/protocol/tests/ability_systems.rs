@@ -338,6 +338,7 @@ fn punch_slots() -> AbilitySlots {
         Some(AbilityId("dash".into())),
         Some(AbilityId("fireball".into())),
         None,
+        None,
     ])
 }
 

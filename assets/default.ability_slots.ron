@@ -2,9 +2,10 @@
 
 (
     (
-        AbilityId("punch"), 
+        AbilityId("punch"),
         AbilityId("speed_burst"),
-        AbilityId("ground_pound"), 
-        AbilityId("blink_strike"), 
+        AbilityId("ground_pound"),
+        AbilityId("blink_strike"),
+        None,
     )
 )
