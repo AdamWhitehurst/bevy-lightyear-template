@@ -7,7 +7,7 @@ use super::effects::apply_on_hit_effects;
 use super::layers::MELEE_HITBOX_OFFSET;
 use crate::ability::{
     facing_direction, AbilityAsset, AbilityBulletOf, AbilityDefs, AbilityPhase, ActiveAbility,
-    ActiveBuffs, ActiveShield, HitTargets, HitboxOf, MeleeHitbox, OnHitEffects,
+    ActiveBuffs, ActiveShield, AoEHitbox, HitTargets, HitboxOf, MeleeHitbox, OnHitEffects,
 };
 use crate::{DeathEvent, Health, Invulnerable, PlayerId};
 
@@ -90,9 +90,11 @@ pub fn process_hitbox_hits(
 }
 
 /// Despawn hitbox entities when their parent ability leaves Active phase.
+/// AoE hitboxes are excluded — their lifetime is governed by `duration_ticks`
+/// via `aoe_hitbox_lifetime`, which can outlive the parent's Active phase.
 pub fn cleanup_hitbox_entities(
     mut commands: Commands,
-    hitbox_query: Query<(Entity, &HitboxOf)>,
+    hitbox_query: Query<(Entity, &HitboxOf), Without<AoEHitbox>>,
     ability_query: Query<&ActiveAbility>,
 ) {
     for (hitbox_entity, hitbox_of) in &hitbox_query {
