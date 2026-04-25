@@ -6,7 +6,7 @@ argument-hint: "doc/tasks/<id>/"
 
 # Structure — How Do We Get There?
 
-Create a ~2-page structure outline that breaks the design into **vertical slices** — each independently testable. Show the signatures, types, and phase boundaries — not the full implementation.
+Create a concise structure outline that breaks the design into **vertical slices** — each independently testable. Show the signatures, types, and phase boundaries — not the full implementation.
 
 ## Input
 
@@ -75,7 +75,7 @@ Read `$ARGUMENTS/design.md` and `$ARGUMENTS/research.md`.
 
 ## Rules
 
-- ~2 pages max. If it's longer, you're writing the plan, not the outline.
+- Be concise! This is an **outline**, not the full plan.
 - Vertical slices, not horizontal layers. Every phase must cross all relevant layers.
 - Signatures and types, not full implementation. Show WHAT changes, not HOW.
 - Each phase must have a verification checkpoint.
