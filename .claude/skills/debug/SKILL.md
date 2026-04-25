@@ -1,9 +1,9 @@
 ---
-name: debugger
-description: Systematic hypothesis-driven debugger for diagnosing root causes. Use when the user reports a bug, unexpected behavior, or runtime issue and wants structured investigation. Follows scientific method — propose hypothesis, instrument code to test it, validate or reject, iterate until root cause is found, then fix and clean up.
+name: debug
+description: Systematic hypothesis-driven debugging for diagnosing root causes. Use when the user reports a bug, unexpected behavior, or runtime issue and wants structured investigation. Propose hypothesis, instrument code to test it, validate or reject, iterate until root cause is found, then fix and clean up.
 ---
 
-# Debugger
+# Debug
 
 Systematic root-cause debugging via hypothesis testing. Never guess-and-check blindly — form a theory, instrument it, prove or disprove, repeat.
 
@@ -24,9 +24,7 @@ Before hypothesizing, collect raw facts:
    - **IMPORTANT**: Use the Read tool WITHOUT limit/offset parameters to read entire files
    - **CRITICAL**: Read these files yourself in the main context before spawning any sub-tasks
    - This ensures you have full context before decomposing the research
-2. **Always check this skill's documents (`.claude/skills/debugger/lessons/`) for lessons relating to the code producing the bug that you need to be aware of**
-    - Refer to the Lessons Index section for high-level overview of area-specific lessons documents
-3. **Analyze and decompose the problem**:
+2. **Analyze and decompose the problem**:
    - Check `git log --oneline -10` and `git diff` for recent changes
    - Check build output / runtime logs if available
    - Break down the user's explanation into composable research areas
@@ -35,7 +33,7 @@ Before hypothesizing, collect raw facts:
    - Create a research plan using TodoWrite to track all subtasks
    - Consider which directories, files, or architectural patterns are relevant
 
-3. **Spawn parallel sub-agent tasks for comprehensive research:**
+2. **Spawn parallel sub-agent tasks for comprehensive research:**
    - CRITICAL: After understanding the research question, you do NOT do the research yourself. You MUST spawn sub-agents to research different aspects of the question
    - Create multiple Task agents to research different aspects concurrently
    - We now have specialized agents that know how to do specific research tasks:
@@ -55,10 +53,6 @@ Before hypothesizing, collect raw facts:
    - Use the **codebase-pattern-finder** agent to find examples of existing patterns (without evaluating them)
 
    **IMPORTANT**: All agents are documentarians, not critics. They will describe what exists without suggesting improvements or identifying issues.
-
-   **For doc directory:**
-   - Use the **doc-locator** agent to discover what documents exist about the topic
-   - Use the **doc-analyzer** agent to extract key insights from specific documents (only the most relevant ones)
 
    **For web research:**
    - Use the **web-search-researcher** agent for external documentation and resources
@@ -82,18 +76,17 @@ Before hypothesizing, collect raw facts:
       - Example: codebase-analyzer (code details) + rust-engineer (Rust idioms)
    5. **Synthesize findings from all agents** into coherent research document
 
-4. **Wait for all sub-agents to complete and synthesize findings:**
+3. **Wait for all sub-agents to complete and synthesize findings:**
    - IMPORTANT: Wait for ALL sub-agent tasks to complete before proceeding
    - Compile all sub-agent results (both codebase and doc findings)
    - Prioritize live codebase findings as primary source of truth
    - Use doc/ findings as supplementary historical context
    - Connect findings across different components
    - Include specific file paths and line numbers for reference
-   - Verify all doc/ paths are correct (e.g., doc/allison/ not doc/ for personal files)
    - Highlight patterns, connections, and architectural decisions
    - Answer the user's specific questions with concrete evidence
 
-5. **Generate or Update research document:**
+4. **Generate or Update research document:**
    - Document all relevant findings
    - Use the metadata gathered in step 4
    - Structure the document with YAML frontmatter followed by content:
@@ -202,8 +195,6 @@ Instruct the user how to run the application and examine output:
 - State the confirmed root cause clearly
 - Proceed to Phase 6
 
-- **Always** Update files under this skill's directory (`.claude/skills/debugger/lessons`) with area-specific debugging lessons (e.g. `lessons/lightyear.md`, `lessons/avian.md`, `lessons/abilities.md`) **AND** this documents "Lessons Index" when adding new ones
-
 ### Phase 6: Fix
 
 Propose a fix using sequential IDs: **F1**, **F2**, **F3**, etc. Link to the hypothesis it addresses.
@@ -232,7 +223,6 @@ If fix doesn't work, the root cause hypothesis was incomplete — return to Phas
   - A footgun in the codebase architecture
   - A subtle interaction between systems
   - A pattern that will likely cause similar bug
-2. **Always** Add or update a file under this skill's directory (`.claude/skills/debugger/lessons`) with area-specific debugging lessons (e.g. `lessons/lightyear.md`, `lessons/tracy.md`) **AND** this documents "Lessons Index" when adding new ones
 
 Only save if genuinely useful for future conversations. Don't save routine fixes.
 
@@ -253,8 +243,3 @@ After fix is verified:
 - **Scope creep**: Fixing other issues discovered during debugging. Note them, stay focused on the reported bug.
 - **Premature fixing**: Proposing a fix before confirming root cause. Instrument first.
 - **Not checking for outdated dependencies or architecture**: When debugging a dependency, verify the actual version in use of a dependency. Architecture can change between major versions (e.g., lightyear 0.25 merged Predicted/Confirmed into one entity) **as well as through undocumented changes**. Check `Cargo.toml`, `git log`, and release notes and review the relevant code **before** building hypotheses.
-
-## Lessons Index
-
-- `lessons/lightyear.md` — Lightyear entity architecture, stuck inputs, tracy instrumentation
-- `lessons/voxel_engine.md` — ChunkWorkBudget starvation, gated system consumer starvation, lightyear room removal timing
