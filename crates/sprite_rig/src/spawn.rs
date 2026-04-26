@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use avian3d::prelude::{LinearVelocity, Position, Rotation};
+use avian3d::prelude::{Position, Rotation};
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageSampler, TextureAtlasBuilder};
 use bevy::light::NotShadowCaster;
@@ -662,19 +662,25 @@ fn topological_sort_bones(bones: &[crate::asset::BoneDef]) -> Vec<&crate::asset:
     sorted
 }
 
-/// Updates `Facing` based on horizontal velocity projected onto camera's right axis.
-pub fn update_facing_from_velocity(
+/// Updates `Facing` from the character's `Rotation` projected onto the camera's right axis.
+///
+/// `Rotation` is set by `update_facing` from input intent and persists when input is
+/// released, so `Facing` tracks gameplay intent rather than physics velocity. This avoids
+/// spurious flips from deceleration overshoot when the character comes to rest.
+pub fn update_facing_from_rotation(
     camera_query: Query<&Transform, With<Camera3d>>,
-    mut query: Query<(&mut Facing, &LinearVelocity), With<CharacterMarker>>,
+    mut query: Query<(&mut Facing, &Rotation), With<CharacterMarker>>,
 ) {
     let Ok(camera_transform) = camera_query.single() else {
+        trace!("Camera not yet spawned during early frames");
         return;
     };
     let camera_right = camera_transform.right().as_vec3();
     let camera_right_xz = Vec3::new(camera_right.x, 0.0, camera_right.z);
 
-    for (mut facing, velocity) in &mut query {
-        let lateral = velocity.dot(camera_right_xz);
+    for (mut facing, rotation) in &mut query {
+        let forward = rotation.0 * Vec3::NEG_Z;
+        let lateral = forward.dot(camera_right_xz);
         if lateral > 0.1 {
             facing.set_if_neq(Facing::Left);
         } else if lateral < -0.1 {

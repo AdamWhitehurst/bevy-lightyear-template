@@ -52,7 +52,7 @@ impl Plugin for SpriteRigPlugin {
                 animset::trigger_ability_animations,
                 animset::return_to_locomotion,
                 spawn::billboard_joint_roots,
-                spawn::update_facing_from_velocity,
+                spawn::update_facing_from_rotation,
                 spawn::apply_facing_to_rig,
                 shadow_twin::update_shadow_twins,
             )
