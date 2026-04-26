@@ -1,4 +1,2 @@
-// Re-export main functionality for testing
-pub mod network;
-pub use network::WebClientPlugin;
+pub use client_web_lightyear::WebClientPlugin;
 pub use protocol::*;

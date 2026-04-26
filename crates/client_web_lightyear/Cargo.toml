@@ -1,0 +1,9 @@
+[package]
+name = "client_web_lightyear"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = { workspace = true, default-features = true }
+client_lightyear = { workspace = true }
+protocol = { workspace = true }

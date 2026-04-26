@@ -2385,6 +2385,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "client_web_lightyear"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "client_lightyear",
+ "protocol",
+]
+
+[[package]]
 name = "cmake"
 version = "0.1.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8131,7 +8140,7 @@ dependencies = [
  "avian3d",
  "bevy",
  "client",
- "client_lightyear",
+ "client_web_lightyear",
  "console_error_panic_hook",
  "dev",
  "getrandom 0.2.16",

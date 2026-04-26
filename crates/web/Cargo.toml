@@ -39,7 +39,6 @@ bevy = { workspace = true, default-features = false, features = [
 lightyear = { workspace = true, features = [
     "client",
     "netcode",
-    "webtransport",
     "leafwing",
     "prediction",
     "replication",
@@ -47,7 +46,7 @@ lightyear = { workspace = true, features = [
 ] }
 protocol = { workspace = true }
 client = { path = "../client", default-features = false }
-client_lightyear = { workspace = true }
+client_web_lightyear = { workspace = true }
 render = { path = "../render" }
 ui = { path = "../ui" }
 dev = { path = "../dev" }

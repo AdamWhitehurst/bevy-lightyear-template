@@ -2,15 +2,13 @@ use bevy::prelude::*;
 use client::gameplay::ClientGameplayPlugin;
 use client::map::ClientMapPlugin;
 use client::transition::ClientTransitionPlugin;
+use client_web_lightyear::WebClientPlugin;
 use dev::DevPlugin;
 use lightyear::prelude::client::*;
 use protocol::*;
 use render::RenderPlugin;
 use std::time::Duration;
 use ui::{UiClientConfig, UiPlugin};
-
-pub mod network;
-use network::WebClientPlugin;
 
 fn main() {
     #[cfg(target_family = "wasm")]

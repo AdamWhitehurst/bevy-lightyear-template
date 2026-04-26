@@ -909,12 +909,12 @@ Add to `[workspace.dependencies]`: `client_web_lightyear = { path = "crates/clie
 ### Verification
 
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test-native` passes
-- [ ] `cargo web-build` (or `cargo web` build phase) succeeds
-- [ ] `grep -rn 'mod network' crates/web/src/` returns nothing
-- [ ] `grep -rn 'ClientTransport\|ServerTransport\|UdpIo\|WebSocketServerIo\|CrossbeamIo' crates/` returns nothing
-- [ ] Final dependency check: `server` Cargo.toml has no `client*`/`web*` production dep; `web` does not depend on `server*`
+- [x] `cargo check-all` passes
+- [x] `cargo test-native` passes
+- [x] `cargo web-build` (or `cargo web` build phase) succeeds
+- [x] `grep -rn 'mod network' crates/web/src/` returns nothing
+- [x] `grep -rn 'ClientTransport\|ServerTransport\|UdpIo\|WebSocketServerIo\|CrossbeamIo' crates/` returns nothing
+- [x] Final dependency check: `server` Cargo.toml has no `client*`/`web*` production dep; `web` does not depend on `server*`
 
 #### Manual
 - [ ] `cargo web` serves; browser connects to running `cargo server`; gameplay works
