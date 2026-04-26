@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use client::gameplay::ClientGameplayPlugin;
 use client::map::ClientMapPlugin;
+use client::transition::ClientTransitionPlugin;
 use dev::DevPlugin;
 use lightyear::prelude::client::*;
 use protocol::*;
@@ -36,6 +37,7 @@ fn main() {
         })
         .add_plugins(ClientGameplayPlugin)
         .add_plugins(ClientMapPlugin)
+        .add_plugins(ClientTransitionPlugin)
         .add_plugins(RenderPlugin)
         .add_plugins(UiPlugin)
         .add_plugins(DevPlugin)

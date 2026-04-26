@@ -28,7 +28,7 @@ use persistence::{PendingStoreOps, StoreBackend};
 /// All downstream systems check `has_time()` before doing work.
 #[derive(Component)]
 pub struct ChunkWorkBudget {
-    start: std::time::Instant,
+    start: bevy::platform::time::Instant,
     budget: std::time::Duration,
 }
 
@@ -48,7 +48,7 @@ const MAX_PENDING_REMESH_TASKS: usize = 512;
 
 impl ChunkWorkBudget {
     fn reset(&mut self) {
-        self.start = std::time::Instant::now();
+        self.start = bevy::platform::time::Instant::now();
     }
 
     /// Returns true if there is time remaining in the budget.
@@ -60,7 +60,7 @@ impl ChunkWorkBudget {
 impl Default for ChunkWorkBudget {
     fn default() -> Self {
         Self {
-            start: std::time::Instant::now(),
+            start: bevy::platform::time::Instant::now(),
             budget: std::time::Duration::from_millis(CHUNK_WORK_BUDGET_MS),
         }
     }

@@ -22,4 +22,5 @@ impl TerrainDefRegistry {
 
 /// Lists terrain IDs for WASM builds (where `load_folder` is unavailable).
 #[derive(Deserialize, Asset, TypePath)]
+#[serde(transparent)]
 pub struct TerrainManifest(pub Vec<String>);

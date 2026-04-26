@@ -160,6 +160,7 @@ impl AbilityPhases {
 
 /// Manifest listing ability IDs, used by WASM builds where `load_folder` is unavailable.
 #[derive(Clone, Debug, Serialize, Deserialize, Asset, TypePath)]
+#[serde(transparent)]
 pub struct AbilityManifest(pub Vec<String>);
 
 /// Resource holding loaded ability asset handles, keyed by `AbilityId`.
