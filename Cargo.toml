@@ -47,7 +47,6 @@ lightyear = { path = "git/lightyear/lightyear", features = [
   "leafwing",
   "raw_connection",
 ] }
-lightyear_crossbeam = { path = "git/lightyear/lightyear_crossbeam" }
 lightyear_replication = { path = "git/lightyear/lightyear_replication" }
 persistence = { path = "crates/persistence" }
 protocol = { path = "crates/protocol" }

@@ -4298,7 +4298,6 @@ dependencies = [
  "lightyear_avian3d",
  "lightyear_connection",
  "lightyear_core",
- "lightyear_crossbeam",
  "lightyear_frame_interpolation",
  "lightyear_inputs",
  "lightyear_inputs_bei",
@@ -4413,20 +4412,6 @@ dependencies = [
  "lightyear_serde",
  "lightyear_utils",
  "serde",
- "tracing",
-]
-
-[[package]]
-name = "lightyear_crossbeam"
-version = "0.26.4"
-dependencies = [
- "aeronet_io",
- "bevy_app",
- "bevy_ecs",
- "bytes",
- "crossbeam-channel",
- "lightyear_core",
- "lightyear_link",
  "tracing",
 ]
 
@@ -6911,7 +6896,6 @@ dependencies = [
  "client",
  "leafwing-input-manager",
  "lightyear",
- "lightyear_crossbeam",
  "mock_instant",
  "ndshape",
  "persistence",

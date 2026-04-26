@@ -17,8 +17,7 @@ tracy = ["bevy/trace_tracy", "voxel_map_engine/tracy", "tracy-client/enable"]
 bevy = { workspace = true, default-features = true, features = ["file_watcher"] }
 voxel_map_engine = { workspace = true }
 leafwing-input-manager = { workspace = true }
-lightyear = { workspace = true, features = ["server", "netcode", "udp", "webtransport", "websocket", "leafwing", "replication", "crossbeam" ] }
-lightyear_crossbeam = { workspace = true }
+lightyear = { workspace = true, features = ["server", "netcode", "udp", "webtransport", "websocket", "leafwing", "replication" ] }
 protocol = { workspace = true }
 anyhow = "1.0"
 persistence = { workspace = true }

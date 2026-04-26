@@ -43,8 +43,7 @@ fn test_server_started() {
     );
 }
 
-// NOTE: Full client-server connection test with crossbeam requires lightyear "test_utils" feature
-// and CrossbeamIo which is not available in standard lightyear features.
+// NOTE: Full client-server connection test requires lightyear "test_utils" feature.
 // For full integration testing, use the stepper pattern from lightyear_tests examples.
 #[test]
 fn test_client_server_connection() {

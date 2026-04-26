@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use lightyear::crossbeam::CrossbeamIo;
 use lightyear::netcode::Key;
 use lightyear::prelude::client::*;
 use lightyear::prelude::*;
@@ -17,8 +16,6 @@ pub enum ClientTransport {
     Udp,
     /// WebTransport (for web client)
     WebTransport { certificate_digest: String },
-    /// Crossbeam channels (for in-memory testing)
-    Crossbeam(CrossbeamIo),
 }
 
 impl Default for ClientTransport {
@@ -115,9 +112,6 @@ fn setup_client(mut commands: Commands, config: ClientNetworkConfig) {
         }
         ClientTransport::WebTransport { certificate_digest } => {
             entity_builder.insert(WebTransportClientIo { certificate_digest });
-        }
-        ClientTransport::Crossbeam(crossbeam_io) => {
-            entity_builder.insert(crossbeam_io);
         }
         #[cfg(target_family = "wasm")]
         ClientTransport::Udp => {

@@ -21,10 +21,6 @@ pub enum ServerTransport {
     WebTransport { port: u16 },
     /// WebSocket on specified port
     WebSocket { port: u16 },
-    /// Crossbeam channels (for in-memory testing)
-    Crossbeam {
-        io: lightyear_crossbeam::CrossbeamIo,
-    },
 }
 
 /// Configuration for server transports
@@ -188,22 +184,6 @@ fn start_server(mut commands: Commands, config: ServerNetworkConfig) {
                         .join("."),
                     port
                 );
-            }
-            ServerTransport::Crossbeam { io } => {
-                let server = commands
-                    .spawn((
-                        Name::new("Crossbeam Server"),
-                        Server::default(),
-                        NetcodeServer::new(server::NetcodeConfig {
-                            protocol_id: config.protocol_id,
-                            private_key: Key::from(config.private_key),
-                            ..default()
-                        }),
-                        io,
-                    ))
-                    .id();
-                commands.trigger(Start { entity: server });
-                info!("Crossbeam server started for testing");
             }
         }
     }
