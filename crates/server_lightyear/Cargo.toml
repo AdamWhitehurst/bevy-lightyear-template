@@ -1,0 +1,16 @@
+[package]
+name = "server_lightyear"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = { workspace = true, default-features = true }
+lightyear = { workspace = true, features = [
+    "server",
+    "netcode",
+    "webtransport",
+    "leafwing",
+    "replication",
+] }
+protocol = { workspace = true }
+async-compat = "0.2"

@@ -4,6 +4,7 @@ members = [
   "crates/client",
   "crates/client_lightyear",
   "crates/server",
+  "crates/server_lightyear",
   "crates/web",
   "crates/render",
   "crates/ui",
@@ -49,6 +50,7 @@ lightyear_replication = { path = "git/lightyear/lightyear_replication" }
 persistence = { path = "crates/persistence" }
 protocol = { path = "crates/protocol" }
 client_lightyear = { path = "crates/client_lightyear" }
+server_lightyear = { path = "crates/server_lightyear" }
 ron = "0.12"
 bevy_common_assets = { version = "0.15", features = ["ron"] }
 dot_vox = "5"

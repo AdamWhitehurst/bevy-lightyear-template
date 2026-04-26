@@ -17,11 +17,11 @@ tracy = ["bevy/trace_tracy", "voxel_map_engine/tracy", "tracy-client/enable"]
 bevy = { workspace = true, default-features = true, features = ["file_watcher"] }
 voxel_map_engine = { workspace = true }
 leafwing-input-manager = { workspace = true }
-lightyear = { workspace = true, features = ["server", "netcode", "webtransport", "leafwing", "replication" ] }
+lightyear = { workspace = true, features = ["server", "netcode", "leafwing", "replication" ] }
+server_lightyear = { workspace = true }
 protocol = { workspace = true }
 anyhow = "1.0"
 persistence = { workspace = true }
-async-compat = "0.2"
 avian3d = { workspace = true }
 bincode = "1.3"
 ron = { workspace = true }

@@ -801,10 +801,10 @@ Add to `[workspace.dependencies]`: `server_lightyear = { path = "crates/server_l
 ### Verification
 
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test-native` passes
-- [ ] `grep -rn 'mod network' crates/server/src/` returns nothing
-- [ ] `grep -rn 'WebTransportServerIo\|NetcodeServer::new\|load_pemfiles' crates/server/src/` returns nothing
+- [x] `cargo check-all` passes
+- [x] `cargo test-native` passes
+- [x] `grep -rn 'mod network' crates/server/src/` returns nothing
+- [x] `grep -rn 'WebTransportServerIo\|NetcodeServer::new\|load_pemfiles' crates/server/src/` returns nothing
 
 #### Manual
 - [ ] `cargo client` + `cargo server` connect; replication works (entity spawns visible from client)

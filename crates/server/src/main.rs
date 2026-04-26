@@ -2,7 +2,6 @@ pub mod chunk_entities;
 pub mod diagnostics;
 pub mod gameplay;
 pub mod map;
-pub mod network;
 pub mod persistence;
 pub mod transition;
 pub mod world_object;
@@ -11,9 +10,9 @@ use bevy::prelude::*;
 use diagnostics::ServerDiagnosticsPlugin;
 use gameplay::ServerGameplayPlugin;
 use map::ServerMapPlugin;
-use network::ServerNetworkPlugin;
 use protocol::diagnostics::SharedDiagnosticsPlugin;
 use protocol::*;
+use server_lightyear::{ServerNetworkConfig, ServerNetworkPlugin};
 use std::time::Duration;
 
 fn main() {
@@ -40,7 +39,15 @@ fn main() {
             tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
         })
         .add_plugins(SharedGameplayPlugin)
-        .add_plugins(ServerNetworkPlugin::default())
+        .add_plugins(ServerNetworkPlugin {
+            config: ServerNetworkConfig {
+                cert_pem_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../certificates/cert.pem")
+                    .into(),
+                key_pem_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../certificates/key.pem")
+                    .into(),
+                ..Default::default()
+            },
+        })
         .add_plugins(ServerGameplayPlugin)
         .add_plugins(ServerMapPlugin)
         .add_plugins(SharedDiagnosticsPlugin)
