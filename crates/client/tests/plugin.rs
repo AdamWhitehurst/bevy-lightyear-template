@@ -1,5 +1,5 @@
-use ::client::network::ClientNetworkPlugin;
 use bevy::prelude::*;
+use client_lightyear::ClientNetworkPlugin;
 use lightyear::prelude::client as lightyear_client;
 use lightyear::prelude::*;
 use lightyear_client::*;

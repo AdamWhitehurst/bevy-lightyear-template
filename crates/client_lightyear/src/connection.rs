@@ -1,14 +1,9 @@
 use bevy::prelude::*;
-use lightyear::netcode::Key;
 use lightyear::prelude::client::*;
 use lightyear::prelude::*;
-use lightyear::webtransport::client::WebTransportClientIo;
-use protocol::*;
+use protocol::{PRIVATE_KEY, PROTOCOL_ID};
 use std::net::SocketAddr;
 
-const CERTIFICATE_DIGEST: &str = include_str!("../../../certificates/digest.txt");
-
-/// Configuration for the client network plugin (WebTransport-only).
 #[derive(Clone, Resource)]
 pub struct ClientNetworkConfig {
     pub client_addr: SocketAddr,
@@ -28,7 +23,7 @@ impl Default for ClientNetworkConfig {
             client_id: 0,
             protocol_id: PROTOCOL_ID,
             private_key: PRIVATE_KEY,
-            certificate_digest: CERTIFICATE_DIGEST.trim().to_string(),
+            certificate_digest: String::new(),
             token_expire_secs: 30,
         }
     }
@@ -51,24 +46,16 @@ impl Plugin for ClientNetworkPlugin {
         let config = self.config.clone();
         app.insert_resource(config.clone());
         app.add_systems(Startup, move |commands: Commands| {
-            setup_client(commands, config.clone());
+            spawn_client_entity(commands, config.clone());
         });
         app.add_observer(on_connected);
         app.add_observer(on_disconnected);
     }
 }
 
-fn setup_client(mut commands: Commands, config: ClientNetworkConfig) {
-    let auth = Authentication::Manual {
-        server_addr: config.server_addr,
-        client_id: config.client_id,
-        private_key: Key::from(config.private_key),
-        protocol_id: config.protocol_id,
-    };
-    let netcode_config = NetcodeConfig {
-        token_expire_secs: config.token_expire_secs,
-        ..Default::default()
-    };
+fn spawn_client_entity(mut commands: Commands, config: ClientNetworkConfig) {
+    let netcode_client = crate::netcode::build_netcode_client(&config);
+    let webtransport_io = crate::webtransport::build_io(&config);
 
     commands.spawn((
         Name::new("Client"),
@@ -78,10 +65,8 @@ fn setup_client(mut commands: Commands, config: ClientNetworkConfig) {
         Link::new(None),
         ReplicationReceiver::default(),
         PredictionManager::default(),
-        NetcodeClient::new(auth, netcode_config).unwrap(),
-        WebTransportClientIo {
-            certificate_digest: config.certificate_digest,
-        },
+        netcode_client,
+        webtransport_io,
     ));
 }
 

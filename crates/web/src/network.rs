@@ -1,8 +1,7 @@
 use bevy::prelude::*;
+use client_lightyear::{ClientNetworkConfig, ClientNetworkPlugin};
 use protocol::*;
 use std::net::SocketAddr;
-
-pub use client::network::{ClientNetworkConfig, ClientNetworkPlugin};
 
 pub struct WebClientPlugin;
 

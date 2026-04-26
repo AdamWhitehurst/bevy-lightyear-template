@@ -13,7 +13,8 @@ avian3d = { workspace = true }
 bevy = { workspace = true, default-features = true }
 voxel_map_engine = { workspace = true }
 leafwing-input-manager = { workspace = true }
-lightyear = { workspace = true, features = ["client", "netcode", "webtransport", "leafwing", "prediction", "replication", "interpolation" ] }
+lightyear = { workspace = true, features = ["client", "netcode", "leafwing", "prediction", "replication", "interpolation" ] }
+client_lightyear = { workspace = true }
 protocol = { workspace = true }
 render = { path = "../render" }
 ui = { path = "../ui" }

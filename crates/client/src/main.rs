@@ -1,17 +1,16 @@
 pub mod diagnostics;
 pub mod gameplay;
 pub mod map;
-pub mod network;
 pub mod transition;
 pub mod world_object;
 
 use bevy::prelude::*;
+use client_lightyear::{ClientNetworkConfig, ClientNetworkPlugin};
 use dev::DevPlugin;
 use diagnostics::ClientDiagnosticsPlugin;
 use gameplay::ClientGameplayPlugin;
 use lightyear::prelude::client::*;
 use map::ClientMapPlugin;
-use network::{ClientNetworkConfig, ClientNetworkPlugin};
 use protocol::diagnostics::SharedDiagnosticsPlugin;
 use protocol::*;
 use render::RenderPlugin;
@@ -23,6 +22,9 @@ fn main() {
 
     let network_config = ClientNetworkConfig {
         client_id,
+        certificate_digest: include_str!("../../../certificates/digest.txt")
+            .trim()
+            .to_string(),
         ..Default::default()
     };
 

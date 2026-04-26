@@ -574,10 +574,10 @@ Add to `[workspace.dependencies]`: `client_lightyear = { path = "crates/client_l
 ### Verification
 
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test-native` passes
-- [ ] `grep -rn 'mod network' crates/client/src/` returns nothing
-- [ ] `grep -rn 'WebTransportClientIo\|NetcodeClient::new' crates/client/src/ crates/web/src/` returns nothing (these now live only in `client_lightyear`)
+- [x] `cargo check-all` passes
+- [x] `cargo test-native` passes
+- [x] `grep -rn 'mod network' crates/client/src/` returns nothing
+- [x] `grep -rn 'WebTransportClientIo\|NetcodeClient::new' crates/client/src/ crates/web/src/` returns nothing (these now live only in `client_lightyear`)
 
 #### Manual
 - [ ] `cargo client` connects to `cargo server`; gameplay works

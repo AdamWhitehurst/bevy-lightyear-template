@@ -2362,6 +2362,7 @@ dependencies = [
  "approx",
  "avian3d",
  "bevy",
+ "client_lightyear",
  "dev",
  "leafwing-input-manager",
  "lightyear",
@@ -2372,6 +2373,15 @@ dependencies = [
  "tracy-client",
  "ui",
  "voxel_map_engine",
+]
+
+[[package]]
+name = "client_lightyear"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "lightyear",
+ "protocol",
 ]
 
 [[package]]
@@ -8111,6 +8121,7 @@ dependencies = [
  "avian3d",
  "bevy",
  "client",
+ "client_lightyear",
  "console_error_panic_hook",
  "dev",
  "getrandom 0.2.16",

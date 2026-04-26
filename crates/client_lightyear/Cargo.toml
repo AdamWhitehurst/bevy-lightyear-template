@@ -1,0 +1,17 @@
+[package]
+name = "client_lightyear"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = { workspace = true, default-features = true }
+lightyear = { workspace = true, features = [
+    "client",
+    "netcode",
+    "webtransport",
+    "leafwing",
+    "prediction",
+    "replication",
+    "interpolation",
+] }
+protocol = { workspace = true }
