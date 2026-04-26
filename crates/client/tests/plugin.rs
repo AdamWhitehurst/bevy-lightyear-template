@@ -1,43 +1,9 @@
-use ::client::network::{ClientNetworkConfig, ClientNetworkPlugin};
+use ::client::network::ClientNetworkPlugin;
 use bevy::prelude::*;
 use lightyear::prelude::client as lightyear_client;
 use lightyear::prelude::*;
 use lightyear_client::*;
 use protocol::*;
-use std::net::SocketAddr;
-
-#[test]
-fn test_client_network_plugin_spawns_entity() {
-    let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.add_plugins(ClientPlugins::default());
-    app.add_plugins(ProtocolPlugin);
-
-    // Add plugin with custom config
-    let config = ClientNetworkConfig {
-        client_addr: SocketAddr::from(([0, 0, 0, 0], 0)),
-        server_addr: SocketAddr::from(([127, 0, 0, 1], 5050)),
-        transport: ::client::network::ClientTransport::Udp,
-        ..Default::default()
-    };
-    app.add_plugins(ClientNetworkPlugin {
-        config: config.clone(),
-    });
-
-    // Run startup systems
-    app.update();
-
-    // Verify client entity was spawned with correct components
-    let mut query = app
-        .world_mut()
-        .query::<(&Client, &NetcodeClient, &LocalAddr, &PeerAddr, &UdpIo)>();
-
-    let result = query.single(app.world());
-    assert!(result.is_ok(), "Client entity should exist");
-    let (_, _, local_addr, peer_addr, _) = result.unwrap();
-    assert_eq!(local_addr.0, config.client_addr);
-    assert_eq!(peer_addr.0, config.server_addr);
-}
 
 #[test]
 fn test_client_network_plugin_registers_observers() {

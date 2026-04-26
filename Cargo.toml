@@ -43,10 +43,7 @@ avian3d = { version = "0.5.0", default-features = false, features = [
 bevy = { version = "0.18", default-features = false }
 leafwing-input-manager = { git = "https://github.com/Leafwing-Studios/leafwing-input-manager.git" }
 voxel_map_engine = { path = "crates/voxel_map_engine" }
-lightyear = { path = "git/lightyear/lightyear", features = [
-  "leafwing",
-  "raw_connection",
-] }
+lightyear = { path = "git/lightyear/lightyear", features = ["leafwing"] }
 lightyear_replication = { path = "git/lightyear/lightyear_replication" }
 persistence = { path = "crates/persistence" }
 protocol = { path = "crates/protocol" }

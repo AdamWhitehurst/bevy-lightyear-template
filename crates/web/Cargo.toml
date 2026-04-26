@@ -40,7 +40,6 @@ lightyear = { workspace = true, features = [
     "client",
     "netcode",
     "webtransport",
-    "websocket",
     "leafwing",
     "prediction",
     "replication",

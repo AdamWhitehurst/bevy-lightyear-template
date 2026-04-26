@@ -330,9 +330,9 @@ pub use client::network::{ClientNetworkConfig, ClientNetworkPlugin};
 ### Verification
 
 #### Automated
-- [ ] `cargo check-all` passes
-- [ ] `cargo test-native` passes
-- [ ] `grep -rn 'ClientTransport\|ServerTransport\|UdpIo\|ServerUdpIo\|WebSocketServerIo' crates/` returns no hits
+- [x] `cargo check-all` passes
+- [x] `cargo test-native` passes
+- [x] `grep -rn 'ClientTransport\|ServerTransport\|UdpIo\|ServerUdpIo\|WebSocketServerIo' crates/` returns no hits
 
 #### Manual
 - [ ] `cargo client` + `cargo server` connect over WebTransport; gameplay works

@@ -6,27 +6,9 @@ use lightyear::webtransport::client::WebTransportClientIo;
 use protocol::*;
 use std::net::SocketAddr;
 
-/// Certificate digest loaded at compile time
 const CERTIFICATE_DIGEST: &str = include_str!("../../../certificates/digest.txt");
 
-/// Transport type for client
-#[derive(Clone)]
-pub enum ClientTransport {
-    /// UDP transport (default for native client)
-    Udp,
-    /// WebTransport (for web client)
-    WebTransport { certificate_digest: String },
-}
-
-impl Default for ClientTransport {
-    fn default() -> Self {
-        Self::WebTransport {
-            certificate_digest: CERTIFICATE_DIGEST.trim().to_string(),
-        }
-    }
-}
-
-/// Configuration for the client network plugin
+/// Configuration for the client network plugin (WebTransport-only).
 #[derive(Clone, Resource)]
 pub struct ClientNetworkConfig {
     pub client_addr: SocketAddr,
@@ -34,8 +16,7 @@ pub struct ClientNetworkConfig {
     pub client_id: u64,
     pub protocol_id: u64,
     pub private_key: [u8; 32],
-    pub transport: ClientTransport,
-    /// Token expiry in seconds. Default is 30 seconds.
+    pub certificate_digest: String,
     pub token_expire_secs: i32,
 }
 
@@ -47,13 +28,12 @@ impl Default for ClientNetworkConfig {
             client_id: 0,
             protocol_id: PROTOCOL_ID,
             private_key: PRIVATE_KEY,
-            transport: ClientTransport::default(),
+            certificate_digest: CERTIFICATE_DIGEST.trim().to_string(),
             token_expire_secs: 30,
         }
     }
 }
 
-/// Plugin that sets up client networking with lightyear
 pub struct ClientNetworkPlugin {
     pub config: ClientNetworkConfig,
 }
@@ -79,21 +59,18 @@ impl Plugin for ClientNetworkPlugin {
 }
 
 fn setup_client(mut commands: Commands, config: ClientNetworkConfig) {
-    // Create authentication
     let auth = Authentication::Manual {
         server_addr: config.server_addr,
         client_id: config.client_id,
         private_key: Key::from(config.private_key),
         protocol_id: config.protocol_id,
     };
-
     let netcode_config = NetcodeConfig {
         token_expire_secs: config.token_expire_secs,
         ..Default::default()
     };
 
-    // Base components (always present)
-    let mut entity_builder = commands.spawn((
+    commands.spawn((
         Name::new("Client"),
         Client::default(),
         LocalAddr(config.client_addr),
@@ -102,22 +79,10 @@ fn setup_client(mut commands: Commands, config: ClientNetworkConfig) {
         ReplicationReceiver::default(),
         PredictionManager::default(),
         NetcodeClient::new(auth, netcode_config).unwrap(),
+        WebTransportClientIo {
+            certificate_digest: config.certificate_digest,
+        },
     ));
-
-    // Add transport-specific component
-    match config.transport {
-        #[cfg(not(target_family = "wasm"))]
-        ClientTransport::Udp => {
-            entity_builder.insert(UdpIo::default());
-        }
-        ClientTransport::WebTransport { certificate_digest } => {
-            entity_builder.insert(WebTransportClientIo { certificate_digest });
-        }
-        #[cfg(target_family = "wasm")]
-        ClientTransport::Udp => {
-            panic!("UDP transport is not supported on WASM");
-        }
-    }
 }
 
 fn on_connected(trigger: On<Add, Connected>) {

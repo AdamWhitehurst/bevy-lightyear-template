@@ -5,29 +5,17 @@ use lightyear::netcode::{Key, NetcodeServer};
 use lightyear::prelude::server::*;
 use lightyear::prelude::*;
 use protocol::*;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 const CERT_PEM: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../certificates/cert.pem");
 const KEY_PEM: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../certificates/key.pem");
 const REPLICATION_INTERVAL: Duration = Duration::from_millis(100);
 
-/// Transport configuration for a server
-#[derive(Clone)]
-pub enum ServerTransport {
-    /// UDP transport on specified port
-    Udp { port: u16 },
-    /// WebTransport on specified port
-    WebTransport { port: u16 },
-    /// WebSocket on specified port
-    WebSocket { port: u16 },
-}
-
-/// Configuration for server transports
 #[derive(Clone, Resource)]
 pub struct ServerNetworkConfig {
-    pub transports: Vec<ServerTransport>,
-    pub bind_addr: [u8; 4],
+    pub bind_addr: IpAddr,
+    pub port: u16,
     pub protocol_id: u64,
     pub private_key: [u8; 32],
     pub replication_interval: Duration,
@@ -36,8 +24,8 @@ pub struct ServerNetworkConfig {
 impl Default for ServerNetworkConfig {
     fn default() -> Self {
         Self {
-            transports: vec![ServerTransport::WebTransport { port: 5001 }],
-            bind_addr: [0, 0, 0, 0],
+            bind_addr: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            port: 5001,
             protocol_id: PROTOCOL_ID,
             private_key: PRIVATE_KEY,
             replication_interval: REPLICATION_INTERVAL,
@@ -45,7 +33,6 @@ impl Default for ServerNetworkConfig {
     }
 }
 
-/// Plugin that sets up server networking with lightyear (UDP, WebTransport, WebSocket)
 pub struct ServerNetworkPlugin {
     pub config: ServerNetworkConfig,
 }
@@ -62,11 +49,9 @@ impl Plugin for ServerNetworkPlugin {
     fn build(&self, app: &mut App) {
         let config = self.config.clone();
         app.insert_resource(config.clone());
-
         app.register_required_components_with::<ClientOf, ReplicationSender>(|| {
             ReplicationSender::new(REPLICATION_INTERVAL, SendUpdatesMode::SinceLastAck, false)
         });
-
         app.add_systems(Startup, move |commands: Commands| {
             start_server(commands, config.clone());
         });
@@ -87,106 +72,28 @@ fn load_webtransport_identity() -> lightyear::webtransport::prelude::Identity {
 }
 
 fn start_server(mut commands: Commands, config: ServerNetworkConfig) {
-    info!("Starting multi-transport server...");
+    let wt_certificate = load_webtransport_identity();
+    let digest = wt_certificate.certificate_chain().as_slice()[0].hash();
+    info!("WebTransport certificate digest: {}", digest);
 
-    // Spawn servers for each transport
-    for transport in config.transports {
-        match transport {
-            ServerTransport::Udp { port } => {
-                let server = commands
-                    .spawn((
-                        Name::new("UDP Server"),
-                        Server::default(),
-                        NetcodeServer::new(server::NetcodeConfig {
-                            protocol_id: config.protocol_id,
-                            private_key: Key::from(config.private_key),
-                            ..default()
-                        }),
-                        LocalAddr(SocketAddr::from((config.bind_addr, port))),
-                        ServerUdpIo::default(),
-                    ))
-                    .id();
-                commands.trigger(Start { entity: server });
-                info!(
-                    "UDP server listening on {}:{}",
-                    config
-                        .bind_addr
-                        .iter()
-                        .map(|b| b.to_string())
-                        .collect::<Vec<_>>()
-                        .join("."),
-                    port
-                );
-            }
-            ServerTransport::WebTransport { port } => {
-                let wt_certificate = load_webtransport_identity();
-                let digest = wt_certificate.certificate_chain().as_slice()[0].hash();
-                info!("WebTransport certificate digest: {}", digest);
-
-                let server = commands
-                    .spawn((
-                        Name::new("WebTransport Server"),
-                        Server::default(),
-                        NetcodeServer::new(server::NetcodeConfig {
-                            protocol_id: config.protocol_id,
-                            private_key: Key::from(config.private_key),
-                            ..default()
-                        }),
-                        LocalAddr(SocketAddr::from((config.bind_addr, port))),
-                        WebTransportServerIo {
-                            certificate: wt_certificate,
-                        },
-                    ))
-                    .id();
-                commands.trigger(Start { entity: server });
-                info!(
-                    "WebTransport server listening on {}:{}",
-                    config
-                        .bind_addr
-                        .iter()
-                        .map(|b| b.to_string())
-                        .collect::<Vec<_>>()
-                        .join("."),
-                    port
-                );
-            }
-            ServerTransport::WebSocket { port } => {
-                let ws_config = lightyear::websocket::server::ServerConfig::builder()
-                    .with_bind_address(SocketAddr::from((config.bind_addr, port)))
-                    .with_identity(
-                        lightyear::websocket::server::Identity::self_signed(vec![
-                            "localhost".to_string(),
-                            "127.0.0.1".to_string(),
-                        ])
-                        .expect("Failed to generate WebSocket certificate"),
-                    );
-                let server = commands
-                    .spawn((
-                        Name::new("WebSocket Server"),
-                        Server::default(),
-                        NetcodeServer::new(server::NetcodeConfig {
-                            protocol_id: config.protocol_id,
-                            private_key: Key::from(config.private_key),
-                            ..default()
-                        }),
-                        LocalAddr(SocketAddr::from((config.bind_addr, port))),
-                        WebSocketServerIo { config: ws_config },
-                    ))
-                    .id();
-                commands.trigger(Start { entity: server });
-                info!(
-                    "WebSocket server listening on {}:{}",
-                    config
-                        .bind_addr
-                        .iter()
-                        .map(|b| b.to_string())
-                        .collect::<Vec<_>>()
-                        .join("."),
-                    port
-                );
-            }
-        }
-    }
-
-    info!("Server started successfully");
+    let server = commands
+        .spawn((
+            Name::new("WebTransport Server"),
+            Server::default(),
+            NetcodeServer::new(server::NetcodeConfig {
+                protocol_id: config.protocol_id,
+                private_key: Key::from(config.private_key),
+                ..default()
+            }),
+            LocalAddr(SocketAddr::from((config.bind_addr, config.port))),
+            WebTransportServerIo {
+                certificate: wt_certificate,
+            },
+        ))
+        .id();
+    commands.trigger(Start { entity: server });
+    info!(
+        "WebTransport server listening on {}:{}",
+        config.bind_addr, config.port
+    );
 }

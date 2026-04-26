@@ -7,4 +7,4 @@ pub mod world_object;
 pub use lightyear::netcode::{Key, NetcodeClient};
 pub use lightyear::prelude::client::NetcodeConfig;
 pub use lightyear::prelude::Authentication;
-pub use network::{ClientNetworkConfig, ClientTransport};
+pub use network::ClientNetworkConfig;
