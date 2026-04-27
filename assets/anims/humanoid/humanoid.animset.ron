@@ -10,6 +10,7 @@
     ),
     ability_animations: {
         "punch": "anims/humanoid/punch.anim.ron",
+        "punch2": "anims/humanoid/punch2.anim.ron",
         "ground_pound": "anims/humanoid/ground_pound.anim.ron",
     },
     hit_react: None,

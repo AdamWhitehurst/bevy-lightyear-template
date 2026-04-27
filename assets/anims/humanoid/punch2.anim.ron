@@ -1,0 +1,38 @@
+#![enable(implicit_some)]
+(
+    name: "punch2",
+    duration: 0.55,
+    looping: false,
+    bone_timelines: {
+        "torso": (
+            rotation: [
+                (time: 0.0, value: 0.0, curve: Linear),
+                (time: 0.3, value: -12.0, curve: Linear),
+                (time: 0.35, value: 12.0, curve: Linear),
+                (time: 0.55, value: 0.0, curve: Linear),
+                ],
+            translation: [],
+            scale: [],
+        ),
+        "arm_l": (
+            rotation: [
+                (time: 0.0, value: 0.0, curve: Linear),
+                (time: 0.25, value: 60.0, curve: Linear),
+                (time: 0.5, value: -60.0, curve: Linear),
+                (time: 0.55, value: 0.0, curve: Linear),
+            ],
+            translation: [
+                (time: 0.0,  value: (0.0, 0.0),    curve: Linear),
+                (time: 0.25, value: (1.0, 0.1),    curve: Linear),
+                (time: 0.3,  value: (1.5, -0.05), curve: Linear),
+                (time: 0.35, value: (-5.0, 0.0),   curve: Linear),
+                (time: 0.50, value: (-5.0, 0.0),    curve: Linear),
+                (time: 0.55, value: (0.0, 0.0),    curve: Linear),
+            ],
+            scale: [],
+        ),
+    },
+    events: [
+        (time: 0.1, name: "punch_whoosh"),
+    ],
+)
