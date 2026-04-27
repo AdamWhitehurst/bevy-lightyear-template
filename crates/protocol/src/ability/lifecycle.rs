@@ -1,7 +1,5 @@
 use super::types::{
-    AbilityBulletOf, AbilityPhases, AbilityProjectileSpawn, ActiveAbility, ActiveBuffs, AoEHitbox,
-    OnEndEffects, OnHitEffectDefs, OnHitEffects, OnInputEffects, OnTickEffects,
-    ProjectileSpawnEffect, WhileActiveEffects,
+    AbilityBulletOf, AbilityProjectileSpawn, ActiveAbility, ActiveBuffs, AoEHitbox,
 };
 use bevy::prelude::*;
 use lightyear::prelude::LocalTimeline;
@@ -23,19 +21,40 @@ pub fn expire_buffs(
     }
 }
 
-pub fn cleanup_effect_markers_on_removal(
+/// Despawn the entity whenever its `ActiveAbility` component is removed.
+///
+/// Two important paths trigger this:
+/// 1. **Lightyear rollback strip.** `prepare_rollback` iterates predicted/PreSpawned entities
+///    and removes any `SyncComponent` whose `PredictionHistory` has no entry at the rollback
+///    target tick. For an `ActiveAbility` spawned at T_press and a rollback to T_press-1,
+///    that strip leaves the entity alive but without its driving component — and replay's
+///    activation would then `commands.spawn(...)` a new one, leaving us with a duplicate.
+///    Despawning here makes the rollback semantically equivalent to "this cast didn't
+///    happen," so replay's spawn is the only one that exists afterward.
+/// 2. **Server rejecting a predicted cast.** Server's authoritative state at the rollback
+///    target tick may contain no `ActiveAbility` for this entity (player wasn't grounded,
+///    cooldown was actually still active server-side, etc.). The component is removed during
+///    rollback; the entity is despawned here. The predicted cast is fully rolled back.
+///
+/// On natural end-of-life (`prediction_despawn` at end of `Recovery`), `ActiveAbility` is
+/// NOT removed — the entity is tagged `PredictionDisable` and lingers until the server's
+/// confirmed despawn arrives. When that confirmed despawn finally removes the entity, all
+/// components (including `ActiveAbility`) come off in one shot; this observer's `try_despawn`
+/// then runs against an entity that's already being despawned and is a harmless no-op.
+///
+/// `HitboxOf`/`AbilityBulletOf` are `linked_spawn` relationships rooted at this entity,
+/// so this despawn cascades to clean up melee/AoE hitboxes and projectile bullets the cast
+/// produced. Those entities carry `DisableRollback` (their per-tick state isn't rolled back
+/// individually), but cascade-despawn via the parent is the right semantic for a
+/// rolled-back cast: hitboxes shouldn't keep applying damage from a cast the server
+/// overruled. If the cast is re-predicted at the same tick during replay, hitboxes are
+/// re-spawned by `apply_on_tick_effects` at the appropriate `active_offset`.
+pub fn despawn_active_ability_on_removal(
     trigger: On<Remove, ActiveAbility>,
     mut commands: Commands,
 ) {
     if let Ok(mut cmd) = commands.get_entity(trigger.entity) {
-        cmd.try_remove::<OnTickEffects>();
-        cmd.try_remove::<WhileActiveEffects>();
-        cmd.try_remove::<OnHitEffects>();
-        cmd.try_remove::<OnHitEffectDefs>();
-        cmd.try_remove::<OnEndEffects>();
-        cmd.try_remove::<OnInputEffects>();
-        cmd.try_remove::<ProjectileSpawnEffect>();
-        cmd.try_remove::<AbilityPhases>();
+        cmd.try_despawn();
     }
 }
 

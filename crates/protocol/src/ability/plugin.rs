@@ -3,7 +3,7 @@ use super::effects::{
     apply_on_end_effects, apply_on_input_effects, apply_on_tick_effects, apply_while_active_effects,
 };
 use super::lifecycle::{
-    ability_bullet_lifetime, aoe_hitbox_lifetime, cleanup_effect_markers_on_removal, expire_buffs,
+    ability_bullet_lifetime, aoe_hitbox_lifetime, despawn_active_ability_on_removal, expire_buffs,
 };
 use super::loader::AbilityAssetLoader;
 use super::loading::{
@@ -118,6 +118,6 @@ impl Plugin for AbilityPlugin {
         );
         app.add_systems(PreUpdate, handle_ability_projectile_spawn);
         app.add_observer(despawn_ability_projectile_spawn);
-        app.add_observer(cleanup_effect_markers_on_removal);
+        app.add_observer(despawn_active_ability_on_removal);
     }
 }
