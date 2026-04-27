@@ -10,8 +10,8 @@ use bevy::prelude::*;
 use leafwing_input_manager::prelude::ActionState;
 use lightyear::prelude::LocalTimeline;
 use lightyear::prelude::{
-    ControlledBy, NetworkTarget, PreSpawned, PredictionDespawnCommandsExt, PredictionTarget,
-    Replicate, Tick,
+    ControlledBy, NetworkTarget, PreSpawned, PredictionDespawnCommandsExt, PredictionDisable,
+    PredictionTarget, Replicate, Tick,
 };
 use tracy_client::Client as TracyClient;
 
@@ -49,6 +49,12 @@ pub fn ability_activation(
     )>,
     server_query: Query<&ControlledBy>,
     grounded_query: Query<(), With<IsGrounded>>,
+    // `Without<PredictionDisable>` filters out client-predicted corpses: lightyear's
+    // `prediction_despawn()` doesn't immediately remove a predicted entity, it tags it
+    // `PredictionDisable` and leaves it in the world until the server's confirmed despawn
+    // arrives. Without this filter the dedup check below would treat those tombstones as
+    // still-active abilities and silently reject every re-cast for the rollback window.
+    active_abilities: Query<&ActiveAbility, Without<PredictionDisable>>,
 ) {
     let tick = timeline.tick();
 
@@ -74,6 +80,25 @@ pub fn ability_activation(
                 continue;
             };
             if cooldowns.is_on_cooldown(slot_idx, tick, phases.cooldown) {
+                continue;
+            }
+
+            // Refuse re-cast while the same ability is still active on this caster.
+            // Cooldown alone isn't sufficient: any ability whose `cooldown` is shorter
+            // than its `startup + active + recovery` lifetime would otherwise allow a
+            // second `ActiveAbility` to spawn on top of the first, double-firing every
+            // gameplay effect (Melee, AoE hitboxes, projectiles, OnHit/OnTick effects).
+            // Skip with no cooldown consumption — matches the ConditionalEffects refusal.
+            if active_abilities
+                .iter()
+                .any(|a| a.caster == entity && &a.def_id == ability_id)
+            {
+                debug!(
+                    ?ability_id,
+                    caster = ?entity,
+                    slot = slot_idx,
+                    "ability re-cast ignored: already active on caster",
+                );
                 continue;
             }
 
