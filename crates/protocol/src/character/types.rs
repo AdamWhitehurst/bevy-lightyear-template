@@ -123,7 +123,7 @@ impl Default for CharacterPhysicsBundle {
             collider: Collider::capsule(CHARACTER_CAPSULE_RADIUS, CHARACTER_CAPSULE_HEIGHT),
             rigid_body: RigidBody::Dynamic,
             locked_axes: LockedAxes::ROTATION_LOCKED,
-            friction: Friction::default(),
+            friction: Friction::ZERO.with_combine_rule(CoefficientCombine::Min),
             collision_layers: character_collision_layers(),
         }
     }
