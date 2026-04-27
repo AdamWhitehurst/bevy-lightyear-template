@@ -2,6 +2,7 @@ use bevy::{
     animation::{AnimationEvent, AnimationEventTrigger},
     prelude::*,
 };
+use lightyear::prelude::PredictionDisable;
 use protocol::{ActiveAbility, CharacterMarker};
 
 use crate::animation::BuiltAnimGraphs;
@@ -185,22 +186,6 @@ pub fn trigger_ability_animations(
         };
 
         let ability_key = &ability.def_id.0;
-
-        // Reject re-trigger while a layer for this ability is already active on this
-        // caster. Two layer entries pointing at the same graph node would clobber each
-        // other's mask in `recompute_layer_masks` (one node, last write wins, freezing
-        // the override side). Gameplay-side a re-cast is a no-op while the ability is
-        // active, so the animation matches that — the first cast keeps playing.
-        if layers.entries.iter().any(|e| e.id == *ability_key) {
-            trace!(
-                ?ability_entity,
-                caster = ?ability.caster,
-                ability_id = %ability_key,
-                "skipping re-trigger; layer for this ability is already active",
-            );
-            continue;
-        }
-
         let Some(&pair) = built_graph.ability_nodes.get(ability_key) else {
             warn!(
                 ability_id = %ability_key,
@@ -214,31 +199,51 @@ pub fn trigger_ability_animations(
             continue;
         }
 
+        // Per-side handling: rebind an existing layer if one already targets this node
+        // (rollback re-fired `Added` for the same logical cast — keep the in-flight clip
+        // running, just point the layer at the new ability_entity), otherwise push fresh
+        // and start the clip.
         if pair.override_claims != 0 {
-            let priority = layers.next_override_priority();
-            layers.entries.push(AnimLayer {
-                id: ability_key.clone(),
-                node_index: pair.override_node,
-                claims: pair.override_claims,
-                priority,
-                mode: AnimLayerMode::Override,
-                source: AnimLayerSource::AbilityOverride { ability_entity },
-            });
-            let anim = player.play(pair.override_node);
-            anim.set_weight(1.0);
+            if let Some(existing) = layers
+                .entries
+                .iter_mut()
+                .find(|e| e.node_index == pair.override_node)
+            {
+                existing.source = AnimLayerSource::AbilityOverride { ability_entity };
+            } else {
+                let priority = layers.next_override_priority();
+                layers.entries.push(AnimLayer {
+                    id: ability_key.clone(),
+                    node_index: pair.override_node,
+                    claims: pair.override_claims,
+                    priority,
+                    mode: AnimLayerMode::Override,
+                    source: AnimLayerSource::AbilityOverride { ability_entity },
+                });
+                let anim = player.play(pair.override_node);
+                anim.set_weight(1.0);
+            }
         }
 
         if pair.additive_claims != 0 {
-            layers.entries.push(AnimLayer {
-                id: ability_key.clone(),
-                node_index: pair.additive_node,
-                claims: pair.additive_claims,
-                priority: 0,
-                mode: AnimLayerMode::Additive,
-                source: AnimLayerSource::AbilityAdditive { ability_entity },
-            });
-            let anim = player.play(pair.additive_node);
-            anim.set_weight(1.0);
+            if let Some(existing) = layers
+                .entries
+                .iter_mut()
+                .find(|e| e.node_index == pair.additive_node)
+            {
+                existing.source = AnimLayerSource::AbilityAdditive { ability_entity };
+            } else {
+                layers.entries.push(AnimLayer {
+                    id: ability_key.clone(),
+                    node_index: pair.additive_node,
+                    claims: pair.additive_claims,
+                    priority: 0,
+                    mode: AnimLayerMode::Additive,
+                    source: AnimLayerSource::AbilityAdditive { ability_entity },
+                });
+                let anim = player.play(pair.additive_node);
+                anim.set_weight(1.0);
+            }
         }
 
         if let Some(graph) = graph_assets.get_mut(&graph_handle.0) {
@@ -250,7 +255,13 @@ pub fn trigger_ability_animations(
 /// Drops layer entries whose ability clip has finished or whose `ActiveAbility` entity has
 /// been despawned, recomputes masks, and restarts any locomotion clips that stopped.
 pub fn cleanup_finished_ability_layers(
-    abilities: Query<(), With<ActiveAbility>>,
+    // `Without<PredictionDisable>` filter: lightyear's `prediction_despawn()` marks the
+    // entity disabled-but-not-yet-removed for the rollback window. Without this filter,
+    // a tombstoned ability looks alive to `abilities.get(...)` and the layer would never
+    // drop until the server's confirmed despawn arrives — much later than the clip ends.
+    // (The clip-finished branch still fires correctly; this matters mostly for rollback
+    // edge cases and any future ability whose clip outlasts its lifetime.)
+    abilities: Query<(), (With<ActiveAbility>, Without<PredictionDisable>)>,
     mut characters: Query<
         (
             &mut AnimationPlayer,

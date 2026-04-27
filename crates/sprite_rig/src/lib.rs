@@ -49,6 +49,13 @@ impl Plugin for SpriteRigPlugin {
                 animation::attach_animation_players,
                 animation::start_locomotion_blend,
                 animation::update_locomotion_blend_weights,
+                // Trigger runs BEFORE cleanup so that a replay-induced second `Added`
+                // for the same logical cast can REBIND the existing layer entry to the
+                // new `ability_entity` before cleanup looks at the (about-to-be-stale) old
+                // entity reference and would otherwise drop the layer entirely.
+                // The dedup-by-node-index inside trigger keeps the invariant "at most one
+                // layer per graph node," which means cleanup never sees two entries it
+                // would `player.stop` against the same node.
                 animset::trigger_ability_animations,
                 animset::cleanup_finished_ability_layers,
                 spawn::billboard_joint_roots,
