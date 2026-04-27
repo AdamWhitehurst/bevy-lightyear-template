@@ -5,6 +5,7 @@
     looping: false,
     bone_timelines: {
         "torso": (
+            blend_mode: Additive,
             rotation: [
                 (time: 0.0,   value: 0.0,   curve: Linear),
                 (time: 0.75,  value: -10.0, curve: Linear),
@@ -57,11 +58,36 @@
             scale: [],
         ),
         "root": (
+            blend_mode: Additive,
             rotation: [],
             translation: [
                 (time: 0.0,   value: (0.0,  0.0),  curve: Linear),
                 (time: 0.75,  value: (0.0,  0.35), curve: Linear),
                 (time: 0.875, value: (0.0, -0.35), curve: Linear),
+                (time: 1.375, value: (0.0,  0.0),  curve: Linear),
+                (time: 1.875, value: (0.0,  0.0),  curve: Linear),
+            ],
+            scale: [],
+        ),
+        "leg_l": (
+            blend_mode: Additive,
+            rotation: [],
+            translation: [
+                (time: 0.0,   value: (0.0,  0.0),  curve: Linear),
+                (time: 0.75,  value: (0.0, -0.35), curve: Linear),
+                (time: 0.875, value: (0.0,  0.35), curve: Linear),
+                (time: 1.375, value: (0.0,  0.0),  curve: Linear),
+                (time: 1.875, value: (0.0,  0.0),  curve: Linear),
+            ],
+            scale: [],
+        ),
+        "leg_r": (
+            blend_mode: Additive,
+            rotation: [],
+            translation: [
+                (time: 0.0,   value: (0.0,  0.0),  curve: Linear),
+                (time: 0.75,  value: (0.0, -0.35), curve: Linear),
+                (time: 0.875, value: (0.0,  0.35), curve: Linear),
                 (time: 1.375, value: (0.0,  0.0),  curve: Linear),
                 (time: 1.875, value: (0.0,  0.0),  curve: Linear),
             ],

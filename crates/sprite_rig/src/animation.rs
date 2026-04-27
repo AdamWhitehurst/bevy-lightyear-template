@@ -12,9 +12,25 @@ use crate::spawn::{AnimSetRef, BoneEntities};
 use crate::RigRegistry;
 use protocol::CharacterMarker;
 
-/// Maps `SpriteAnimAsset` ID to the derived `Handle<AnimationClip>`.
+/// Override + additive `AnimationClip` handles derived from a single source `.anim.ron`.
+///
+/// Bones in the source's `bone_timelines` are partitioned by `blend_mode`. The override
+/// clip carries curves for `Override` bones (plus hold-at-default fillers for unmentioned
+/// bones, used by locomotion blend normalization). The additive clip carries delta curves
+/// for `Additive` bones only. Both handles are always present; if a side has no bones in
+/// its partition, the underlying clip is empty (no curves) and the corresponding mask is
+/// 0, so trigger logic skips creating a layer entry for that side.
+#[derive(Clone)]
+pub struct BuiltClipPair {
+    pub override_clip: Handle<AnimationClip>,
+    pub additive_clip: Handle<AnimationClip>,
+    pub override_bones: AnimationMask,
+    pub additive_bones: AnimationMask,
+}
+
+/// Maps `SpriteAnimAsset` ID to the derived override + additive clip pair.
 #[derive(Resource, Default)]
-pub struct BuiltAnimations(pub HashMap<AssetId<SpriteAnimAsset>, Handle<AnimationClip>>);
+pub struct BuiltAnimations(pub HashMap<AssetId<SpriteAnimAsset>, BuiltClipPair>);
 
 /// Maps anim asset path string to its strong `Handle<SpriteAnimAsset>`.
 ///
@@ -45,15 +61,34 @@ pub struct AnimBoneDefaults(pub HashMap<AssetId<SpriteAnimAsset>, Vec<BoneAnimDe
 pub struct BuiltAnimGraph {
     /// Handle to the graph asset.
     pub graph_handle: Handle<AnimationGraph>,
-    /// Maps clip path string (locomotion) or ability ID to `AnimationNodeIndex`.
+    /// Maps locomotion clip path to its `AnimationNodeIndex` (under the locomotion blend).
     pub node_map: HashMap<String, AnimationNodeIndex>,
     /// Locomotion entries in order of speed_threshold.
     pub locomotion_entries: Vec<LocomotionNodeEntry>,
-    /// Index of the locomotion blend node, used for runtime mask toggling.
+    /// Index of the locomotion blend node; used as the locomotion layer's `node_index`.
     pub locomotion_blend_node: AnimationNodeIndex,
-    /// Per-ability mask of bones the ability animates (to apply to locomotion blend
-    /// during playback, masking those bones out of locomotion).
-    pub ability_bone_masks: HashMap<String, AnimationMask>,
+    /// Per-ability override + additive node indices and bone-claim masks.
+    pub ability_nodes: HashMap<String, AbilityNodePair>,
+    /// Mask covering every registered bone group; the locomotion layer claims all of them.
+    pub all_bones_mask: AnimationMask,
+}
+
+/// A single ability's override and additive graph nodes plus the bone-claim masks for each.
+///
+/// `override_claims` is the set of bones the ability writes in `Override` mode (zero if none);
+/// the override clip is parented to `base_blend` so it participates in the priority-mask
+/// chain alongside locomotion. `additive_claims` is the set of bones the ability writes in
+/// `Additive` mode (zero if none); the additive clip is parented directly to the master
+/// `Add` node so its delta contributions sum on top of whatever the override system wrote.
+///
+/// Either `override_claims` or `additive_claims` may be 0; trigger logic skips creating a
+/// layer entry for a side whose mask is empty.
+#[derive(Clone, Copy)]
+pub struct AbilityNodePair {
+    pub override_node: AnimationNodeIndex,
+    pub additive_node: AnimationNodeIndex,
+    pub override_claims: AnimationMask,
+    pub additive_claims: AnimationMask,
 }
 
 /// A locomotion clip node and its speed threshold for blend weight calculation.
@@ -169,11 +204,14 @@ fn collect_animset_clip_paths(animset: &SpriteAnimSetAsset) -> Vec<&str> {
     paths
 }
 
-/// Builds `AnimationClip` assets from loaded `SpriteAnimAsset` data.
+/// Builds override + additive `AnimationClip` pairs from loaded `SpriteAnimAsset` data.
 ///
-/// Uses a polling approach: iterates `LoadedAnimHandles` and builds clips for any
-/// source assets that are loaded but don't yet have a built clip. Also handles
-/// hot-reload via `AssetEvent::Modified`.
+/// Uses a polling approach: iterates `LoadedAnimHandles` and builds pairs for any source
+/// assets that don't yet have a built pair. Hot-reload via `AssetEvent::Modified` updates
+/// both clips in place, preserving handle identity so existing graph nodes keep working.
+///
+/// Hot-reload limitation: changing a bone's `blend_mode` after first build will not
+/// repartition the existing graph nodes' masks; restart the app to pick up mode changes.
 pub fn build_animation_clips(
     mut events: MessageReader<AssetEvent<SpriteAnimAsset>>,
     source_assets: Res<Assets<SpriteAnimAsset>>,
@@ -182,48 +220,95 @@ pub fn build_animation_clips(
     loaded_handles: Res<LoadedAnimHandles>,
     bone_defaults: Res<AnimBoneDefaults>,
 ) {
-    // Build clips for newly-available source assets (polling handles hot-reload timing)
+    // Build pairs for newly-available source assets (polling handles hot-reload timing).
     for (_path, anim_handle) in loaded_handles.0.iter() {
         let anim_id = anim_handle.id();
         if built.0.contains_key(&anim_id) {
-            continue; // already built
+            continue;
         }
         let Some(source) = source_assets.get(anim_id) else {
-            continue; // not loaded yet — expected during startup
+            continue;
         };
         let Some(bones) = bone_defaults.0.get(&anim_id) else {
-            continue; // rig bone defaults not resolved yet — expected during startup
+            continue;
         };
-        let clip = build_clip_from(source, bones);
-        let handle = clips.add(clip);
-        built.0.insert(anim_id, handle);
+        let (override_clip, additive_clip, override_bones, additive_bones) =
+            build_clip_pair(source, bones);
+        let pair = BuiltClipPair {
+            override_clip: clips.add(override_clip),
+            additive_clip: clips.add(additive_clip),
+            override_bones,
+            additive_bones,
+        };
+        built.0.insert(anim_id, pair);
     }
 
-    // Handle hot-reload: rebuild in-place when source asset is modified on disk
+    // Hot-reload: rebuild both clips in place when the source asset is modified on disk.
     for event in events.read() {
         if let AssetEvent::Modified { id } = event {
             let Some(source) = source_assets.get(*id) else {
-                continue; // asset removed between event and read — unlikely but harmless
+                continue;
             };
-            let Some(handle) = built.0.get(id) else {
-                continue; // not yet built — will be caught by polling above next frame
+            let Some(pair) = built.0.get(id) else {
+                continue;
             };
             let Some(bones) = bone_defaults.0.get(id) else {
-                continue; // rig bone defaults not resolved yet
+                continue;
             };
-            let new_clip = build_clip_from(source, bones);
-            let _ = clips.insert(handle.id(), new_clip);
+            let (override_clip, additive_clip, override_bones, additive_bones) =
+                build_clip_pair(source, bones);
+            if override_bones != pair.override_bones || additive_bones != pair.additive_bones {
+                warn!(
+                    asset_id = ?id,
+                    "bone blend_mode partition changed on hot-reload; mask updates require app restart",
+                );
+            }
+            let _ = clips.insert(pair.override_clip.id(), override_clip);
+            let _ = clips.insert(pair.additive_clip.id(), additive_clip);
         }
     }
 }
 
-/// Converts a `SpriteAnimAsset` into a Bevy `AnimationClip`.
-///
-/// Uses the rig's bone animation defaults to:
-/// 1. Convert offset-based translation keyframes to absolute positions with baked z-order
-/// 2. Auto-fill bones not mentioned in the animation with "hold at default" curves,
-///    ensuring every clip contributes to every bone for correct blend weighting
-fn build_clip_from(anim: &SpriteAnimAsset, bone_defaults: &[BoneAnimDefault]) -> AnimationClip {
+/// Converts a `SpriteAnimAsset` into an override + additive `AnimationClip` pair, plus the
+/// bone masks identifying which bones each side animates.
+fn build_clip_pair(
+    anim: &SpriteAnimAsset,
+    bone_defaults: &[BoneAnimDefault],
+) -> (AnimationClip, AnimationClip, AnimationMask, AnimationMask) {
+    let (override_bones, additive_bones) = partition_bones_by_mode(anim, bone_defaults);
+    let override_clip = build_override_clip(anim, bone_defaults);
+    let additive_clip = build_additive_clip(anim, bone_defaults);
+    (override_clip, additive_clip, override_bones, additive_bones)
+}
+
+/// Returns `(override_bones_mask, additive_bones_mask)` partitioning the source clip's
+/// animated bones by their declared `blend_mode`. Bone bit indices match the rig's
+/// `bone_defaults` order (identical to `register_bone_mask_groups`).
+fn partition_bones_by_mode(
+    anim: &SpriteAnimAsset,
+    bone_defaults: &[BoneAnimDefault],
+) -> (AnimationMask, AnimationMask) {
+    use crate::asset::BoneBlendMode;
+    let mut override_mask: AnimationMask = 0;
+    let mut additive_mask: AnimationMask = 0;
+    for (i, bone) in bone_defaults.iter().enumerate() {
+        if let Some(timeline) = anim.bone_timelines.get(&bone.name) {
+            let bit = 1u64 << i;
+            match timeline.blend_mode {
+                BoneBlendMode::Override => override_mask |= bit,
+                BoneBlendMode::Additive => additive_mask |= bit,
+            }
+        }
+    }
+    (override_mask, additive_mask)
+}
+
+/// Builds the override-mode clip: bones with `Override` blend mode get real curves with
+/// default + z baked in; bones not in that partition (including additive ones and bones
+/// not mentioned at all) get hold-at-default fillers so weighted blending stays correct
+/// when this clip lives inside a Bevy `Blend` node (locomotion, base_blend).
+fn build_override_clip(anim: &SpriteAnimAsset, bone_defaults: &[BoneAnimDefault]) -> AnimationClip {
+    use crate::asset::BoneBlendMode;
     let mut clip = AnimationClip::default();
     clip.set_duration(anim.duration);
 
@@ -231,31 +316,116 @@ fn build_clip_from(anim: &SpriteAnimAsset, bone_defaults: &[BoneAnimDefault]) ->
         let target_id =
             AnimationTargetId::from_names(std::iter::once(&Name::new(bone_default.name.clone())));
 
-        if let Some(timeline) = anim.bone_timelines.get(&bone_default.name) {
-            add_rotation_curve(&mut clip, target_id, timeline, anim.duration);
-            add_translation_curve(
-                &mut clip,
-                target_id,
-                timeline,
-                bone_default.default_xy,
-                bone_default.z_order,
-                anim.duration,
-            );
-            add_scale_curve(&mut clip, target_id, timeline);
-        } else {
-            add_hold_at_default_curves(
-                &mut clip,
-                target_id,
-                bone_default.default_xy,
-                bone_default.z_order,
-                anim.duration,
-            );
+        match anim.bone_timelines.get(&bone_default.name) {
+            Some(timeline) if matches!(timeline.blend_mode, BoneBlendMode::Override) => {
+                add_rotation_curve(&mut clip, target_id, timeline, anim.duration);
+                add_translation_curve(
+                    &mut clip,
+                    target_id,
+                    timeline,
+                    bone_default.default_xy,
+                    bone_default.z_order,
+                    anim.duration,
+                );
+                add_scale_curve(&mut clip, target_id, timeline);
+            }
+            _ => {
+                add_hold_at_default_curves(
+                    &mut clip,
+                    target_id,
+                    bone_default.default_xy,
+                    bone_default.z_order,
+                    anim.duration,
+                );
+            }
         }
     }
 
     crate::animset::add_events_to_clip(&mut clip, &anim.events);
 
     clip
+}
+
+/// Builds the additive-mode clip: bones with `Additive` blend mode get delta curves
+/// (no default offset, no z-order, identity-based rotation). Bones not in this partition
+/// receive no curves — under a Bevy `Add` parent, missing curves contribute nothing,
+/// which is the correct identity element for additive composition.
+///
+/// Events are intentionally omitted; they're attached to the override clip side only,
+/// which prevents double-firing since both clips share the same source duration.
+/// Scale curves are unsupported in additive mode and are dropped with a `warn!`.
+fn build_additive_clip(anim: &SpriteAnimAsset, bone_defaults: &[BoneAnimDefault]) -> AnimationClip {
+    use crate::asset::BoneBlendMode;
+    let mut clip = AnimationClip::default();
+    clip.set_duration(anim.duration);
+
+    for bone_default in bone_defaults {
+        let Some(timeline) = anim.bone_timelines.get(&bone_default.name) else {
+            continue;
+        };
+        if !matches!(timeline.blend_mode, BoneBlendMode::Additive) {
+            continue;
+        }
+
+        let target_id =
+            AnimationTargetId::from_names(std::iter::once(&Name::new(bone_default.name.clone())));
+        add_additive_rotation_curve(&mut clip, target_id, timeline);
+        add_additive_translation_curve(&mut clip, target_id, timeline);
+        if !timeline.scale.is_empty() {
+            warn!(
+                bone = %bone_default.name,
+                anim = %anim.name,
+                "scale curves are not supported in additive blend mode; dropped",
+            );
+        }
+    }
+
+    clip
+}
+
+/// Adds an additive rotation curve interpreting keyframe values as delta rotations.
+fn add_additive_rotation_curve(
+    clip: &mut AnimationClip,
+    target_id: AnimationTargetId,
+    timeline: &crate::asset::BoneTimeline,
+) {
+    if timeline.rotation.len() < 2 {
+        return;
+    }
+    let curve = UnevenSampleAutoCurve::new(
+        timeline
+            .rotation
+            .iter()
+            .map(|k| (k.time, Quat::from_rotation_z(k.value.to_radians()))),
+    )
+    .expect("Additive rotation timeline needs >= 2 keyframes");
+    clip.add_curve_to_target(
+        target_id,
+        AnimatableCurve::new(animated_field!(Transform::rotation), curve),
+    );
+}
+
+/// Adds an additive translation curve interpreting keyframe values as deltas (no default
+/// offset, no z-order — those are owned by the override layer underneath).
+fn add_additive_translation_curve(
+    clip: &mut AnimationClip,
+    target_id: AnimationTargetId,
+    timeline: &crate::asset::BoneTimeline,
+) {
+    if timeline.translation.len() < 2 {
+        return;
+    }
+    let curve = UnevenSampleAutoCurve::new(
+        timeline
+            .translation
+            .iter()
+            .map(|k| (k.time, Vec3::new(k.value.x, k.value.y, 0.0))),
+    )
+    .expect("Additive translation timeline needs >= 2 keyframes");
+    clip.add_curve_to_target(
+        target_id,
+        AnimatableCurve::new(animated_field!(Transform::translation), curve),
+    );
 }
 
 /// Adds identity rotation + default-position translation curves for bones not in the animation.
@@ -369,7 +539,6 @@ fn add_scale_curve(
 pub fn build_anim_graphs(
     registry: Res<RigRegistry>,
     animset_assets: Res<Assets<SpriteAnimSetAsset>>,
-    source_assets: Res<Assets<SpriteAnimAsset>>,
     built_anims: Res<BuiltAnimations>,
     loaded_handles: Res<LoadedAnimHandles>,
     bone_defaults: Res<AnimBoneDefaults>,
@@ -390,13 +559,8 @@ pub fn build_anim_graphs(
             continue; // clips not all built yet — expected during startup
         }
 
-        let built = build_graph_for_animset(
-            animset,
-            &*loaded_handles,
-            &*built_anims,
-            &*source_assets,
-            &*bone_defaults,
-        );
+        let built =
+            build_graph_for_animset(animset, &*loaded_handles, &*built_anims, &*bone_defaults);
         let graph_handle = graphs.add(built.0);
 
         built_graphs.0.insert(
@@ -406,7 +570,8 @@ pub fn build_anim_graphs(
                 node_map: built.1,
                 locomotion_entries: built.2,
                 locomotion_blend_node: built.3,
-                ability_bone_masks: built.4,
+                ability_nodes: built.4,
+                all_bones_mask: built.5,
             },
         );
     }
@@ -435,38 +600,68 @@ fn all_clips_built(
     })
 }
 
-/// Constructs an `AnimationGraph` with per-bone mask groups for body-region independence.
+/// Constructs the per-character animation graph. Topology:
 ///
-/// Each bone gets its own mask group (index = position in rig bone list). Ability clips
-/// are masked to only affect bones they explicitly define in `bone_timelines`. The returned
-/// `ability_bone_masks` maps ability_id → mask of bones the ability animates (used at
-/// runtime to mask those bones out of locomotion during ability playback).
+/// ```text
+/// graph.root (implicit Blend, weight 1.0)
+/// └── master_add (Add)
+///     ├── base_pose_blend (Blend) — resolves the absolute "override system" pose
+///     │   ├── locomotion_blend (Blend) — locomotion clips, runtime weight-blended by speed
+///     │   │   ├── idle, walk, run, …
+///     │   ├── ability_X_override_clip (with mask, weight 1.0)
+///     │   ├── ability_Y_override_clip (with mask, weight 1.0)
+///     │   └── …
+///     ├── ability_X_additive_clip (with mask, weight 1.0)
+///     ├── ability_Y_additive_clip (with mask, weight 1.0)
+///     └── …
+/// ```
+///
+/// `locomotion_blend` is kept as a separate inner Blend (its node_index is what's stored in
+/// `BuiltAnimGraph::locomotion_blend_node`) so that `recompute_layer_masks` mutating its
+/// mask only excludes locomotion clips from override-claimed bones — not the override
+/// ability clips that are siblings one level up under `base_pose_blend`. Earlier we tried
+/// flattening these into one Blend; that propagated the locomotion-layer mask to override
+/// ability clips and prevented them from writing their claimed bones (the reason "ability
+/// animations don't play at all" surfaced after Increment 2).
+///
+/// `master_add` (Bevy `Add`) sums children: `base_pose_blend`'s absolute pose (first child)
+/// plus each additive ability's delta. Without additives, master_add has one child and
+/// passes through unchanged.
 fn build_graph_for_animset(
     animset: &SpriteAnimSetAsset,
     loaded_handles: &LoadedAnimHandles,
     built_anims: &BuiltAnimations,
-    source_assets: &Assets<SpriteAnimAsset>,
     bone_defaults: &AnimBoneDefaults,
 ) -> (
     AnimationGraph,
     HashMap<String, AnimationNodeIndex>,
     Vec<LocomotionNodeEntry>,
     AnimationNodeIndex,
-    HashMap<String, AnimationMask>,
+    HashMap<String, AbilityNodePair>,
+    AnimationMask,
 ) {
     let mut graph = AnimationGraph::new();
     let mut node_map = HashMap::new();
     let mut locomotion_entries = Vec::new();
-    let mut ability_bone_masks = HashMap::new();
+    let mut ability_nodes = HashMap::new();
 
     let bone_names = resolve_bone_names(animset, loaded_handles, bone_defaults);
     register_bone_mask_groups(&mut graph, &bone_names);
+    let all_bones_mask = compute_all_bones_mask(bone_names.len());
 
-    let blend_node = graph.add_blend(1.0, graph.root);
+    let master_add = graph.add_additive_blend(1.0, graph.root);
+    let base_pose_blend = graph.add_blend(1.0, master_add);
+    let locomotion_blend = graph.add_blend(1.0, base_pose_blend);
 
     for loco_entry in &animset.locomotion.entries {
-        let clip_handle = resolve_clip_handle(&loco_entry.clip, loaded_handles, built_anims);
-        let node_idx = graph.add_clip(clip_handle, 1.0, blend_node);
+        let pair = resolve_clip_pair(&loco_entry.clip, loaded_handles, built_anims);
+        if pair.additive_bones != 0 {
+            warn!(
+                clip = %loco_entry.clip,
+                "locomotion clip declared additive bones; ignored — locomotion is override-only",
+            );
+        }
+        let node_idx = graph.add_clip(pair.override_clip.clone(), 1.0, locomotion_blend);
         node_map.insert(loco_entry.clip.clone(), node_idx);
         locomotion_entries.push(LocomotionNodeEntry {
             node_index: node_idx,
@@ -475,18 +670,40 @@ fn build_graph_for_animset(
     }
 
     for (ability_id, clip_path) in &animset.ability_animations {
-        let clip_handle = resolve_clip_handle(clip_path, loaded_handles, built_anims);
-        let unspecified_mask =
-            compute_unspecified_bone_mask(clip_path, loaded_handles, source_assets, &bone_names);
-        let specified_mask = !unspecified_mask;
-        let node_idx = graph.add_clip_with_mask(clip_handle, unspecified_mask, 1.0, graph.root);
-        node_map.insert(ability_id.clone(), node_idx);
-        ability_bone_masks.insert(ability_id.clone(), specified_mask);
+        let pair = resolve_clip_pair(clip_path, loaded_handles, built_anims);
+
+        // Override side: sibling of `locomotion_blend` under `base_pose_blend`.
+        let override_exclusion = (!pair.override_bones) & all_bones_mask;
+        let override_node = graph.add_clip_with_mask(
+            pair.override_clip.clone(),
+            override_exclusion,
+            1.0,
+            base_pose_blend,
+        );
+
+        // Additive side: direct child of `master_add`.
+        let additive_exclusion = (!pair.additive_bones) & all_bones_mask;
+        let additive_node = graph.add_clip_with_mask(
+            pair.additive_clip.clone(),
+            additive_exclusion,
+            1.0,
+            master_add,
+        );
+
+        ability_nodes.insert(
+            ability_id.clone(),
+            AbilityNodePair {
+                override_node,
+                additive_node,
+                override_claims: pair.override_bones,
+                additive_claims: pair.additive_bones,
+            },
+        );
     }
 
     if let Some(ref clip_path) = animset.hit_react {
-        let clip_handle = resolve_clip_handle(clip_path, loaded_handles, built_anims);
-        let node_idx = graph.add_clip(clip_handle, 1.0, graph.root);
+        let pair = resolve_clip_pair(clip_path, loaded_handles, built_anims);
+        let node_idx = graph.add_clip(pair.override_clip.clone(), 1.0, base_pose_blend);
         node_map.insert(clip_path.clone(), node_idx);
     }
 
@@ -494,9 +711,24 @@ fn build_graph_for_animset(
         graph,
         node_map,
         locomotion_entries,
-        blend_node,
-        ability_bone_masks,
+        locomotion_blend,
+        ability_nodes,
+        all_bones_mask,
     )
+}
+
+/// Returns a mask with the low `bone_count` bits set; bits above that correspond to no
+/// registered bone group and are kept 0 so logged masks stay clean.
+fn compute_all_bones_mask(bone_count: usize) -> AnimationMask {
+    debug_assert!(
+        bone_count <= 64,
+        "AnimationMask is u64: max 64 bones per rig, got {bone_count}",
+    );
+    if bone_count >= 64 {
+        AnimationMask::MAX
+    } else {
+        (1u64 << bone_count) - 1
+    }
 }
 
 /// Gets bone names from the first locomotion clip's bone defaults (all clips in an animset
@@ -531,39 +763,12 @@ fn register_bone_mask_groups(graph: &mut AnimationGraph, bone_names: &[String]) 
     }
 }
 
-/// Computes a mask of bones NOT specified in the ability clip's `bone_timelines`.
-///
-/// Bits set in the returned mask correspond to bones the ability does NOT animate,
-/// so the ability clip node won't affect those bones.
-fn compute_unspecified_bone_mask(
-    clip_path: &str,
-    loaded_handles: &LoadedAnimHandles,
-    source_assets: &Assets<SpriteAnimAsset>,
-    bone_names: &[String],
-) -> AnimationMask {
-    let handle = loaded_handles
-        .0
-        .get(clip_path)
-        .unwrap_or_else(|| panic!("LoadedAnimHandles missing entry for {clip_path}"));
-    let source = source_assets
-        .get(handle.id())
-        .unwrap_or_else(|| panic!("SpriteAnimAsset not loaded for {clip_path}"));
-
-    let mut mask: AnimationMask = 0;
-    for (i, name) in bone_names.iter().enumerate() {
-        if !source.bone_timelines.contains_key(name) {
-            mask |= 1 << i;
-        }
-    }
-    mask
-}
-
-/// Looks up a built `AnimationClip` handle by its source path.
-fn resolve_clip_handle(
+/// Looks up a `BuiltClipPair` (override + additive) by source-clip path.
+fn resolve_clip_pair(
     clip_path: &str,
     loaded_handles: &LoadedAnimHandles,
     built_anims: &BuiltAnimations,
-) -> Handle<AnimationClip> {
+) -> BuiltClipPair {
     let anim_handle = loaded_handles
         .0
         .get(clip_path)
@@ -575,7 +780,8 @@ fn resolve_clip_handle(
         .clone()
 }
 
-/// Attaches `AnimationPlayer`, `AnimationTarget`, and graph handle to characters with built graphs.
+/// Attaches `AnimationPlayer`, `AnimationTarget`, graph handle, and an empty
+/// `ActiveAnimLayers` stack to characters with built graphs.
 pub fn attach_animation_players(
     mut commands: Commands,
     characters: Query<
@@ -593,6 +799,7 @@ pub fn attach_animation_players(
         commands.entity(entity).insert((
             AnimationPlayer::default(),
             AnimationGraphHandle(built_graph.graph_handle.clone()),
+            crate::animset::ActiveAnimLayers::default(),
         ));
 
         for (bone_name, &bone_entity) in &bone_entities.0 {
@@ -605,13 +812,24 @@ pub fn attach_animation_players(
     }
 }
 
-/// Starts all locomotion clips on newly-added animation players and initializes blend weights.
+/// Starts all locomotion clips on newly-added animation players, initializes blend weights,
+/// and seeds `ActiveAnimLayers` with the permanent locomotion layer entry.
 pub fn start_locomotion_blend(
     mut commands: Commands,
-    mut query: Query<(Entity, &mut AnimationPlayer, &AnimSetRef), Added<AnimationPlayer>>,
+    mut query: Query<
+        (
+            Entity,
+            &mut AnimationPlayer,
+            &AnimSetRef,
+            &AnimationGraphHandle,
+            &mut crate::animset::ActiveAnimLayers,
+        ),
+        Added<AnimationPlayer>,
+    >,
     built_graphs: Res<BuiltAnimGraphs>,
+    mut graph_assets: ResMut<Assets<AnimationGraph>>,
 ) {
-    for (entity, mut player, animset_ref) in &mut query {
+    for (entity, mut player, animset_ref, graph_handle, mut layers) in &mut query {
         let built_graph = built_graphs
             .0
             .get(&animset_ref.0.id())
@@ -624,6 +842,18 @@ pub fn start_locomotion_blend(
             let anim = player.play(entry.node_index);
             anim.repeat();
             anim.set_weight(weight);
+        }
+
+        layers.entries.push(crate::animset::AnimLayer {
+            id: "locomotion".to_string(),
+            node_index: built_graph.locomotion_blend_node,
+            claims: built_graph.all_bones_mask,
+            priority: 0,
+            mode: crate::animset::AnimLayerMode::Override,
+            source: crate::animset::AnimLayerSource::Locomotion,
+        });
+        if let Some(graph) = graph_assets.get_mut(&graph_handle.0) {
+            crate::animset::recompute_layer_masks(&layers.entries, graph);
         }
 
         commands.entity(entity).insert(LocomotionBlendWeights {

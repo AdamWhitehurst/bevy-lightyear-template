@@ -50,7 +50,7 @@ impl Plugin for SpriteRigPlugin {
                 animation::start_locomotion_blend,
                 animation::update_locomotion_blend_weights,
                 animset::trigger_ability_animations,
-                animset::return_to_locomotion,
+                animset::cleanup_finished_ability_layers,
                 spawn::billboard_joint_roots,
                 spawn::update_facing_from_rotation,
                 spawn::apply_facing_to_rig,

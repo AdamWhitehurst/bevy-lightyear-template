@@ -79,11 +79,33 @@ pub struct SpriteAnimAsset {
 }
 
 /// Keyframe timelines for a single bone's transform channels.
+///
+/// `blend_mode` determines how the bone's curves combine with other layers writing the same
+/// bone. `Override` (the default) treats curves as absolute poses and fully drives the bone
+/// at this layer's priority; `Additive` treats curves as deltas from rest and sums on top of
+/// whatever lower-priority layers wrote. See `doc/bug/per_bone_blend_modes.md` for authoring
+/// rules.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct BoneTimeline {
+    #[serde(default)]
+    pub blend_mode: BoneBlendMode,
     pub rotation: Vec<RotationKeyframe>,
     pub translation: Vec<TranslationKeyframe>,
     pub scale: Vec<ScaleKeyframe>,
+}
+
+/// Per-bone choice of how this timeline combines with other layers' contributions.
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub enum BoneBlendMode {
+    /// Curves are absolute poses; this bone is wholly driven by this layer when active.
+    /// Lower-priority layers writing the same bone are masked out.
+    #[default]
+    Override,
+    /// Curves are deltas from rest pose; summed on top of whatever lower-priority layers
+    /// wrote. Translation curves are interpreted as offsets from `(0, 0, 0)`; rotation
+    /// curves as delta rotations (identity = no change). Scale is unsupported in this
+    /// mode and emits a warning at build time.
+    Additive,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
