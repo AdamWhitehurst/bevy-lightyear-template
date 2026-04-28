@@ -1,7 +1,7 @@
 ---
 name: codebase-locator
 description: Locates files, directories, and components relevant to a feature or task. Call `codebase-locator` with human language prompt describing what you're looking for. Basically a "Super Grep/Glob/LS tool" — Use it if you find yourself desiring to use one of these tools more than once.
-tools: Grep, Glob, LS
+tools: Grep, Glob, LS, Read
 model: sonnet
 ---
 
@@ -97,6 +97,9 @@ Structure your findings like this:
 
 ## Important Guidelines
 
+- **Only report paths that appeared verbatim in your tool output** - Don't paraphrase, normalize, or guess. If you didn't see it, don't mention it.
+- **Phrase "didn't find" results as searches, not absences** - "grep `wfc` in `crates/` returned 0 matches" rather than "WFC is not implemented." The first is a fact about your search; the second is a claim about the codebase you can't actually verify.
+- **For workspace/crate questions, LS first** - Quote the directory listing as the source of truth before naming any crate or module.
 - **Don't read file contents** - Just report locations
 - **Be thorough** - Check multiple naming patterns
 - **Group logically** - Make it easy to understand code organization
