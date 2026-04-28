@@ -16,7 +16,10 @@ The user provides a task description, ticket file path, or issue reference.
 
 1. **Read any provided files fully** before doing anything else.
 
-2. **Light codebase exploration**: Spawn a **codebase-locator** agent to find which areas of the codebase relate to the task. You need to know what exists to write good questions.
+2. **Light codebase and web exploration**:
+   - Spawn a **codebase-locator** agent to find which areas of the codebase relate to the task. You need to know what exists to write good questions.
+   - Spawn **web-search-researcher** agent to better understand any concepts in the task so you can include questions that lead to more insightful research. Examples: possible packages, patterns, best practices, prior art, and/or expert experience. You need to know what is possible to write good questions.
+
   - high-level architecture information you want to ask useful, relevant questions about how the task will affect architecture/system from a high level
 
 3. **Decompose into around 3-15 research questions**:
