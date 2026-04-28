@@ -17,6 +17,7 @@
   - [ ] new keys + ui
   - [ ] server discovery + ui
   - [ ] map ownership tied to nostr identities. Overworld = server's, Homebase = client's
+  - [ ] chat messaging, includes map id 
 - [ ] Nostr Node/Relay? May not be needed if can just use publicly available ones
 
 - [ ] Singleplayer
