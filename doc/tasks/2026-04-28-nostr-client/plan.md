@@ -1297,11 +1297,11 @@ pub client_id: u64,
 
 ### Verification
 #### Automated
-- [ ] `pgrep -af 'cargo (build|check|test|run)|wasm-pack test'` shows no other active build/test before running cargo commands.
-- [ ] `cargo check-all` passes.
-- [ ] `cargo test-native` passes.
-- [ ] `cargo test -p nostr_client announcement` covers event JSON parse, version rejection, and replacement by pubkey.
-- [ ] `cargo test -p ui ui_plugin` passes after `ServerList` UI dependency changes.
+- [x] `pgrep -af 'cargo (build|check|test|run)|wasm-pack test'` shows no other active build/test before running cargo commands.
+- [x] `cargo check-all` passes.
+- [x] `cargo test-native` passes.
+- [x] `cargo test -p nostr_client announcement` covers event JSON parse, version rejection, and replacement by pubkey.
+- [x] `cargo test -p ui ui_plugin` passes after `ServerList` UI dependency changes.
 
 #### Manual
 - [ ] Run `SERVER_NSEC=nsec1... RUST_LOG=nostr_client=debug cargo server-log`; wait for announcement publish.

@@ -1,6 +1,10 @@
 use bevy::prelude::*;
 use protocol::{IdentityLoadComplete, RelayPoolReady};
 
+use crate::announcement::{
+    poll_server_announcements, spawn_server_announcement_subscription,
+    ServerAnnouncementSubscriptionStarted, ServerList,
+};
 use crate::relay_pool::{poll_relay_pool_ready, shutdown_relay_pool, spawn_relay_pool};
 
 #[derive(Clone, Resource, Debug)]
@@ -55,8 +59,17 @@ impl Plugin for NostrClientPlugin {
         app.insert_resource(self.config.clone())
             .init_resource::<RelayPoolReady>()
             .init_resource::<IdentityLoadComplete>()
+            .init_resource::<ServerList>()
+            .init_resource::<ServerAnnouncementSubscriptionStarted>()
             .add_systems(Startup, (mark_identity_load_complete, spawn_relay_pool))
-            .add_systems(Update, poll_relay_pool_ready)
+            .add_systems(
+                Update,
+                (
+                    poll_relay_pool_ready,
+                    spawn_server_announcement_subscription,
+                    poll_server_announcements,
+                ),
+            )
             .add_systems(Last, shutdown_relay_pool);
     }
 }

@@ -38,6 +38,7 @@ fn main() {
     let ui_config = UiClientConfig {
         server_addr: network_config.server_addr,
         client_id: network_config.client_id,
+        certificate_digest: network_config.certificate_digest.clone(),
         protocol_id: network_config.protocol_id,
         private_key: network_config.private_key,
     };

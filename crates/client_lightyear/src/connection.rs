@@ -8,6 +8,8 @@ use std::net::SocketAddr;
 pub struct ClientNetworkConfig {
     pub client_addr: SocketAddr,
     pub server_addr: SocketAddr,
+    /// Lightyear netcode client id. The UI may replace this with a value derived
+    /// from the logged-in Nostr public key before `Connect` is triggered.
     pub client_id: u64,
     pub protocol_id: u64,
     pub private_key: [u8; 32],

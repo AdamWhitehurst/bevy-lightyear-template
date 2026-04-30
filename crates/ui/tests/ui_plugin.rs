@@ -4,7 +4,7 @@ use lightyear::prelude::client::*;
 use lightyear::prelude::{Controlled, PeerId, Predicted, RemoteId};
 use protocol::transition::ClientTransitionState;
 use protocol::*;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use ui::*;
 
 fn add_ui_test_plugin(app: &mut App) {
@@ -347,6 +347,50 @@ fn map_switch_button_label_shows_overworld_when_on_homebase() {
     assert_eq!(
         text.0, "Overworld",
         "Button should say 'Overworld' when player is on Homebase"
+    );
+}
+
+#[test]
+fn server_list_entry_sets_connection_config() {
+    let mut app = App::new();
+    add_ui_test_plugin(&mut app);
+    app.world_mut()
+        .spawn((Name::new("Test Client"), Client::default()));
+    let (identity, _) = nostr_client::generate_encrypted_identity("passphrase").unwrap();
+    let pubkey = identity.public;
+    app.insert_resource(identity);
+    app.world_mut()
+        .resource_mut::<nostr_client::announcement::ServerList>()
+        .entries
+        .push(nostr_client::announcement::ServerListEntry {
+            pubkey,
+            addr: "127.0.0.1:6001".parse().unwrap(),
+            cert_digest: "digest-from-announcement".to_string(),
+            display_name: "Listed Server".to_string(),
+            received_at: Instant::now(),
+        });
+    enter_main_menu(&mut app);
+    app.update();
+
+    let button = {
+        let mut query = app
+            .world_mut()
+            .query_filtered::<Entity, With<ServerListEntryButton>>();
+        query
+            .single(app.world())
+            .expect("ServerListEntryButton should exist")
+    };
+    app.world_mut()
+        .entity_mut(button)
+        .insert(Interaction::Pressed);
+    app.update();
+
+    let config = app.world().resource::<UiClientConfig>();
+    assert_eq!(config.server_addr, "127.0.0.1:6001".parse().unwrap());
+    assert_eq!(config.certificate_digest, "digest-from-announcement");
+    assert_eq!(
+        config.client_id,
+        nostr_client::client_id_from_public_key(&pubkey)
     );
 }
 

@@ -9,7 +9,8 @@ use bevy_ui_text_input::TextInputPlugin;
 pub use components::*;
 use lightyear::netcode::Key;
 use lightyear::prelude::{client::*, Controlled, Replicated};
-use lightyear::prelude::{Authentication, MessageSender, Predicted};
+use lightyear::prelude::{Authentication, MessageSender, PeerAddr, Predicted};
+use lightyear::webtransport::client::WebTransportClientIo;
 use nostr_client::{ClientIdentity, LoginError, StoredEncryptedIdentity};
 use protocol::map::{MapChannel, MapSwitchTarget, PlayerMapSwitchRequest};
 use protocol::{
@@ -25,6 +26,7 @@ use std::net::SocketAddr;
 pub struct UiClientConfig {
     pub server_addr: SocketAddr,
     pub client_id: u64,
+    pub certificate_digest: String,
     pub protocol_id: u64,
     pub private_key: [u8; 32],
 }
@@ -35,6 +37,7 @@ impl Default for UiClientConfig {
             server_addr: SocketAddr::from(([127, 0, 0, 1], 5001)),
             client_id: 0,
             protocol_id: PROTOCOL_ID,
+            certificate_digest: String::new(),
             private_key: PRIVATE_KEY,
         }
     }
@@ -50,6 +53,7 @@ impl Plugin for UiPlugin {
         app.add_plugins(TextInputPlugin);
         app.init_resource::<LoginError>();
         app.init_resource::<StoredEncryptedIdentity>();
+        app.init_resource::<nostr_client::announcement::ServerList>();
         app.add_message::<nostr_client::SaveEncryptedIdentity>();
 
         // Initialize state management
@@ -140,10 +144,14 @@ fn on_entering_connecting_state(
         protocol_id: config.protocol_id,
     };
 
-    // Insert fresh NetcodeClient (replaces old one, generates new token)
-    commands.entity(client_entity).insert(
+    // Insert fresh connection components so server-list selection can replace startup defaults.
+    commands.entity(client_entity).insert((
+        PeerAddr(config.server_addr),
         NetcodeClient::new(auth, NetcodeConfig::default()).expect("Failed to create NetcodeClient"),
-    );
+        WebTransportClientIo {
+            certificate_digest: config.certificate_digest.clone(),
+        },
+    ));
 
     commands.trigger(Connect {
         entity: client_entity,
@@ -187,7 +195,10 @@ fn on_client_connected(
     next_state.set(ClientState::InGame);
 }
 
-fn setup_main_menu(mut commands: Commands) {
+fn setup_main_menu(
+    mut commands: Commands,
+    server_list: Res<nostr_client::announcement::ServerList>,
+) {
     trace!("Setting up main menu UI");
 
     commands
@@ -215,6 +226,10 @@ fn setup_main_menu(mut commands: Commands) {
                 TextColor(Color::WHITE),
             ));
 
+            for entry in &server_list.entries {
+                let label = format!("{}\n{}\n{}", entry.display_name, entry.addr, entry.pubkey);
+                widgets::spawn_button(parent, &label, ServerListEntryButton(entry.clone()));
+            }
             // Connect Button
             parent
                 .spawn((
@@ -274,9 +289,30 @@ fn setup_main_menu(mut commands: Commands) {
 fn main_menu_button_interaction(
     mut next_state: ResMut<NextState<ClientState>>,
     mut exit_writer: MessageWriter<AppExit>,
+    mut config: ResMut<UiClientConfig>,
+    identity: Option<Res<ClientIdentity>>,
+    entry_query: Query<(&Interaction, &ServerListEntryButton), Changed<Interaction>>,
     connect_query: Query<&Interaction, (Changed<Interaction>, With<ConnectButton>)>,
     quit_query: Query<&Interaction, (Changed<Interaction>, With<QuitButton>)>,
 ) {
+    for (interaction, entry) in &entry_query {
+        if *interaction == Interaction::Pressed {
+            let identity = identity
+                .as_ref()
+                .expect("ClientIdentity must exist before server selection");
+            config.server_addr = entry.0.addr;
+            config.certificate_digest = entry.0.cert_digest.clone();
+            config.client_id = nostr_client::client_id_from_public_key(&identity.public);
+            info!(
+                pubkey = %identity.public,
+                server = %entry.0.pubkey,
+                addr = %entry.0.addr,
+                "selected Nostr server"
+            );
+            next_state.set(ClientState::Connecting);
+        }
+    }
+
     // Handle Connect button
     for interaction in connect_query.iter() {
         if *interaction == Interaction::Pressed {

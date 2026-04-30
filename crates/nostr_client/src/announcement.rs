@@ -1,9 +1,13 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Instant};
 
-use nostr_sdk::{Client, EventBuilder, Kind, Tag};
+use async_channel::Receiver;
+use bevy::{prelude::*, tasks::IoTaskPool};
+use nostr_sdk::{
+    Client, Event, EventBuilder, Filter, Kind, PublicKey, RelayMessage, RelayPoolNotification, Tag,
+};
 use serde::{Deserialize, Serialize};
 
-use crate::ServerIdentity;
+use crate::{relay_pool::RelayPool, ServerIdentity};
 
 pub const NOSTR_KIND_SERVER_ANNOUNCEMENT: u16 = 30078;
 pub const SERVER_ANNOUNCEMENT_VERSION: u32 = 1;
@@ -15,6 +19,26 @@ pub struct ServerAnnouncement {
     pub display_name: String,
     pub version: u32,
 }
+
+#[derive(Clone, Debug)]
+pub struct ServerListEntry {
+    pub pubkey: PublicKey,
+    pub addr: SocketAddr,
+    pub cert_digest: String,
+    pub display_name: String,
+    pub received_at: Instant,
+}
+
+#[derive(Resource, Default, Clone, Debug)]
+pub struct ServerList {
+    pub entries: Vec<ServerListEntry>,
+}
+
+#[derive(Resource)]
+pub struct ServerAnnouncementRx(pub Receiver<ServerListEntry>);
+
+#[derive(Resource, Default, Clone, Copy, Debug)]
+pub struct ServerAnnouncementSubscriptionStarted(pub bool);
 
 pub fn server_announcement_builder(
     announcement: &ServerAnnouncement,
@@ -48,6 +72,114 @@ pub async fn publish_server_announcement(
     Ok(event.id.to_string())
 }
 
+pub fn parse_server_announcement_event(event: &Event) -> Result<ServerListEntry, String> {
+    if event.kind != Kind::Custom(NOSTR_KIND_SERVER_ANNOUNCEMENT.into()) {
+        return Err(format!("unexpected announcement kind {}", event.kind));
+    }
+
+    let announcement: ServerAnnouncement = serde_json::from_str(&event.content)
+        .map_err(|error| format!("invalid announcement JSON: {error}"))?;
+    if announcement.version != SERVER_ANNOUNCEMENT_VERSION {
+        return Err(format!(
+            "unsupported announcement version {}",
+            announcement.version,
+        ));
+    }
+
+    Ok(ServerListEntry {
+        pubkey: event.pubkey,
+        addr: announcement.server_addr,
+        cert_digest: announcement.cert_digest,
+        display_name: announcement.display_name,
+        received_at: Instant::now(),
+    })
+}
+
+pub fn poll_server_announcements(
+    mut list: ResMut<ServerList>,
+    rx: Option<Res<ServerAnnouncementRx>>,
+) {
+    let Some(rx) = rx else {
+        trace!("poll_server_announcements: subscription receiver not ready");
+        return;
+    };
+
+    while let Ok(entry) = rx.0.try_recv() {
+        if let Some(existing) = list
+            .entries
+            .iter_mut()
+            .find(|existing| existing.pubkey == entry.pubkey)
+        {
+            *existing = entry;
+        } else {
+            list.entries.push(entry);
+        }
+    }
+}
+
+pub fn spawn_server_announcement_subscription(
+    mut commands: Commands,
+    mut started: ResMut<ServerAnnouncementSubscriptionStarted>,
+    pool: Option<Res<RelayPool>>,
+) {
+    if started.0 {
+        trace!("spawn_server_announcement_subscription: already started");
+        return;
+    }
+
+    let Some(pool) = pool else {
+        trace!("spawn_server_announcement_subscription: RelayPool not ready yet");
+        return;
+    };
+
+    started.0 = true;
+    let (tx, rx) = async_channel::unbounded();
+    commands.insert_resource(ServerAnnouncementRx(rx));
+
+    let client = pool.client.clone();
+    IoTaskPool::get()
+        .spawn(async move {
+            let mut notifications = client.notifications();
+            let filter = Filter::new().kind(Kind::Custom(NOSTR_KIND_SERVER_ANNOUNCEMENT.into()));
+            let subscription = client
+                .subscribe(filter, None)
+                .await
+                .expect("server announcement subscription must start");
+            let subscription_id = subscription.val;
+            debug!(%subscription_id, "started Nostr server announcement subscription");
+
+            loop {
+                match notifications.recv().await {
+                    Ok(RelayPoolNotification::Message {
+                        message:
+                            RelayMessage::Event {
+                                subscription_id: id,
+                                event,
+                            },
+                        ..
+                    }) if id.as_ref() == &subscription_id => {
+                        match parse_server_announcement_event(event.as_ref()) {
+                            Ok(entry) => {
+                                let _ = tx.send(entry).await;
+                            }
+                            Err(error) => warn!(%error, "ignored invalid server announcement"),
+                        }
+                    }
+                    Ok(RelayPoolNotification::Shutdown) => {
+                        debug!("Nostr relay pool shut down server announcement subscription");
+                        break;
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        warn!(%error, "Nostr server announcement subscription ended");
+                        break;
+                    }
+                }
+            }
+        })
+        .detach();
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
@@ -66,13 +198,17 @@ mod tests {
         }
     }
 
+    fn signed_event(keys: &Keys, announcement: &ServerAnnouncement) -> Event {
+        server_announcement_builder(announcement)
+            .unwrap()
+            .sign_with_keys(keys)
+            .unwrap()
+    }
+
     #[test]
     fn announcement_builder_signs_kind_content_and_identifier() {
         let keys = Keys::new(SecretKey::generate());
-        let event = server_announcement_builder(&announcement())
-            .unwrap()
-            .sign_with_keys(&keys)
-            .unwrap();
+        let event = signed_event(&keys, &announcement());
 
         assert_eq!(
             event.kind,
@@ -88,5 +224,66 @@ mod tests {
         assert_eq!(content.cert_digest, announcement().cert_digest);
         assert_eq!(content.display_name, announcement().display_name);
         assert_eq!(content.version, SERVER_ANNOUNCEMENT_VERSION);
+    }
+
+    #[test]
+    fn parse_server_announcement_event_extracts_entry() {
+        let keys = Keys::new(SecretKey::generate());
+        let event = signed_event(&keys, &announcement());
+
+        let entry = parse_server_announcement_event(&event).unwrap();
+
+        assert_eq!(entry.pubkey, keys.public_key());
+        assert_eq!(entry.addr, announcement().server_addr);
+        assert_eq!(entry.cert_digest, announcement().cert_digest);
+        assert_eq!(entry.display_name, announcement().display_name);
+    }
+
+    #[test]
+    fn parse_server_announcement_event_rejects_version_mismatch() {
+        let keys = Keys::new(SecretKey::generate());
+        let mut announcement = announcement();
+        announcement.version = SERVER_ANNOUNCEMENT_VERSION + 1;
+        let event = signed_event(&keys, &announcement);
+
+        let error = parse_server_announcement_event(&event).unwrap_err();
+
+        assert!(error.contains("unsupported announcement version"));
+    }
+
+    #[test]
+    fn poll_server_announcements_replaces_existing_pubkey_entry() {
+        let keys = Keys::new(SecretKey::generate());
+        let original =
+            parse_server_announcement_event(&signed_event(&keys, &announcement())).unwrap();
+        let mut updated_announcement = announcement();
+        updated_announcement.server_addr =
+            SocketAddr::from((IpAddr::V4(Ipv4Addr::LOCALHOST), 5002));
+        updated_announcement.display_name = "Updated Server".to_string();
+        let updated =
+            parse_server_announcement_event(&signed_event(&keys, &updated_announcement)).unwrap();
+        let other_keys = Keys::new(SecretKey::generate());
+        let other =
+            parse_server_announcement_event(&signed_event(&other_keys, &announcement())).unwrap();
+        let (tx, rx) = async_channel::unbounded();
+        tx.try_send(original).unwrap();
+        tx.try_send(other).unwrap();
+        tx.try_send(updated).unwrap();
+
+        let mut app = App::new();
+        app.init_resource::<ServerList>()
+            .insert_resource(ServerAnnouncementRx(rx))
+            .add_systems(Update, poll_server_announcements);
+        app.update();
+
+        let list = app.world().resource::<ServerList>();
+        assert_eq!(list.entries.len(), 2);
+        let entry = list
+            .entries
+            .iter()
+            .find(|entry| entry.pubkey == keys.public_key())
+            .unwrap();
+        assert_eq!(entry.addr, updated_announcement.server_addr);
+        assert_eq!(entry.display_name, updated_announcement.display_name);
     }
 }
