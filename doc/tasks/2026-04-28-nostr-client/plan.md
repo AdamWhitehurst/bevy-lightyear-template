@@ -279,6 +279,31 @@ fn check_assets_loaded(
 
 In Phase 1 only, set `IdentityLoadComplete(true)` by default in the Nostr plugin startup path so the new gate does not block until Phase 2 implements real identity loading.
 
+#### 6a. Client UI startup state gate
+**File**: `crates/ui/src/state.rs`  
+**Action**: modify
+
+`ClientState` must not default to an interactive state. Add a startup-only `Loading` state as the default so the UI cannot show `MainMenu`, connect, or enter `InGame` while global `AppState::Loading` is waiting on assets, relay EOSE, or identity load.
+
+```rust
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
+pub enum ClientState {
+    #[default]
+    Loading,
+    MainMenu,
+    Connecting,
+    InGame,
+}
+```
+
+**File**: `crates/ui/src/lib.rs`  
+**Action**: modify
+
+Add one startup bridge from global readiness into the UI state machine: when `AppState::Ready` is entered and `ClientState` is still `Loading`, transition to `ClientState::MainMenu`. Do not broadly gate unrelated UI systems on `AppState::Ready`; the single state transition owns the startup boundary.
+
+Also make `on_client_connected` transition to `InGame` only when the current `ClientState` is `Connecting`, so early network connections cannot bypass the startup gate.
+
+
 **File**: `crates/protocol/src/lib.rs`  
 **Action**: modify
 
@@ -361,9 +386,9 @@ use nostr_client::NostrClientPlugin;
 - [x] `RUST_LOG=nostr_client=debug cargo client-log` starts and logs relay setup plus an EOSE/readiness log before the `AppState::Ready` transition.
 
 #### Manual
-- [ ] Run `RUST_LOG=nostr_client=debug cargo client-log`; observe a Compat-spawned Nostr setup task, at least one relay EOSE/readiness message, then `AppState::Ready`.
-- [ ] Run `NOSTR_RELAYS=wss://does-not-exist.invalid RUST_LOG=nostr_client=debug cargo client-log`; observe the app stays in `Loading` and logs that it is waiting for Nostr relay EOSE.
-- [ ] Restore valid relays with `unset NOSTR_RELAYS` or valid `NOSTR_RELAYS=...`; observe startup progresses again.
+- [x] Run `RUST_LOG=nostr_client=debug cargo client-log`; observe a Compat-spawned Nostr setup task, at least one relay EOSE/readiness message, then `AppState::Ready`.
+- [x] Run `NOSTR_RELAYS=wss://does-not-exist.invalid RUST_LOG=nostr_client=debug cargo client-log`; observe the app stays in `Loading` and logs that it is waiting for Nostr relay EOSE.
+- [x] Restore valid relays with `unset NOSTR_RELAYS` or valid `NOSTR_RELAYS=...`; observe startup progresses again.
 
 ---
 
@@ -684,12 +709,15 @@ pub fn spawn_text_input<M: Component>(parent: &mut ChildSpawnerCommands, placeho
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
 pub enum ClientState {
     #[default]
+    Loading,
     Login,
     MainMenu,
     Connecting,
     InGame,
 }
 ```
+
+Phase 2 changes the `AppState::Ready` startup bridge added in Phase 1 from `Loading -> MainMenu` to `Loading -> Login`; `Loading` remains the only default initial client state.
 
 #### 9. Login and input marker components
 **File**: `crates/ui/src/components.rs`  

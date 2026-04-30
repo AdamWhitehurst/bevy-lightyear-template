@@ -59,6 +59,10 @@ impl Plugin for UiPlugin {
                 .run_if(resource_exists::<protocol::transition::ClientTransitionState>),
         );
 
+        app.add_systems(
+            OnEnter(protocol::AppState::Ready),
+            enter_main_menu_after_app_ready,
+        );
         // State transition systems
         app.add_systems(
             OnEnter(ClientState::Connecting),
@@ -97,6 +101,16 @@ impl Plugin for UiPlugin {
     }
 }
 
+fn enter_main_menu_after_app_ready(
+    current_state: Res<State<ClientState>>,
+    mut next_state: ResMut<NextState<ClientState>>,
+) {
+    if *current_state.get() == ClientState::Loading {
+        info!("Startup gates complete, entering main menu");
+        next_state.set(ClientState::MainMenu);
+    }
+}
+
 fn on_entering_connecting_state(
     mut commands: Commands,
     client_query: Query<Entity, With<Client>>,
@@ -128,17 +142,28 @@ fn on_client_disconnected(
     mut next_state: ResMut<NextState<ClientState>>,
     current_state: Res<State<ClientState>>,
 ) {
-    // Only transition if not already in MainMenu
-    if *current_state.get() != ClientState::MainMenu {
-        info!("Client disconnected, returning to main menu");
-        next_state.set(ClientState::MainMenu);
+    match *current_state.get() {
+        ClientState::Loading | ClientState::MainMenu => {}
+        _ => {
+            info!("Client disconnected, returning to main menu");
+            next_state.set(ClientState::MainMenu);
+        }
     }
 }
 
 fn on_client_connected(
     _trigger: On<Add, Connected>,
     mut next_state: ResMut<NextState<ClientState>>,
+    current_state: Res<State<ClientState>>,
 ) {
+    if *current_state.get() != ClientState::Connecting {
+        warn!(
+            state = ?current_state.get(),
+            "Client connected outside Connecting state; ignoring InGame transition"
+        );
+        return;
+    }
+
     info!("Client connected, transitioning to InGame state");
     next_state.set(ClientState::InGame);
 }

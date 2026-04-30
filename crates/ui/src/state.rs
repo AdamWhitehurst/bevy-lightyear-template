@@ -3,8 +3,10 @@ use bevy::prelude::*;
 /// Client application state
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
 pub enum ClientState {
-    /// Main menu - not connected to server
+    /// Startup loading gate - not interactive until global app readiness completes
     #[default]
+    Loading,
+    /// Main menu - not connected to server
     MainMenu,
     /// Connecting to server - loading screen
     Connecting,

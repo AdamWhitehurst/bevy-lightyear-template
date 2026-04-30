@@ -7,28 +7,69 @@ use protocol::*;
 use std::time::Duration;
 use ui::*;
 
+fn add_ui_test_plugin(app: &mut App) {
+    app.add_plugins(MinimalPlugins);
+    app.add_plugins(StatesPlugin);
+    app.init_state::<AppState>();
+    app.init_resource::<ClientTransitionState>();
+    app.add_plugins(UiPlugin);
+}
+
+fn enter_app_ready(app: &mut App) {
+    app.update();
+    app.world_mut()
+        .resource_mut::<NextState<AppState>>()
+        .set(AppState::Ready);
+    app.update();
+    app.update();
+}
+
 #[test]
 fn test_ui_plugin_initializes_state() {
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.add_plugins(StatesPlugin);
-    app.init_resource::<ClientTransitionState>();
-    app.add_plugins(UiPlugin);
+    add_ui_test_plugin(&mut app);
 
     app.update();
 
     // Verify state is initialized
     let state = app.world().resource::<State<ClientState>>();
+    assert_eq!(*state.get(), ClientState::Loading);
+}
+
+#[test]
+fn app_ready_transitions_loading_to_main_menu() {
+    let mut app = App::new();
+    add_ui_test_plugin(&mut app);
+
+    enter_app_ready(&mut app);
+
+    let state = app.world().resource::<State<ClientState>>();
     assert_eq!(*state.get(), ClientState::MainMenu);
+}
+
+#[test]
+fn pre_ready_connection_does_not_enter_ingame() {
+    let mut app = App::new();
+    add_ui_test_plugin(&mut app);
+
+    let client = app
+        .world_mut()
+        .spawn((Name::new("Test Client"), Client::default()))
+        .id();
+    app.update();
+
+    app.world_mut().entity_mut(client).insert(Connected);
+    app.update();
+
+    let state = app.world().resource::<State<ClientState>>();
+    assert_eq!(*state.get(), ClientState::Loading);
 }
 
 #[test]
 fn test_main_menu_spawns_buttons() {
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.add_plugins(StatesPlugin);
-    app.init_resource::<ClientTransitionState>();
-    app.add_plugins(UiPlugin);
+    add_ui_test_plugin(&mut app);
+    enter_app_ready(&mut app);
 
     app.update();
 
@@ -54,14 +95,12 @@ fn test_main_menu_spawns_buttons() {
 #[test]
 fn test_connect_button_triggers_state_transition() {
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.add_plugins(StatesPlugin);
-    app.init_resource::<ClientTransitionState>();
-    app.add_plugins(UiPlugin);
+    add_ui_test_plugin(&mut app);
 
     // Setup dummy client entity (needed for Connecting state)
     app.world_mut()
         .spawn((Name::new("Test Client"), Client::default()));
+    enter_app_ready(&mut app);
 
     app.update();
 
@@ -90,10 +129,7 @@ fn test_connect_button_triggers_state_transition() {
 #[test]
 fn test_ingame_state_spawns_hud() {
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.add_plugins(StatesPlugin);
-    app.init_resource::<ClientTransitionState>();
-    app.add_plugins(UiPlugin);
+    add_ui_test_plugin(&mut app);
 
     // Setup dummy client entity (needed for button interactions)
     app.world_mut()
@@ -133,6 +169,7 @@ fn test_disconnection_returns_to_main_menu() {
         tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
     });
     app.add_plugins(ProtocolPlugin);
+    app.init_state::<AppState>();
     app.init_resource::<ClientTransitionState>();
     app.add_plugins(UiPlugin);
 
@@ -168,10 +205,7 @@ fn test_disconnection_returns_to_main_menu() {
 #[test]
 fn test_connecting_state_spawns_cancel_button() {
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.add_plugins(StatesPlugin);
-    app.init_resource::<ClientTransitionState>();
-    app.add_plugins(UiPlugin);
+    add_ui_test_plugin(&mut app);
 
     // Setup dummy client entity (needed for Connecting state)
     app.world_mut()
@@ -199,10 +233,7 @@ fn test_connecting_state_spawns_cancel_button() {
 #[test]
 fn ingame_hud_spawns_map_switch_button() {
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.add_plugins(StatesPlugin);
-    app.init_resource::<ClientTransitionState>();
-    app.add_plugins(UiPlugin);
+    add_ui_test_plugin(&mut app);
 
     app.world_mut()
         .spawn((Name::new("Test Client"), Client::default()));
@@ -225,10 +256,7 @@ fn ingame_hud_spawns_map_switch_button() {
 #[test]
 fn map_switch_button_label_shows_homebase_when_on_overworld() {
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.add_plugins(StatesPlugin);
-    app.init_resource::<ClientTransitionState>();
-    app.add_plugins(UiPlugin);
+    add_ui_test_plugin(&mut app);
 
     app.world_mut()
         .spawn((Name::new("Test Client"), Client::default()));
@@ -262,10 +290,7 @@ fn map_switch_button_label_shows_homebase_when_on_overworld() {
 #[test]
 fn map_switch_button_label_shows_overworld_when_on_homebase() {
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.add_plugins(StatesPlugin);
-    app.init_resource::<ClientTransitionState>();
-    app.add_plugins(UiPlugin);
+    add_ui_test_plugin(&mut app);
 
     app.world_mut()
         .spawn((Name::new("Test Client"), Client::default()));
@@ -299,14 +324,12 @@ fn map_switch_button_label_shows_overworld_when_on_homebase() {
 #[test]
 fn test_state_cleanup() {
     let mut app = App::new();
-    app.add_plugins(MinimalPlugins);
-    app.add_plugins(StatesPlugin);
-    app.init_resource::<ClientTransitionState>();
-    app.add_plugins(UiPlugin);
+    add_ui_test_plugin(&mut app);
 
     // Setup dummy client entity (needed for Connecting state)
     app.world_mut()
         .spawn((Name::new("Test Client"), Client::default()));
+    enter_app_ready(&mut app);
 
     app.update();
 
