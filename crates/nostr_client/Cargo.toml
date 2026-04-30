@@ -7,7 +7,6 @@ edition = "2021"
 bevy = { workspace = true, features = ["bevy_log"] }
 protocol = { workspace = true }
 async-channel = "2"
-async-compat = "0.2"
 futures-lite = "2"
 nostr-sdk = { version = "0.44", features = ["nip49"] }
 serde = { workspace = true, features = ["derive"] }

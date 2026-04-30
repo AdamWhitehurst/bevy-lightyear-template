@@ -48,7 +48,7 @@ Do not add `nostr-sdk` to `protocol`.
 **File**: `crates/nostr_client/Cargo.toml`  
 **Action**: create
 
-Start with the SDK and bridge dependencies needed by native and WASM builds. If `cargo web-build` fails because of SDK feature selection, fix feature-gating in this phase before proceeding.
+Start with the SDK and bridge dependencies needed by native and WASM builds. Do not wrap the Nostr relay task in `async_compat`: `nostr-sdk`/`nostr-relay-pool` already use wasm-safe browser primitives (`web_sys`, `wasm_bindgen_futures`, `gloo_timers`) on wasm and their own runtime bridge on native. If `cargo web-build` fails because of SDK feature selection, fix feature-gating in this phase before proceeding.
 
 ```toml
 [package]
@@ -60,7 +60,6 @@ edition = "2021"
 bevy = { workspace = true, features = ["bevy_log"] }
 protocol = { workspace = true }
 async-channel = "2"
-async-compat = "0.2"
 futures-lite = "2"
 nostr-sdk = "0.44"
 serde = { workspace = true, features = ["derive"] }
@@ -89,7 +88,7 @@ pub use relay_pool::{relay_pool_ready, RelayPool};
 **File**: `crates/nostr_client/src/relay_pool.rs`  
 **Action**: create
 
-Create a long-lived `nostr_sdk::Client` inside a `Compat`-wrapped task and bridge readiness into ECS through `async_channel`. Readiness means at least one configured relay reaches EOSE on the discovery subscription.
+Create a long-lived `nostr_sdk::Client` inside a Bevy `IoTaskPool` task and bridge readiness into ECS through `async_channel`. Readiness means at least one configured relay reaches EOSE on the discovery subscription.
 
 ```rust
 use async_channel::Receiver;
@@ -135,7 +134,7 @@ pub fn spawn_relay_pool(mut commands: Commands, config: Res<NostrClientConfig>) 
     });
 
     let relays = config.relays.clone();
-    IoTaskPool::get().spawn(async_compat::Compat::new(async move {
+    IoTaskPool::get().spawn(async move {
         for relay in relays {
             match client.add_relay(relay.clone()).await {
                 Ok(_) => debug!(%relay, "added Nostr relay"),
@@ -150,7 +149,7 @@ pub fn spawn_relay_pool(mut commands: Commands, config: Res<NostrClientConfig>) 
         // Use client.notifications()/RelayPoolNotification and send ready_tx exactly once
         // when the subscription observes EOSE from any relay.
         // Match exact notification variant names against nostr-sdk 0.44 during implementation.
-    })).detach();
+    }).detach();
 }
 ```
 
@@ -163,11 +162,11 @@ pub fn shutdown_relay_pool(pool: Option<Res<RelayPool>>) {
         return;
     };
     let client = pool.client.clone();
-    IoTaskPool::get().scope(|scope| {
-        scope.spawn(async_compat::Compat::new(async move {
+    IoTaskPool::get()
+        .spawn(async move {
             client.shutdown().await;
-        }));
-    });
+        })
+        .detach();
 }
 ```
 
@@ -866,6 +865,8 @@ Adjust `on_client_disconnected` so disconnect returns to `MainMenu` only if a `C
 - [x] `cargo test-native` passes.
 - [x] `cargo test -p nostr_client identity` passes.
 - [x] `cargo test -p client fs_encrypted_identity` passes.
+- [x] `cargo web-build` passes after removing `async_compat` from `nostr_client`.
+- [x] `bevy run web -p 4001` plus browser reload reaches `AppState::Ready`/`ClientState::Login` without the `async-compat` wasm panic.
 
 #### Manual
 - [ ] Delete or move `worlds/identity.bin`, then run `cargo client`; app opens to `Login` with Generate and Import choices.
@@ -1038,12 +1039,12 @@ fn publish_announcement_on_ready(
         version: SERVER_ANNOUNCEMENT_VERSION,
     };
 
-    IoTaskPool::get().spawn(async_compat::Compat::new(async move {
+    IoTaskPool::get().spawn(async move {
         match nostr_client::announcement::publish_server_announcement(client, identity, announcement).await {
             Ok(event_id) => info!(%event_id, "published Nostr server announcement"),
             Err(error) => panic!("failed to publish Nostr server announcement: {error}"),
         }
-    })).detach();
+    }).detach();
 }
 
 fn load_cert_digest() -> String {
@@ -1193,7 +1194,7 @@ pub fn spawn_server_announcement_subscription(
     let (tx, rx) = async_channel::unbounded();
     commands.insert_resource(ServerAnnouncementRx(rx));
     let client = pool.client.clone();
-    IoTaskPool::get().spawn(async_compat::Compat::new(async move {
+    IoTaskPool::get().spawn(async move {
         let filter = Filter::new().kind(Kind::Custom(NOSTR_KIND_SERVER_ANNOUNCEMENT.into()));
         let mut stream = client.stream_events(filter, std::time::Duration::from_secs(60)).await
             .expect("server announcement stream must start");
@@ -1203,7 +1204,7 @@ pub fn spawn_server_announcement_subscription(
                 Err(error) => warn!(%error, "ignored invalid server announcement"),
             }
         }
-    })).detach();
+    }).detach();
 }
 ```
 

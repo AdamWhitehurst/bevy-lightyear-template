@@ -27,7 +27,7 @@ pub fn spawn_relay_pool(mut commands: Commands, config: Res<NostrClientConfig>) 
 
     let relays = config.relays.clone();
     IoTaskPool::get()
-        .spawn(async_compat::Compat::new(async move {
+        .spawn(async move {
             debug!(
                 relay_count = relays.len(),
                 "starting Nostr relay setup task"
@@ -75,7 +75,7 @@ pub fn spawn_relay_pool(mut commands: Commands, config: Res<NostrClientConfig>) 
                     }
                 }
             }
-        }))
+        })
         .detach();
 }
 
@@ -104,9 +104,9 @@ pub fn shutdown_relay_pool(mut exit: MessageReader<AppExit>, pool: Option<Res<Re
     };
 
     let client = pool.client.clone();
-    IoTaskPool::get().scope(|scope| {
-        scope.spawn(async_compat::Compat::new(async move {
+    IoTaskPool::get()
+        .spawn(async move {
             client.shutdown().await;
-        }));
-    });
+        })
+        .detach();
 }
