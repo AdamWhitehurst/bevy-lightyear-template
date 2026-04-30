@@ -1099,10 +1099,10 @@ fn main() {
 - [x] `cargo test -p nostr_client identity` includes raw `nsec1...` and `ncryptsec1...` decode tests.
 
 #### Manual
-- [ ] `SERVER_NSEC=nsec1... RUST_LOG=nostr_client=debug,server=debug cargo server-log` logs a published announcement event id.
-- [ ] `SERVER_NSEC=ncryptsec1... SERVER_NSEC_PASSPHRASE=... RUST_LOG=nostr_client=debug,server=debug cargo server-log` logs the same publish success path.
-- [ ] With neither `SERVER_NSEC` nor `keys/server.nsec`, `cargo server-log` panics at startup with a clear error mentioning both sources.
-- [ ] Use `nak` or `nostr-tool` to subscribe to kind `30078` for the server pubkey; event exists and `content` parses as JSON with `server_addr`, `cert_digest`, `display_name`, and `version`.
+- [x] `SERVER_NSEC=nsec1... RUST_LOG=nostr_client=debug,server=debug cargo server-log` logs a published announcement event id.
+- [x] `SERVER_NSEC=ncryptsec1... SERVER_NSEC_PASSPHRASE=... RUST_LOG=nostr_client=debug,server=debug cargo server-log` logs the same publish success path.
+- [x] With neither `SERVER_NSEC` nor `keys/server.nsec`, `cargo server-log` panics at startup with a clear error mentioning both sources.
+- [x] Use `nak` or `nostr-tool` to subscribe to kind `30078` for the server pubkey; event exists and `content` parses as JSON with `server_addr`, `cert_digest`, `display_name`, and `version`.
 
 ---
 
