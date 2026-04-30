@@ -1,6 +1,6 @@
 #![enable(implicit_some)]
 {
-    "protocol::ability::AbilityPhases": (startup: 0, active: 1, recovery: 0, cooldown: 0),
+    "protocol::ability::AbilityPhases": (startup: 2, active: 1, recovery: 13, cooldown: 0),
     "protocol::ability::ConditionalEffects": ([
         (
             condition: Grounded,

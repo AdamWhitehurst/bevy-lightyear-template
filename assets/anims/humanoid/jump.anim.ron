@@ -1,0 +1,106 @@
+#![enable(implicit_some)]
+(
+    name: "jump",
+    duration: 0.25,
+    looping: false,
+    bone_timelines: {
+        "root": (
+            blend_mode: Additive,
+            rotation: [],
+            translation: [
+                (time: 0.0,       value: (0.0,  0.0),  curve: Linear),
+                (time: 0.03125,   value: (0.0, -0.4),  curve: Linear),
+                (time: 0.046875,  value: (0.0,  0.0),  curve: Linear),
+                (time: 0.25,      value: (0.0,  0.0),  curve: Linear),
+            ],
+            scale: [],
+        ),
+        "torso": (
+            blend_mode: Additive,
+            rotation: [],
+            translation: [
+                (time: 0.0,       value: (0.0,  0.0),  curve: Linear),
+                (time: 0.03125,   value: (0.0, -0.2),  curve: Linear),
+                (time: 0.140625,  value: (0.0,  0.45), curve: Linear),
+                (time: 0.1875,    value: (0.0,  0.35), curve: Linear),
+                (time: 0.25,      value: (0.0,  0.0),  curve: Linear),
+            ],
+            scale: [],
+        ),
+        "head": (
+            blend_mode: Additive,
+            rotation: [],
+            translation: [
+                (time: 0.0,       value: (0.0,  0.0),   curve: Linear),
+                (time: 0.03125,   value: (0.0, -0.05),  curve: Linear),
+                (time: 0.140625,  value: (0.0,  0.2),   curve: Linear),
+                (time: 0.1875,    value: (0.0,  0.15),  curve: Linear),
+                (time: 0.25,      value: (0.0,  0.0),   curve: Linear),
+            ],
+            scale: [],
+        ),
+        "leg_l": (
+            blend_mode: Additive,
+            rotation: [],
+            translation: [
+                (time: 0.0,       value: (0.0, 0.0),  curve: Linear),
+                (time: 0.03125,   value: (0.0, 0.4),  curve: Linear),
+                (time: 0.046875,  value: (0.0, 0.0),  curve: Linear),
+                (time: 0.25,      value: (0.0, 0.0),  curve: Linear),
+            ],
+            scale: [],
+        ),
+        "leg_r": (
+            blend_mode: Additive,
+            rotation: [],
+            translation: [
+                (time: 0.0,       value: (0.0, 0.0),  curve: Linear),
+                (time: 0.03125,   value: (0.0, 0.4),  curve: Linear),
+                (time: 0.046875,  value: (0.0, 0.0),  curve: Linear),
+                (time: 0.25,      value: (0.0, 0.0),  curve: Linear),
+            ],
+            scale: [],
+        ),
+        "arm_l": (
+            rotation: [
+                (time: 0.0,        value:    0.0, curve: Linear),
+                (time: 0.03125,    value:    0.0, curve: Linear),
+                (time: 0.0625,     value:  -90.0, curve: Linear),
+                (time: 0.09375,    value: -170.0, curve: Linear),
+                (time: 0.140625,   value: -195.0, curve: Linear),
+                (time: 0.1875,     value: -170.0, curve: Linear),
+                (time: 0.234375,   value:  -80.0, curve: Linear),
+                (time: 0.25,       value:    0.0, curve: Linear),
+            ],
+            translation: [
+                (time: 0.0,       value: (0.0,  0.0),   curve: Linear),
+                (time: 0.03125,   value: (0.0, -0.2),   curve: Linear),
+                (time: 0.109375,  value: (0.4,  4.2),   curve: Linear),
+                (time: 0.171875,  value: (0.5,  4.0),   curve: Linear),
+                (time: 0.25,      value: (0.0,  0.0),   curve: Linear),
+            ],
+            scale: [],
+        ),
+        "arm_r": (
+            rotation: [
+                (time: 0.0,        value:    0.0, curve: Linear),
+                (time: 0.03125,    value:    0.0, curve: Linear),
+                (time: 0.078125,   value:   90.0, curve: Linear),
+                (time: 0.109375,   value:  170.0, curve: Linear),
+                (time: 0.15625,    value:  195.0, curve: Linear),
+                (time: 0.203125,   value:  170.0, curve: Linear),
+                (time: 0.234375,   value:   80.0, curve: Linear),
+                (time: 0.25,       value:    0.0, curve: Linear),
+            ],
+            translation: [
+                (time: 0.0,       value: ( 0.0,  0.0),   curve: Linear),
+                (time: 0.03125,   value: ( 0.0, -0.2),   curve: Linear),
+                (time: 0.140625,  value: (-0.4,  4.2),   curve: Linear),
+                (time: 0.1875,    value: (-0.3,  4.0),   curve: Linear),
+                (time: 0.25,      value: ( 0.0,  0.0),   curve: Linear),
+            ],
+            scale: [],
+        ),
+    },
+    events: [],
+)
