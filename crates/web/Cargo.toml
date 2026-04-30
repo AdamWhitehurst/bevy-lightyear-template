@@ -45,6 +45,7 @@ lightyear = { workspace = true, features = [
     "interpolation",
 ] }
 protocol = { workspace = true }
+nostr_client = { workspace = true }
 client = { path = "../client", default-features = false }
 client_web_lightyear = { workspace = true }
 render = { path = "../render" }

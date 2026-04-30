@@ -5,6 +5,7 @@ use client::transition::ClientTransitionPlugin;
 use client_web_lightyear::WebClientPlugin;
 use dev::DevPlugin;
 use lightyear::prelude::client::*;
+use nostr_client::NostrClientPlugin;
 use protocol::*;
 use render::RenderPlugin;
 use std::time::Duration;
@@ -26,6 +27,7 @@ fn main() {
             tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
         })
         .add_plugins(SharedGameplayPlugin)
+        .add_plugins(NostrClientPlugin::default())
         .add_plugins(WebClientPlugin::default())
         .insert_resource(UiClientConfig {
             server_addr: std::net::SocketAddr::from(([127, 0, 0, 1], 5001)),

@@ -20,6 +20,7 @@ leafwing-input-manager = { workspace = true }
 lightyear = { workspace = true, features = ["server", "netcode", "leafwing", "replication" ] }
 server_lightyear = { workspace = true }
 protocol = { workspace = true }
+nostr_client = { workspace = true }
 anyhow = "1.0"
 persistence = { workspace = true }
 avian3d = { workspace = true }

@@ -16,6 +16,7 @@ leafwing-input-manager = { workspace = true }
 lightyear = { workspace = true, features = ["client", "netcode", "leafwing", "prediction", "replication", "interpolation" ] }
 client_lightyear = { workspace = true }
 protocol = { workspace = true }
+nostr_client = { workspace = true }
 render = { path = "../render" }
 ui = { path = "../ui" }
 dev = { path = "../dev" }

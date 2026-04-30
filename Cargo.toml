@@ -13,6 +13,7 @@ members = [
   "crates/voxel_map_engine",
   "crates/sprite_rig",
   "crates/persistence",
+  "crates/nostr_client",
 ]
 exclude = [
   "git/avian",
@@ -50,6 +51,7 @@ lightyear = { path = "git/lightyear/lightyear", features = ["leafwing"] }
 lightyear_replication = { path = "git/lightyear/lightyear_replication" }
 persistence = { path = "crates/persistence" }
 protocol = { path = "crates/protocol" }
+nostr_client = { path = "crates/nostr_client" }
 client_lightyear = { path = "crates/client_lightyear" }
 server_lightyear = { path = "crates/server_lightyear" }
 client_web_lightyear = { path = "crates/client_web_lightyear" }

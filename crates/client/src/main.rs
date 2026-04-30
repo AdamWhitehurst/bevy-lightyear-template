@@ -11,6 +11,7 @@ use diagnostics::ClientDiagnosticsPlugin;
 use gameplay::ClientGameplayPlugin;
 use lightyear::prelude::client::*;
 use map::ClientMapPlugin;
+use nostr_client::NostrClientPlugin;
 use protocol::diagnostics::SharedDiagnosticsPlugin;
 use protocol::*;
 use render::RenderPlugin;
@@ -45,6 +46,7 @@ fn main() {
             tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
         })
         .add_plugins(SharedGameplayPlugin)
+        .add_plugins(NostrClientPlugin::default())
         .add_plugins(ClientNetworkPlugin {
             config: network_config,
         })

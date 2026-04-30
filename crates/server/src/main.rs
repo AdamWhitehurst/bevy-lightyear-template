@@ -10,6 +10,7 @@ use bevy::prelude::*;
 use diagnostics::ServerDiagnosticsPlugin;
 use gameplay::ServerGameplayPlugin;
 use map::ServerMapPlugin;
+use nostr_client::NostrClientPlugin;
 use protocol::diagnostics::SharedDiagnosticsPlugin;
 use protocol::*;
 use server_lightyear::{ServerNetworkConfig, ServerNetworkPlugin};
@@ -39,6 +40,7 @@ fn main() {
             tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
         })
         .add_plugins(SharedGameplayPlugin)
+        .add_plugins(NostrClientPlugin::default())
         .add_plugins(ServerNetworkPlugin {
             config: ServerNetworkConfig {
                 cert_pem_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../certificates/cert.pem")

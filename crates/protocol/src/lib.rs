@@ -29,7 +29,9 @@ pub use ability::{
     InputEffect, OnEndEffects, OnHitEffectDefs, OnHitEffects, OnInputEffects, OnTickEffects,
     ProjectileSpawnEffect, TickEffect, WhileActiveEffects,
 };
-pub use app_state::{AppState, AppStatePlugin, TrackedAssets};
+pub use app_state::{
+    AppState, AppStatePlugin, IdentityLoadComplete, RelayPoolReady, TrackedAssets,
+};
 pub use character::{apply_movement, detect_grounded, update_facing};
 pub use character::{
     CharacterMarker, CharacterPhysicsBundle, CharacterType, ColorComponent, DeathEvent,
