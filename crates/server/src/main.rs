@@ -2,6 +2,7 @@ pub mod chunk_entities;
 pub mod diagnostics;
 pub mod gameplay;
 pub mod map;
+pub mod nostr_announcement;
 pub mod persistence;
 pub mod transition;
 pub mod world_object;
@@ -10,13 +11,23 @@ use bevy::prelude::*;
 use diagnostics::ServerDiagnosticsPlugin;
 use gameplay::ServerGameplayPlugin;
 use map::ServerMapPlugin;
-use nostr_client::NostrClientPlugin;
+use nostr_announcement::ServerAnnouncementPlugin;
+use nostr_client::{load_server_identity_from_env_or_file, NostrClientPlugin};
 use protocol::diagnostics::SharedDiagnosticsPlugin;
 use protocol::*;
 use server_lightyear::{ServerNetworkConfig, ServerNetworkPlugin};
 use std::time::Duration;
 
 fn main() {
+    let network_config = ServerNetworkConfig {
+        cert_pem_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../certificates/cert.pem").into(),
+        key_pem_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../certificates/key.pem").into(),
+        ..Default::default()
+    };
+    let server_identity =
+        load_server_identity_from_env_or_file(network_config.nsec_file_path.as_deref())
+            .expect("SERVER_NSEC or keys/server.nsec must contain a valid nsec/ncryptsec");
+
     App::new()
         .add_plugins(MinimalPlugins)
         .add_plugins(bevy::app::TerminalCtrlCHandlerPlugin)
@@ -41,15 +52,11 @@ fn main() {
         })
         .add_plugins(SharedGameplayPlugin)
         .add_plugins(NostrClientPlugin::default())
+        .insert_resource(server_identity)
         .add_plugins(ServerNetworkPlugin {
-            config: ServerNetworkConfig {
-                cert_pem_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../certificates/cert.pem")
-                    .into(),
-                key_pem_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../certificates/key.pem")
-                    .into(),
-                ..Default::default()
-            },
+            config: network_config,
         })
+        .add_plugins(ServerAnnouncementPlugin)
         .add_plugins(ServerGameplayPlugin)
         .add_plugins(ServerMapPlugin)
         .add_plugins(SharedDiagnosticsPlugin)

@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use nostr_sdk::nips::nip49::EncryptedSecretKey;
 use nostr_sdk::{FromBech32, Keys, PublicKey, SecretKey, ToBech32};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 pub const ENCRYPTED_IDENTITY_VERSION: u32 = 1;
 
@@ -15,6 +16,11 @@ pub struct EncryptedIdentity {
 pub struct ClientIdentity {
     pub secret: SecretKey,
     pub public: PublicKey,
+}
+
+#[derive(Resource, Clone)]
+pub struct ServerIdentity {
+    pub keys: Keys,
 }
 
 impl ClientIdentity {
@@ -78,6 +84,45 @@ pub fn unlock_identity(
     Ok(ClientIdentity::from_secret(secret))
 }
 
+pub fn decode_nsec_or_ncryptsec(
+    value: &str,
+    passphrase: Option<&str>,
+) -> Result<SecretKey, String> {
+    let trimmed = value.trim();
+    if trimmed.starts_with("ncryptsec1") {
+        let passphrase = passphrase.ok_or("SERVER_NSEC_PASSPHRASE is required for ncryptsec")?;
+        let encrypted = EncryptedSecretKey::from_bech32(trimmed)
+            .map_err(|error| format!("invalid ncryptsec: {error}"))?;
+        encrypted
+            .decrypt(passphrase)
+            .map_err(|error| format!("failed to decrypt ncryptsec: {error}"))
+    } else {
+        SecretKey::parse(trimmed).map_err(|error| format!("invalid nsec: {error}"))
+    }
+}
+
+pub fn load_server_identity_from_env_or_file(
+    path: Option<&Path>,
+) -> Result<ServerIdentity, String> {
+    let raw = match std::env::var("SERVER_NSEC") {
+        Ok(value) => value,
+        Err(_) => {
+            let path = path.ok_or("SERVER_NSEC not set and no nsec_file_path configured")?;
+            std::fs::read_to_string(path).map_err(|error| {
+                format!(
+                    "SERVER_NSEC not set and failed to read {}: {error}",
+                    path.display()
+                )
+            })?
+        }
+    };
+    let passphrase = std::env::var("SERVER_NSEC_PASSPHRASE").ok();
+    let secret = decode_nsec_or_ncryptsec(&raw, passphrase.as_deref())?;
+    Ok(ServerIdentity {
+        keys: Keys::new(secret),
+    })
+}
+
 fn encrypt_identity(
     secret: SecretKey,
     passphrase: &str,
@@ -114,5 +159,37 @@ mod tests {
         let (_identity, encrypted) = generate_encrypted_identity("correct horse").unwrap();
 
         assert!(unlock_identity(&encrypted, "wrong horse").is_err());
+    }
+
+    #[test]
+    fn raw_nsec_decodes() {
+        let secret = SecretKey::generate();
+        let nsec = secret.to_bech32().unwrap();
+
+        let decoded = decode_nsec_or_ncryptsec(&nsec, None).unwrap();
+
+        assert_eq!(secret, decoded);
+    }
+
+    #[test]
+    fn ncryptsec_decodes_with_passphrase() {
+        let secret = SecretKey::generate();
+        let encrypted = secret.encrypt("server passphrase").unwrap();
+        let ncryptsec = encrypted.to_bech32().unwrap();
+
+        let decoded = decode_nsec_or_ncryptsec(&ncryptsec, Some("server passphrase")).unwrap();
+
+        assert_eq!(secret, decoded);
+    }
+
+    #[test]
+    fn ncryptsec_requires_passphrase() {
+        let secret = SecretKey::generate();
+        let encrypted = secret.encrypt("server passphrase").unwrap();
+        let ncryptsec = encrypted.to_bech32().unwrap();
+
+        let error = decode_nsec_or_ncryptsec(&ncryptsec, None).unwrap_err();
+
+        assert!(error.contains("SERVER_NSEC_PASSPHRASE"));
     }
 }

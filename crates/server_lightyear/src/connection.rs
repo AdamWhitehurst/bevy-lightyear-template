@@ -16,6 +16,7 @@ pub struct ServerNetworkConfig {
     pub private_key: [u8; 32],
     pub cert_pem_path: PathBuf,
     pub key_pem_path: PathBuf,
+    pub nsec_file_path: Option<PathBuf>,
     pub replication_interval: Duration,
 }
 
@@ -28,6 +29,10 @@ impl Default for ServerNetworkConfig {
             private_key: PRIVATE_KEY,
             cert_pem_path: PathBuf::new(),
             key_pem_path: PathBuf::new(),
+            nsec_file_path: Some(PathBuf::from(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../keys/server.nsec"
+            ))),
             replication_interval: REPLICATION_INTERVAL,
         }
     }

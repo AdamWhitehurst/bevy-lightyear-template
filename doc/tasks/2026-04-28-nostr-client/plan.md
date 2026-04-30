@@ -869,12 +869,12 @@ Adjust `on_client_disconnected` so disconnect returns to `MainMenu` only if a `C
 - [x] `bevy run web -p 4001` plus browser reload reaches `AppState::Ready`/`ClientState::Login` without the `async-compat` wasm panic.
 
 #### Manual
-- [ ] Delete or move `worlds/identity.bin`, then run `cargo client`; app opens to `Login` with Generate and Import choices.
-- [ ] Generate flow: enter passphrase, click Generate; app transitions to `MainMenu`, and `worlds/identity.bin` exists with no plaintext `nsec1` string visible when inspected as binary.
-- [ ] Restart client; Unlock screen appears; correct passphrase transitions to `MainMenu`.
-- [ ] Wrong passphrase shows error feedback and remains in `Login`.
-- [ ] Import flow: remove `worlds/identity.bin`, paste an `nsec1...`, enter passphrase, click Import; app stores encrypted identity and transitions to `MainMenu`.
-- [ ] Web build still passes; web client reaches Login and can use session-only Generate/Import without writing `worlds/identity.bin`.
+- [x] Delete or move `worlds/identity.bin`, then run `cargo client`; app opens to `Login` with Generate and Import choices.
+- [x] Generate flow: enter passphrase, click Generate; app transitions to `MainMenu`, and `worlds/identity.bin` exists with no plaintext `nsec1` string visible when inspected as binary.
+- [x] Restart client; Unlock screen appears; correct passphrase transitions to `MainMenu`.
+- [x] Wrong passphrase shows error feedback and remains in `Login`.
+- [x] Import flow: remove `worlds/identity.bin`, paste an `nsec1...`, enter passphrase, click Import; app stores encrypted identity and transitions to `MainMenu`.
+- [x] Web build still passes; web client reaches Login and can use session-only Generate/Import without writing `worlds/identity.bin`.
 
 ---
 
@@ -1092,11 +1092,11 @@ fn main() {
 
 ### Verification
 #### Automated
-- [ ] `pgrep -af 'cargo (build|check|test|run)|wasm-pack test'` shows no other active build/test before running cargo commands.
-- [ ] `cargo check-all` passes.
-- [ ] `cargo test-native` passes.
-- [ ] `cargo test -p nostr_client announcement` passes.
-- [ ] `cargo test -p nostr_client identity` includes raw `nsec1...` and `ncryptsec1...` decode tests.
+- [x] `pgrep -af 'cargo (build|check|test|run)|wasm-pack test'` shows no other active build/test before running cargo commands.
+- [x] `cargo check-all` passes.
+- [x] `cargo test-native` passes.
+- [x] `cargo test -p nostr_client announcement` passes.
+- [x] `cargo test -p nostr_client identity` includes raw `nsec1...` and `ncryptsec1...` decode tests.
 
 #### Manual
 - [ ] `SERVER_NSEC=nsec1... RUST_LOG=nostr_client=debug,server=debug cargo server-log` logs a published announcement event id.
