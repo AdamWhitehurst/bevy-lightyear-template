@@ -22,7 +22,51 @@ sh scripts/setup.sh
 
 This installs dependencies and generates certificates.
 
-### 2. Run Server
+### 2. Configure Nostr identities
+
+Nostr `nsec1...` values are plaintext private keys. Do not commit them, paste them into logs, or share them. The server and client use them differently:
+
+#### Server identity
+
+The server signs its relay announcement with a durable Nostr key. Provide it with either:
+
+- `SERVER_NSEC`, which takes precedence, or
+- `keys/server.nsec`, used as the local development fallback.
+
+Both sources may contain either a raw `nsec1...` secret or an encrypted NIP-49 `ncryptsec1...` value. If you use `ncryptsec1...`, also set `SERVER_NSEC_PASSPHRASE`.
+
+```bash
+# One-shot env var
+SERVER_NSEC='nsec1...' cargo server
+
+# Or local file fallback
+mkdir -p keys
+printf '%s\n' 'nsec1...' > keys/server.nsec
+chmod 600 keys/server.nsec
+cargo server
+
+# Encrypted server key
+SERVER_NSEC='ncryptsec1...' SERVER_NSEC_PASSPHRASE='...' cargo server
+```
+
+#### Client identity
+
+The native client starts on the Nostr Login screen:
+
+- **Generate** creates a new Nostr key, encrypts it with the passphrase you enter, and stores only encrypted identity data in `worlds/identity.bin`.
+- **Import** accepts an existing `nsec1...`, encrypts it with the passphrase you enter, and stores only encrypted identity data in `worlds/identity.bin`.
+- On later launches, enter the same passphrase on **Unlock** to reuse the same public key and durable identity.
+- To reset the native client identity, stop the client and delete `worlds/identity.bin`.
+
+The web client can Generate or Import for the current browser session, but it does not write `worlds/identity.bin`.
+
+Relay discovery uses the default public relay list unless `NOSTR_RELAYS` is set to a comma-separated list of `wss://...` relay URLs:
+
+```bash
+NOSTR_RELAYS='wss://relay.damus.io,wss://nos.lol' cargo client
+```
+
+### 3. Run Server
 
 ```bash
 cargo server
@@ -33,7 +77,7 @@ Server listens on:
 - WebTransport: `0.0.0.0:5001`
 - WebSocket: `0.0.0.0:5002`
 
-### 3. Run Native Client
+### 4. Run Native Client
 
 ```bash
 cargo client
@@ -41,7 +85,7 @@ cargo client
 
 Connects to server via UDP on `127.0.0.1:5000`.
 
-### 4. Run WASM Client
+### 5. Run WASM Client
 
 ```bash
 bevy run --bin web
