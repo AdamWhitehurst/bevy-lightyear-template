@@ -6,12 +6,14 @@ use crate::relay_pool::{poll_relay_pool_ready, shutdown_relay_pool, spawn_relay_
 #[derive(Clone, Resource, Debug)]
 pub struct NostrClientConfig {
     pub relays: Vec<String>,
+    pub mark_identity_load_complete_on_startup: bool,
 }
 
 impl Default for NostrClientConfig {
     fn default() -> Self {
         Self {
             relays: relays_from_env_or_default(),
+            mark_identity_load_complete_on_startup: true,
         }
     }
 }
@@ -59,7 +61,12 @@ impl Plugin for NostrClientPlugin {
     }
 }
 
-fn mark_identity_load_complete(mut complete: ResMut<IdentityLoadComplete>) {
-    complete.0 = true;
-    debug!("Phase 1 identity load placeholder marked complete");
+fn mark_identity_load_complete(
+    mut complete: ResMut<IdentityLoadComplete>,
+    config: Res<NostrClientConfig>,
+) {
+    if config.mark_identity_load_complete_on_startup {
+        complete.0 = true;
+        debug!("identity load marked complete by Nostr client config");
+    }
 }

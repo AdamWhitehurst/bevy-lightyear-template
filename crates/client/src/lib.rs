@@ -1,5 +1,6 @@
 pub mod gameplay;
 pub mod map;
+pub mod persistence;
 pub mod transition;
 pub mod world_object;
 

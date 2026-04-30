@@ -1,12 +1,16 @@
 pub mod components;
+pub mod login;
 pub mod state;
+pub mod widgets;
 
 use bevy::ecs::message::MessageWriter;
 use bevy::prelude::*;
+use bevy_ui_text_input::TextInputPlugin;
 pub use components::*;
 use lightyear::netcode::Key;
 use lightyear::prelude::{client::*, Controlled, Replicated};
 use lightyear::prelude::{Authentication, MessageSender, Predicted};
+use nostr_client::{ClientIdentity, LoginError, StoredEncryptedIdentity};
 use protocol::map::{MapChannel, MapSwitchTarget, PlayerMapSwitchRequest};
 use protocol::{
     CharacterMarker, DummyTarget, MapInstanceId, PendingTransition, PRIVATE_KEY, PROTOCOL_ID,
@@ -43,6 +47,10 @@ impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         // Initialize resources
         app.init_resource::<UiClientConfig>();
+        app.add_plugins(TextInputPlugin);
+        app.init_resource::<LoginError>();
+        app.init_resource::<StoredEncryptedIdentity>();
+        app.add_message::<nostr_client::SaveEncryptedIdentity>();
 
         // Initialize state management
         app.init_state::<ClientState>();
@@ -61,7 +69,12 @@ impl Plugin for UiPlugin {
 
         app.add_systems(
             OnEnter(protocol::AppState::Ready),
-            enter_main_menu_after_app_ready,
+            enter_login_after_app_ready,
+        );
+        app.add_systems(OnEnter(ClientState::Login), login::setup_login_screen);
+        app.add_systems(
+            Update,
+            login::login_button_interaction.run_if(in_state(ClientState::Login)),
         );
         // State transition systems
         app.add_systems(
@@ -101,13 +114,13 @@ impl Plugin for UiPlugin {
     }
 }
 
-fn enter_main_menu_after_app_ready(
+fn enter_login_after_app_ready(
     current_state: Res<State<ClientState>>,
     mut next_state: ResMut<NextState<ClientState>>,
 ) {
     if *current_state.get() == ClientState::Loading {
-        info!("Startup gates complete, entering main menu");
-        next_state.set(ClientState::MainMenu);
+        info!("Startup gates complete, entering login");
+        next_state.set(ClientState::Login);
     }
 }
 
@@ -141,12 +154,18 @@ fn on_client_disconnected(
     _trigger: On<Add, Disconnected>,
     mut next_state: ResMut<NextState<ClientState>>,
     current_state: Res<State<ClientState>>,
+    identity: Option<Res<ClientIdentity>>,
 ) {
     match *current_state.get() {
-        ClientState::Loading | ClientState::MainMenu => {}
+        ClientState::Loading | ClientState::Login | ClientState::MainMenu => {}
         _ => {
-            info!("Client disconnected, returning to main menu");
-            next_state.set(ClientState::MainMenu);
+            if identity.is_some() {
+                info!("Client disconnected, returning to main menu");
+                next_state.set(ClientState::MainMenu);
+            } else {
+                info!("Client disconnected without identity, returning to login");
+                next_state.set(ClientState::Login);
+            }
         }
     }
 }

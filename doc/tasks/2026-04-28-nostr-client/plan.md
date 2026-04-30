@@ -861,11 +861,11 @@ Adjust `on_client_disconnected` so disconnect returns to `MainMenu` only if a `C
 
 ### Verification
 #### Automated
-- [ ] `pgrep -af 'cargo (build|check|test|run)|wasm-pack test'` shows no other active build/test before running cargo commands.
-- [ ] `cargo check-all` passes.
-- [ ] `cargo test-native` passes.
-- [ ] `cargo test -p nostr_client identity` passes.
-- [ ] `cargo test -p client fs_encrypted_identity` passes.
+- [x] `pgrep -af 'cargo (build|check|test|run)|wasm-pack test'` shows no other active build/test before running cargo commands.
+- [x] `cargo check-all` passes.
+- [x] `cargo test-native` passes.
+- [x] `cargo test -p nostr_client identity` passes.
+- [x] `cargo test -p client fs_encrypted_identity` passes.
 
 #### Manual
 - [ ] Delete or move `worlds/identity.bin`, then run `cargo client`; app opens to `Login` with Generate and Import choices.

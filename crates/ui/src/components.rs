@@ -19,3 +19,18 @@ pub struct CancelButton;
 /// Marker for the map switch toggle button in in-game HUD
 #[derive(Component)]
 pub struct MapSwitchButton;
+
+#[derive(Component)]
+pub struct GenerateButton;
+
+#[derive(Component)]
+pub struct ImportButton;
+
+#[derive(Component)]
+pub struct UnlockButton;
+
+#[derive(Component)]
+pub struct PassphraseInput;
+
+#[derive(Component)]
+pub struct NsecInput;

@@ -7,6 +7,8 @@ edition = "2021"
 bevy = { workspace = true, default-features = true }
 lightyear = { workspace = true, features = ["client", "netcode"] }
 protocol = { path = "../protocol" }
+nostr_client = { workspace = true }
+bevy_ui_text_input = "0.7"
 
 [dev-dependencies]
 protocol = { workspace = true, features = ["test_utils"] }

@@ -17,6 +17,8 @@ lightyear = { workspace = true, features = ["client", "netcode", "leafwing", "pr
 client_lightyear = { workspace = true }
 protocol = { workspace = true }
 nostr_client = { workspace = true }
+persistence = { workspace = true }
+bincode = "1.3"
 render = { path = "../render" }
 ui = { path = "../ui" }
 dev = { path = "../dev" }
@@ -28,3 +30,4 @@ approx = { workspace = true }
 mock_instant = { workspace = true }
 test-log = { workspace = true }
 protocol = { workspace = true, features = ["test_utils"] }
+tempfile = "3"

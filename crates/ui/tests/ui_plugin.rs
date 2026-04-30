@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 use lightyear::prelude::client::*;
-use lightyear::prelude::{Controlled, Predicted};
+use lightyear::prelude::{Controlled, PeerId, Predicted, RemoteId};
 use protocol::transition::ClientTransitionState;
 use protocol::*;
 use std::time::Duration;
@@ -10,6 +10,13 @@ use ui::*;
 fn add_ui_test_plugin(app: &mut App) {
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin);
+    app.add_plugins(bevy::input::InputPlugin);
+    app.add_plugins(bevy::picking::InteractionPlugin);
+    app.add_plugins(bevy::picking::PickingPlugin);
+    app.add_message::<bevy::asset::AssetEvent<bevy::text::Font>>();
+    app.init_resource::<Assets<bevy::image::Image>>();
+    app.init_resource::<Assets<bevy::text::Font>>();
+    app.init_resource::<Assets<bevy::image::TextureAtlasLayout>>();
     app.init_state::<AppState>();
     app.init_resource::<ClientTransitionState>();
     app.add_plugins(UiPlugin);
@@ -21,6 +28,14 @@ fn enter_app_ready(app: &mut App) {
         .resource_mut::<NextState<AppState>>()
         .set(AppState::Ready);
     app.update();
+    app.update();
+}
+
+fn enter_main_menu(app: &mut App) {
+    enter_app_ready(app);
+    app.world_mut()
+        .resource_mut::<NextState<ClientState>>()
+        .set(ClientState::MainMenu);
     app.update();
 }
 
@@ -37,14 +52,14 @@ fn test_ui_plugin_initializes_state() {
 }
 
 #[test]
-fn app_ready_transitions_loading_to_main_menu() {
+fn app_ready_transitions_loading_to_login() {
     let mut app = App::new();
     add_ui_test_plugin(&mut app);
 
     enter_app_ready(&mut app);
 
     let state = app.world().resource::<State<ClientState>>();
-    assert_eq!(*state.get(), ClientState::MainMenu);
+    assert_eq!(*state.get(), ClientState::Login);
 }
 
 #[test]
@@ -58,7 +73,9 @@ fn pre_ready_connection_does_not_enter_ingame() {
         .id();
     app.update();
 
-    app.world_mut().entity_mut(client).insert(Connected);
+    app.world_mut()
+        .entity_mut(client)
+        .insert((Connected, RemoteId(PeerId::Netcode(0))));
     app.update();
 
     let state = app.world().resource::<State<ClientState>>();
@@ -69,7 +86,7 @@ fn pre_ready_connection_does_not_enter_ingame() {
 fn test_main_menu_spawns_buttons() {
     let mut app = App::new();
     add_ui_test_plugin(&mut app);
-    enter_app_ready(&mut app);
+    enter_main_menu(&mut app);
 
     app.update();
 
@@ -100,7 +117,7 @@ fn test_connect_button_triggers_state_transition() {
     // Setup dummy client entity (needed for Connecting state)
     app.world_mut()
         .spawn((Name::new("Test Client"), Client::default()));
-    enter_app_ready(&mut app);
+    enter_main_menu(&mut app);
 
     app.update();
 
@@ -165,6 +182,13 @@ fn test_disconnection_returns_to_main_menu() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin);
+    app.add_plugins(bevy::input::InputPlugin);
+    app.add_plugins(bevy::picking::InteractionPlugin);
+    app.add_plugins(bevy::picking::PickingPlugin);
+    app.add_message::<bevy::asset::AssetEvent<bevy::text::Font>>();
+    app.init_resource::<Assets<bevy::image::Image>>();
+    app.init_resource::<Assets<bevy::text::Font>>();
+    app.init_resource::<Assets<bevy::image::TextureAtlasLayout>>();
     app.add_plugins(ClientPlugins {
         tick_duration: Duration::from_secs_f64(1.0 / FIXED_TIMESTEP_HZ),
     });
@@ -172,6 +196,11 @@ fn test_disconnection_returns_to_main_menu() {
     app.init_state::<AppState>();
     app.init_resource::<ClientTransitionState>();
     app.add_plugins(UiPlugin);
+    app.insert_resource(
+        nostr_client::generate_encrypted_identity("passphrase")
+            .unwrap()
+            .0,
+    );
 
     // Setup client entity
     app.world_mut()
@@ -329,7 +358,7 @@ fn test_state_cleanup() {
     // Setup dummy client entity (needed for Connecting state)
     app.world_mut()
         .spawn((Name::new("Test Client"), Client::default()));
-    enter_app_ready(&mut app);
+    enter_main_menu(&mut app);
 
     app.update();
 

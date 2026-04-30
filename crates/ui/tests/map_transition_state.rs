@@ -8,6 +8,13 @@ fn ui_test_app() -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(StatesPlugin);
+    app.add_plugins(bevy::input::InputPlugin);
+    app.add_plugins(bevy::picking::InteractionPlugin);
+    app.add_plugins(bevy::picking::PickingPlugin);
+    app.add_message::<bevy::asset::AssetEvent<bevy::text::Font>>();
+    app.init_resource::<Assets<bevy::image::Image>>();
+    app.init_resource::<Assets<bevy::text::Font>>();
+    app.init_resource::<Assets<bevy::image::TextureAtlasLayout>>();
     app.init_resource::<ClientTransitionState>();
     app.add_plugins(UiPlugin);
     app.world_mut()

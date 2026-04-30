@@ -6,6 +6,8 @@ pub enum ClientState {
     /// Startup loading gate - not interactive until global app readiness completes
     #[default]
     Loading,
+    /// Nostr identity login and unlock screen
+    Login,
     /// Main menu - not connected to server
     MainMenu,
     /// Connecting to server - loading screen
