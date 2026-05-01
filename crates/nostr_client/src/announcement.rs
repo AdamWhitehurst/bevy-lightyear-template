@@ -11,6 +11,7 @@ use crate::{relay_pool::RelayPool, ServerIdentity};
 
 pub const NOSTR_KIND_SERVER_ANNOUNCEMENT: u16 = 30078;
 pub const SERVER_ANNOUNCEMENT_VERSION: u32 = 1;
+const SERVER_ANNOUNCEMENT_IDENTIFIER: &str = "server";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ServerAnnouncement {
@@ -46,7 +47,7 @@ pub fn server_announcement_builder(
     let content = serde_json::to_string(announcement)?;
     Ok(
         EventBuilder::new(Kind::Custom(NOSTR_KIND_SERVER_ANNOUNCEMENT.into()), content)
-            .tag(Tag::identifier("server")),
+            .tag(Tag::identifier(SERVER_ANNOUNCEMENT_IDENTIFIER)),
     )
 }
 
@@ -72,9 +73,18 @@ pub async fn publish_server_announcement(
     Ok(event.id.to_string())
 }
 
+fn server_announcement_filter() -> Filter {
+    Filter::new()
+        .kind(Kind::Custom(NOSTR_KIND_SERVER_ANNOUNCEMENT.into()))
+        .identifier(SERVER_ANNOUNCEMENT_IDENTIFIER)
+}
+
 pub fn parse_server_announcement_event(event: &Event) -> Result<ServerListEntry, String> {
     if event.kind != Kind::Custom(NOSTR_KIND_SERVER_ANNOUNCEMENT.into()) {
         return Err(format!("unexpected announcement kind {}", event.kind));
+    }
+    if event.tags.identifier() != Some(SERVER_ANNOUNCEMENT_IDENTIFIER) {
+        return Err("server announcement identifier tag mismatch".to_string());
     }
 
     let announcement: ServerAnnouncement = serde_json::from_str(&event.content)
@@ -140,7 +150,7 @@ pub fn spawn_server_announcement_subscription(
     IoTaskPool::get()
         .spawn(async move {
             let mut notifications = client.notifications();
-            let filter = Filter::new().kind(Kind::Custom(NOSTR_KIND_SERVER_ANNOUNCEMENT.into()));
+            let filter = server_announcement_filter();
             let subscription = client
                 .subscribe(filter, None)
                 .await
@@ -162,7 +172,9 @@ pub fn spawn_server_announcement_subscription(
                             Ok(entry) => {
                                 let _ = tx.send(entry).await;
                             }
-                            Err(error) => warn!(%error, "ignored invalid server announcement"),
+                            Err(error) => {
+                                trace!(%error, "ignored non-matching server announcement event")
+                            }
                         }
                     }
                     Ok(RelayPoolNotification::Shutdown) => {
@@ -217,7 +229,7 @@ mod tests {
         assert!(event
             .tags
             .identifier()
-            .is_some_and(|value| value == "server"));
+            .is_some_and(|value| value == SERVER_ANNOUNCEMENT_IDENTIFIER));
 
         let content: ServerAnnouncement = serde_json::from_str(&event.content).unwrap();
         assert_eq!(content.server_addr, announcement().server_addr);
@@ -237,6 +249,31 @@ mod tests {
         assert_eq!(entry.addr, announcement().server_addr);
         assert_eq!(entry.cert_digest, announcement().cert_digest);
         assert_eq!(entry.display_name, announcement().display_name);
+    }
+
+    #[test]
+    fn server_announcement_filter_selects_identifier() {
+        let value = serde_json::to_value(server_announcement_filter()).unwrap();
+        assert_eq!(
+            value.get("#d").and_then(|value| value.as_array()),
+            Some(&vec![serde_json::Value::String(
+                SERVER_ANNOUNCEMENT_IDENTIFIER.to_string(),
+            )])
+        );
+    }
+
+    #[test]
+    fn parse_server_announcement_event_rejects_identifier_mismatch() {
+        let keys = Keys::new(SecretKey::generate());
+        let content = serde_json::to_string(&announcement()).unwrap();
+        let event = EventBuilder::new(Kind::Custom(NOSTR_KIND_SERVER_ANNOUNCEMENT.into()), content)
+            .tag(Tag::identifier("other"))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        let error = parse_server_announcement_event(&event).unwrap_err();
+
+        assert!(error.contains("identifier tag mismatch"));
     }
 
     #[test]
