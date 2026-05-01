@@ -47,7 +47,7 @@ fn short_public_key(public: &PublicKey) -> String {
         return hex;
     }
 
-    format!("{}…{}", &hex[..8], &hex[hex.len() - 6..])
+    format!("{}...{}", &hex[..8], &hex[hex.len() - 6..])
 }
 
 #[derive(Resource, Default, Clone, Debug)]
