@@ -4,7 +4,8 @@ pub mod plugin;
 pub mod relay_pool;
 
 pub use announcement::{
-    ServerAnnouncement, NOSTR_KIND_SERVER_ANNOUNCEMENT, SERVER_ANNOUNCEMENT_VERSION,
+    ServerAnnouncement, NOSTR_KIND_SERVER_ANNOUNCEMENT, SERVER_ANNOUNCEMENT_REPUBLISH_SECS,
+    SERVER_ANNOUNCEMENT_TTL_SECS, SERVER_ANNOUNCEMENT_VERSION,
 };
 pub use identity::{
     client_id_from_public_key, decode_nsec_or_ncryptsec, generate_encrypted_identity,

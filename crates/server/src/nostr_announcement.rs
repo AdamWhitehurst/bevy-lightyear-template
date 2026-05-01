@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 use bevy::tasks::IoTaskPool;
-use nostr_client::{RelayPool, ServerAnnouncement, ServerIdentity, SERVER_ANNOUNCEMENT_VERSION};
+use nostr_client::{
+    RelayPool, ServerAnnouncement, ServerIdentity, SERVER_ANNOUNCEMENT_REPUBLISH_SECS,
+    SERVER_ANNOUNCEMENT_VERSION,
+};
 use server_lightyear::ServerNetworkConfig;
 
 pub struct ServerAnnouncementPlugin;
@@ -10,6 +13,10 @@ impl Plugin for ServerAnnouncementPlugin {
         app.add_systems(
             OnEnter(protocol::AppState::Ready),
             publish_announcement_on_ready,
+        )
+        .add_systems(
+            Update,
+            publish_announcement_periodically.run_if(in_state(protocol::AppState::Ready)),
         );
     }
 }
@@ -18,6 +25,35 @@ fn publish_announcement_on_ready(
     pool: Res<RelayPool>,
     identity: Res<ServerIdentity>,
     network: Res<ServerNetworkConfig>,
+) {
+    publish_announcement(&pool, &identity, &network);
+}
+
+fn publish_announcement_periodically(
+    time: Res<Time>,
+    mut last_publish: Local<Option<f64>>,
+    pool: Res<RelayPool>,
+    identity: Res<ServerIdentity>,
+    network: Res<ServerNetworkConfig>,
+) {
+    let now = time.elapsed_secs_f64();
+    let Some(last) = *last_publish else {
+        *last_publish = Some(now);
+        return;
+    };
+
+    if now - last < SERVER_ANNOUNCEMENT_REPUBLISH_SECS as f64 {
+        return;
+    }
+
+    *last_publish = Some(now);
+    publish_announcement(&pool, &identity, &network);
+}
+
+fn publish_announcement(
+    pool: &RelayPool,
+    identity: &ServerIdentity,
+    network: &ServerNetworkConfig,
 ) {
     let client = pool.client.clone();
     let identity = identity.clone();

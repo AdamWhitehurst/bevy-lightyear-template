@@ -1,9 +1,13 @@
-use std::{net::SocketAddr, time::Instant};
+use std::{
+    net::SocketAddr,
+    time::{Duration, Instant},
+};
 
 use async_channel::Receiver;
 use bevy::{prelude::*, tasks::IoTaskPool};
 use nostr_sdk::{
     Client, Event, EventBuilder, Filter, Kind, PublicKey, RelayMessage, RelayPoolNotification, Tag,
+    Timestamp,
 };
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +15,11 @@ use crate::{relay_pool::RelayPool, ServerIdentity};
 
 pub const NOSTR_KIND_SERVER_ANNOUNCEMENT: u16 = 30078;
 pub const SERVER_ANNOUNCEMENT_VERSION: u32 = 1;
+#[cfg(debug_assertions)]
+pub const SERVER_ANNOUNCEMENT_TTL_SECS: u64 = 10;
+#[cfg(not(debug_assertions))]
+pub const SERVER_ANNOUNCEMENT_TTL_SECS: u64 = 60;
+pub const SERVER_ANNOUNCEMENT_REPUBLISH_SECS: u64 = SERVER_ANNOUNCEMENT_TTL_SECS / 2;
 const SERVER_ANNOUNCEMENT_IDENTIFIER: &str = "server";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -65,9 +74,11 @@ pub fn server_announcement_builder(
     announcement: &ServerAnnouncement,
 ) -> Result<EventBuilder, serde_json::Error> {
     let content = serde_json::to_string(announcement)?;
+    let expiration = Timestamp::now() + Duration::from_secs(SERVER_ANNOUNCEMENT_TTL_SECS);
     Ok(
         EventBuilder::new(Kind::Custom(NOSTR_KIND_SERVER_ANNOUNCEMENT.into()), content)
-            .tag(Tag::identifier(SERVER_ANNOUNCEMENT_IDENTIFIER)),
+            .tag(Tag::identifier(SERVER_ANNOUNCEMENT_IDENTIFIER))
+            .tag(Tag::expiration(expiration)),
     )
 }
 
@@ -144,6 +155,16 @@ pub fn poll_server_announcements(
         } else {
             list.entries.push(entry);
         }
+    }
+
+    let now = Instant::now();
+    let before_len = list.entries.len();
+    list.entries.retain(|entry| {
+        now.duration_since(entry.received_at) <= Duration::from_secs(SERVER_ANNOUNCEMENT_TTL_SECS)
+    });
+    let removed = before_len.saturating_sub(list.entries.len());
+    if removed > 0 {
+        trace!(removed, "pruned stale Nostr server announcements");
     }
 }
 
@@ -256,6 +277,11 @@ mod tests {
         assert_eq!(content.cert_digest, announcement().cert_digest);
         assert_eq!(content.display_name, announcement().display_name);
         assert_eq!(content.version, SERVER_ANNOUNCEMENT_VERSION);
+        let expiration = event
+            .tags
+            .expiration()
+            .expect("announcement must include NIP-40 expiration tag");
+        assert!(expiration.as_secs() > Timestamp::now().as_secs());
     }
 
     #[test]
@@ -356,5 +382,23 @@ mod tests {
             .unwrap();
         assert_eq!(entry.addr, updated_announcement.server_addr);
         assert_eq!(entry.display_name, updated_announcement.display_name);
+    }
+    #[test]
+    fn poll_server_announcements_prunes_stale_entries() {
+        let keys = Keys::new(SecretKey::generate());
+        let mut stale =
+            parse_server_announcement_event(&signed_event(&keys, &announcement())).unwrap();
+        stale.received_at = Instant::now() - Duration::from_secs(SERVER_ANNOUNCEMENT_TTL_SECS + 1);
+        let (tx, rx) = async_channel::unbounded();
+        tx.try_send(stale).unwrap();
+
+        let mut app = App::new();
+        app.init_resource::<ServerList>()
+            .insert_resource(ServerAnnouncementRx(rx))
+            .add_systems(Update, poll_server_announcements);
+        app.update();
+
+        let list = app.world().resource::<ServerList>();
+        assert!(list.entries.is_empty());
     }
 }
