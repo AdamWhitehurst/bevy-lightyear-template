@@ -227,8 +227,11 @@ fn setup_main_menu(
             ));
 
             for entry in &server_list.entries {
-                let label = format!("{}\n{}\n{}", entry.display_name, entry.addr, entry.pubkey);
-                widgets::spawn_button(parent, &label, ServerListEntryButton(entry.clone()));
+                widgets::spawn_server_entry_button(
+                    parent,
+                    &entry.menu_label(),
+                    ServerListEntryButton(entry.clone()),
+                );
             }
             // Connect Button
             parent

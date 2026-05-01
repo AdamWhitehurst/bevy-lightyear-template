@@ -369,6 +369,7 @@ fn server_list_entry_sets_connection_config() {
             display_name: "Listed Server".to_string(),
             received_at: Instant::now(),
         });
+    let full_pubkey = pubkey.to_string();
     enter_main_menu(&mut app);
     app.update();
 
@@ -380,6 +381,11 @@ fn server_list_entry_sets_connection_config() {
             .single(app.world())
             .expect("ServerListEntryButton should exist")
     };
+    let children = app.world().get::<Children>(button).unwrap();
+    let label = app.world().get::<Text>(children[0]).unwrap();
+    assert!(label.0.contains("Listed Server"));
+    assert!(label.0.contains("Server ID:"));
+    assert!(!label.0.contains(&full_pubkey));
     app.world_mut()
         .entity_mut(button)
         .insert(Interaction::Pressed);

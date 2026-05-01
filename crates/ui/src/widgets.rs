@@ -35,6 +35,39 @@ pub fn spawn_button<M: Component>(parent: &mut ChildSpawnerCommands, label: &str
         });
 }
 
+pub fn spawn_server_entry_button<M: Component>(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    marker: M,
+) {
+    parent
+        .spawn((
+            Button,
+            Node {
+                width: Val::Px(620.0),
+                height: Val::Px(110.0),
+                border: UiRect::all(Val::Px(5.0)),
+                padding: UiRect::all(Val::Px(10.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BorderColor::all(TEXT_COLOR),
+            BackgroundColor(BUTTON_BG),
+            marker,
+        ))
+        .with_children(|parent| {
+            parent.spawn((
+                Text::new(label),
+                TextFont {
+                    font_size: 24.0,
+                    ..default()
+                },
+                TextColor(TEXT_COLOR),
+            ));
+        });
+}
+
 pub fn spawn_text_input<M: Component>(
     parent: &mut ChildSpawnerCommands,
     placeholder: &str,

@@ -30,6 +30,26 @@ pub struct ServerListEntry {
     pub received_at: Instant,
 }
 
+impl ServerListEntry {
+    pub fn menu_label(&self) -> String {
+        format!(
+            "{}\n{}\nServer ID: {}",
+            self.display_name,
+            self.addr,
+            short_public_key(&self.pubkey)
+        )
+    }
+}
+
+fn short_public_key(public: &PublicKey) -> String {
+    let hex = public.to_string();
+    if hex.len() <= 18 {
+        return hex;
+    }
+
+    format!("{}…{}", &hex[..8], &hex[hex.len() - 6..])
+}
+
 #[derive(Resource, Default, Clone, Debug)]
 pub struct ServerList {
     pub entries: Vec<ServerListEntry>,
@@ -249,6 +269,20 @@ mod tests {
         assert_eq!(entry.addr, announcement().server_addr);
         assert_eq!(entry.cert_digest, announcement().cert_digest);
         assert_eq!(entry.display_name, announcement().display_name);
+    }
+
+    #[test]
+    fn menu_label_uses_short_server_id() {
+        let keys = Keys::new(SecretKey::generate());
+        let entry = parse_server_announcement_event(&signed_event(&keys, &announcement())).unwrap();
+        let full_pubkey = keys.public_key().to_string();
+
+        let label = entry.menu_label();
+
+        assert!(label.contains("Test Server"));
+        assert!(label.contains("127.0.0.1:5001"));
+        assert!(label.contains("Server ID:"));
+        assert!(!label.contains(&full_pubkey));
     }
 
     #[test]
