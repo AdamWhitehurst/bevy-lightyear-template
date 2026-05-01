@@ -5,6 +5,7 @@ use nostr_client::{
     SERVER_ANNOUNCEMENT_VERSION,
 };
 use server_lightyear::ServerNetworkConfig;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 pub struct ServerAnnouncementPlugin;
 
@@ -58,7 +59,7 @@ fn publish_announcement(
     let client = pool.client.clone();
     let identity = identity.clone();
     let announcement = ServerAnnouncement {
-        server_addr: std::net::SocketAddr::from((network.bind_addr, network.port)),
+        server_addr: announced_server_addr(network),
         cert_digest: load_cert_digest(),
         display_name: "Untitled Brawler Server".to_string(),
         version: SERVER_ANNOUNCEMENT_VERSION,
@@ -84,4 +85,63 @@ fn load_cert_digest() -> String {
     include_str!("../../../certificates/digest.txt")
         .trim()
         .to_string()
+}
+
+fn announced_server_addr(network: &ServerNetworkConfig) -> SocketAddr {
+    SocketAddr::from((announced_ip(network.bind_addr), network.port))
+}
+
+fn announced_ip(bind_addr: IpAddr) -> IpAddr {
+    match bind_addr {
+        IpAddr::V4(addr) if addr.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(addr) if addr.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+        addr => addr,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn announced_server_addr_replaces_unspecified_ipv4_with_loopback() {
+        let network = ServerNetworkConfig {
+            bind_addr: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            port: 5001,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            announced_server_addr(&network),
+            SocketAddr::from((Ipv4Addr::LOCALHOST, 5001))
+        );
+    }
+
+    #[test]
+    fn announced_server_addr_replaces_unspecified_ipv6_with_loopback() {
+        let network = ServerNetworkConfig {
+            bind_addr: IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+            port: 5001,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            announced_server_addr(&network),
+            SocketAddr::from((Ipv6Addr::LOCALHOST, 5001))
+        );
+    }
+
+    #[test]
+    fn announced_server_addr_preserves_specific_bind_address() {
+        let network = ServerNetworkConfig {
+            bind_addr: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
+            port: 5001,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            announced_server_addr(&network),
+            SocketAddr::from((Ipv4Addr::new(192, 0, 2, 10), 5001))
+        );
+    }
 }
