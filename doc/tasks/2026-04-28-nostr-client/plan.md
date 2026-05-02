@@ -1304,11 +1304,11 @@ pub client_id: u64,
 - [x] `cargo test -p ui ui_plugin` passes after `ServerList` UI dependency changes.
 
 #### Manual
-- [ ] Run `SERVER_NSEC=nsec1... RUST_LOG=nostr_client=debug cargo server-log`; wait for announcement publish.
-- [ ] Run `RUST_LOG=nostr_client=debug cargo client`; unlock/generate identity; after EOSE, `MainMenu` shows the server entry with display name, address, and signing pubkey.
-- [ ] Click the server entry; UI transitions to `Connecting`, and existing flow connects using pre-shared netcode key.
-- [ ] Kill server; client entry remains visible after returning to `MainMenu`.
-- [ ] Restart server with same `SERVER_NSEC` and changed address/port if configurable; entry is replaced rather than duplicated for that pubkey.
+- [x] Run `SERVER_NSEC=nsec1... RUST_LOG=nostr_client=debug cargo server-log`; wait for announcement publish.
+- [x] Run `RUST_LOG=nostr_client=debug cargo client`; unlock/generate identity; after EOSE, `MainMenu` shows the server entry with display name, address, and signing pubkey.
+- [x] Click the server entry; UI transitions to `Connecting`, and existing flow connects using pre-shared netcode key.
+- [x] Kill server; client entry remains visible after returning to `MainMenu`.
+- [x] Restart server with same `SERVER_NSEC` and changed address/port if configurable; entry is replaced rather than duplicated for that pubkey.
 
 ---
 
