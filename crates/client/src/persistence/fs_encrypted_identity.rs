@@ -1,6 +1,9 @@
-use std::{fs, path::PathBuf, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 
-use nostr_client::{client_identity_dir, identity::ENCRYPTED_IDENTITY_VERSION, EncryptedIdentity};
+use nostr_client::{
+    client_identity_dir, load_encrypted_identity_from_dir, save_encrypted_identity_to_dir,
+    EncryptedIdentity, IdentityStoreError,
+};
 use persistence::{PersistenceError, Store};
 
 #[derive(Clone)]
@@ -18,45 +21,46 @@ pub fn nostr_identity_dir(profile: Option<&str>) -> Result<PathBuf, String> {
 
 impl Store<(), EncryptedIdentity> for FsEncryptedIdentityStore {
     fn save(&self, _key: &(), value: &EncryptedIdentity) -> Result<(), PersistenceError> {
-        fs::create_dir_all(self.base_dir.as_ref())
-            .map_err(|error| PersistenceError::Serialize(format!("mkdir identity dir: {error}")))?;
-        let path = self.base_dir.join("identity.bin");
-        let bytes = bincode::serialize(value)
-            .map_err(|error| PersistenceError::Serialize(format!("serialize identity: {error}")))?;
-        let tmp_path = path.with_extension("bin.tmp");
-        fs::write(&tmp_path, &bytes)
-            .map_err(|error| PersistenceError::Serialize(format!("write identity tmp: {error}")))?;
-        fs::rename(&tmp_path, &path)
-            .map_err(|error| PersistenceError::Serialize(format!("rename identity: {error}")))?;
-        Ok(())
+        save_encrypted_identity_to_dir(self.base_dir.as_ref(), value)
+            .map_err(identity_store_save_error_to_persistence)
     }
 
     fn load(&self, _key: &()) -> Result<Option<EncryptedIdentity>, PersistenceError> {
-        let path = self.base_dir.join("identity.bin");
-        if !path.exists() {
-            return Ok(None);
-        }
+        load_encrypted_identity_from_dir(self.base_dir.as_ref())
+            .map_err(identity_store_load_error_to_persistence)
+    }
+}
 
-        let bytes = fs::read(&path)
-            .map_err(|error| PersistenceError::Deserialize(format!("read identity: {error}")))?;
-        let identity: EncryptedIdentity = bincode::deserialize(&bytes).map_err(|error| {
-            PersistenceError::Deserialize(format!("deserialize identity: {error}"))
-        })?;
-        if identity.version != ENCRYPTED_IDENTITY_VERSION {
-            return Err(PersistenceError::VersionMismatch {
-                expected: ENCRYPTED_IDENTITY_VERSION,
-                actual: identity.version,
-            });
+fn identity_store_save_error_to_persistence(error: IdentityStoreError) -> PersistenceError {
+    match error {
+        IdentityStoreError::Io(message) | IdentityStoreError::Serialize(message) => {
+            PersistenceError::Serialize(message)
         }
+        IdentityStoreError::Deserialize(message) => PersistenceError::Deserialize(message),
+        IdentityStoreError::VersionMismatch { expected, actual } => {
+            PersistenceError::VersionMismatch { expected, actual }
+        }
+    }
+}
 
-        Ok(Some(identity))
+fn identity_store_load_error_to_persistence(error: IdentityStoreError) -> PersistenceError {
+    match error {
+        IdentityStoreError::Io(message) | IdentityStoreError::Deserialize(message) => {
+            PersistenceError::Deserialize(message)
+        }
+        IdentityStoreError::Serialize(message) => PersistenceError::Serialize(message),
+        IdentityStoreError::VersionMismatch { expected, actual } => {
+            PersistenceError::VersionMismatch { expected, actual }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nostr_client::{generate_encrypted_identity, EncryptedIdentity};
+    use nostr_client::{
+        generate_encrypted_identity, identity::ENCRYPTED_IDENTITY_VERSION, EncryptedIdentity,
+    };
 
     fn test_store(dir: &std::path::Path) -> FsEncryptedIdentityStore {
         FsEncryptedIdentityStore {
@@ -70,6 +74,25 @@ mod tests {
             nostr_identity_dir(Some("alice_1")).unwrap(),
             client_identity_dir(Some("alice_1")).unwrap()
         );
+    }
+
+    #[test]
+    fn load_wrong_version_returns_version_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let wrong_version = EncryptedIdentity {
+            version: nostr_client::identity::ENCRYPTED_IDENTITY_VERSION + 1,
+            ciphertext: "ncryptsec1invalid".to_string(),
+        };
+        save_encrypted_identity_to_dir(dir.path(), &wrong_version).unwrap();
+        let store = test_store(dir.path());
+
+        match store.load(&()).unwrap_err() {
+            PersistenceError::VersionMismatch { expected, actual } => {
+                assert_eq!(expected, ENCRYPTED_IDENTITY_VERSION);
+                assert_eq!(actual, ENCRYPTED_IDENTITY_VERSION + 1);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
     }
 
     #[test]
@@ -91,26 +114,6 @@ mod tests {
 
         assert_eq!(loaded.version, ENCRYPTED_IDENTITY_VERSION);
         assert_eq!(loaded.ciphertext, encrypted.ciphertext);
-    }
-
-    #[test]
-    fn wrong_version_returns_version_mismatch() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = test_store(dir.path());
-        let wrong_version = EncryptedIdentity {
-            version: ENCRYPTED_IDENTITY_VERSION + 1,
-            ciphertext: "ncryptsec1invalid".to_string(),
-        };
-        let bytes = bincode::serialize(&wrong_version).unwrap();
-        fs::write(dir.path().join("identity.bin"), bytes).unwrap();
-
-        match store.load(&()).unwrap_err() {
-            PersistenceError::VersionMismatch { expected, actual } => {
-                assert_eq!(expected, ENCRYPTED_IDENTITY_VERSION);
-                assert_eq!(actual, ENCRYPTED_IDENTITY_VERSION + 1);
-            }
-            other => panic!("unexpected error: {other}"),
-        }
     }
 
     #[test]

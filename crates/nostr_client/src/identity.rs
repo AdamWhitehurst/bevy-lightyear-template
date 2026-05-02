@@ -90,7 +90,7 @@ pub fn decode_nsec_or_ncryptsec(
 ) -> Result<SecretKey, String> {
     let trimmed = value.trim();
     if trimmed.starts_with("ncryptsec1") {
-        let passphrase = passphrase.ok_or("SERVER_NSEC_PASSPHRASE is required for ncryptsec")?;
+        let passphrase = passphrase.ok_or("NOSTR_IDENTITY_PASSPHRASE is required for ncryptsec")?;
         let encrypted = EncryptedSecretKey::from_bech32(trimmed)
             .map_err(|error| format!("invalid ncryptsec: {error}"))?;
         encrypted
@@ -101,23 +101,42 @@ pub fn decode_nsec_or_ncryptsec(
     }
 }
 
-pub fn load_server_identity_from_env_or_file(
-    path: Option<&Path>,
+pub fn load_server_identity_from_env_or_profile(
+    profile: Option<&str>,
 ) -> Result<ServerIdentity, String> {
-    let raw = match std::env::var("SERVER_NSEC") {
-        Ok(value) => value,
-        Err(_) => {
-            let path = path.ok_or("SERVER_NSEC not set and no nsec_file_path configured")?;
-            std::fs::read_to_string(path).map_err(|error| {
-                format!(
-                    "SERVER_NSEC not set and failed to read {}: {error}",
-                    path.display()
-                )
-            })?
-        }
-    };
-    let passphrase = std::env::var("SERVER_NSEC_PASSPHRASE").ok();
-    let secret = decode_nsec_or_ncryptsec(&raw, passphrase.as_deref())?;
+    let passphrase = std::env::var("NOSTR_IDENTITY_PASSPHRASE").ok();
+    if let Ok(raw) = std::env::var("SERVER_NSEC") {
+        return server_identity_from_secret_text(&raw, passphrase.as_deref());
+    }
+    let profile_dir = client_identity_dir(profile)?;
+    load_server_identity_from_profile_dir(&profile_dir, passphrase.as_deref())
+}
+
+pub fn load_server_identity_from_profile_dir(
+    profile_dir: &Path,
+    passphrase: Option<&str>,
+) -> Result<ServerIdentity, String> {
+    let encrypted = load_encrypted_identity_from_dir(profile_dir)
+        .map_err(|error| format!("load profile identity: {error}"))?
+        .ok_or_else(|| {
+            format!(
+                "SERVER_NSEC not set and no encrypted identity found at {}",
+                identity_file_path_in_dir(profile_dir).display()
+            )
+        })?;
+    let passphrase =
+        passphrase.ok_or("NOSTR_IDENTITY_PASSPHRASE is required to unlock profile identity")?;
+    let identity = unlock_identity(&encrypted, passphrase)?;
+    Ok(ServerIdentity {
+        keys: Keys::new(identity.secret),
+    })
+}
+
+fn server_identity_from_secret_text(
+    raw: &str,
+    passphrase: Option<&str>,
+) -> Result<ServerIdentity, String> {
+    let secret = decode_nsec_or_ncryptsec(raw, passphrase)?;
     Ok(ServerIdentity {
         keys: Keys::new(secret),
     })
@@ -137,11 +156,12 @@ pub fn client_identity_dir(profile: Option<&str>) -> Result<PathBuf, String> {
     }
 }
 
-pub fn server_nsec_file_path(profile: Option<&str>) -> Result<PathBuf, String> {
-    match profile {
-        Some(profile) => Ok(profile_config_dir(profile)?.join("server.nsec")),
-        None => Ok(nostr_config_dir().join("server.nsec")),
-    }
+pub fn identity_file_path(profile: Option<&str>) -> Result<PathBuf, String> {
+    Ok(identity_file_path_in_dir(&client_identity_dir(profile)?))
+}
+
+pub fn identity_file_path_in_dir(profile_dir: &Path) -> PathBuf {
+    profile_dir.join("identity.bin")
 }
 
 fn profile_config_dir(profile: &str) -> Result<PathBuf, String> {
@@ -183,6 +203,85 @@ fn non_empty_env_path(name: &str) -> Option<PathBuf> {
     std::env::var_os(name)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
+}
+
+#[derive(Debug)]
+pub enum IdentityStoreError {
+    Io(String),
+    Serialize(String),
+    Deserialize(String),
+    VersionMismatch { expected: u32, actual: u32 },
+}
+
+impl std::fmt::Display for IdentityStoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(error) => write!(f, "IO error: {error}"),
+            Self::Serialize(error) => write!(f, "serialize identity: {error}"),
+            Self::Deserialize(error) => write!(f, "deserialize identity: {error}"),
+            Self::VersionMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "identity version mismatch: expected {expected}, got {actual}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for IdentityStoreError {}
+
+pub fn save_encrypted_identity_to_dir(
+    profile_dir: &Path,
+    value: &EncryptedIdentity,
+) -> Result<(), IdentityStoreError> {
+    std::fs::create_dir_all(profile_dir).map_err(|error| {
+        IdentityStoreError::Io(format!(
+            "mkdir identity dir {}: {error}",
+            profile_dir.display()
+        ))
+    })?;
+    let path = identity_file_path_in_dir(profile_dir);
+    let bytes = bincode::serialize(value)
+        .map_err(|error| IdentityStoreError::Serialize(error.to_string()))?;
+    let tmp_path = path.with_extension("bin.tmp");
+    std::fs::write(&tmp_path, &bytes).map_err(|error| {
+        IdentityStoreError::Io(format!(
+            "write identity tmp {}: {error}",
+            tmp_path.display()
+        ))
+    })?;
+    std::fs::rename(&tmp_path, &path).map_err(|error| {
+        IdentityStoreError::Io(format!(
+            "rename identity {} to {}: {error}",
+            tmp_path.display(),
+            path.display()
+        ))
+    })?;
+    Ok(())
+}
+
+pub fn load_encrypted_identity_from_dir(
+    profile_dir: &Path,
+) -> Result<Option<EncryptedIdentity>, IdentityStoreError> {
+    let path = identity_file_path_in_dir(profile_dir);
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let bytes = std::fs::read(&path).map_err(|error| {
+        IdentityStoreError::Io(format!("read identity {}: {error}", path.display()))
+    })?;
+    let identity: EncryptedIdentity = bincode::deserialize(&bytes)
+        .map_err(|error| IdentityStoreError::Deserialize(error.to_string()))?;
+    if identity.version != ENCRYPTED_IDENTITY_VERSION {
+        return Err(IdentityStoreError::VersionMismatch {
+            expected: ENCRYPTED_IDENTITY_VERSION,
+            actual: identity.version,
+        });
+    }
+
+    Ok(Some(identity))
 }
 
 fn encrypt_identity(
@@ -252,7 +351,7 @@ mod tests {
 
         let error = decode_nsec_or_ncryptsec(&ncryptsec, None).unwrap_err();
 
-        assert!(error.contains("SERVER_NSEC_PASSPHRASE"));
+        assert!(error.contains("NOSTR_IDENTITY_PASSPHRASE"));
     }
 
     #[test]
@@ -283,14 +382,67 @@ mod tests {
     }
 
     #[test]
-    fn server_nsec_file_path_uses_profile_subdirectory() {
+    fn identity_file_path_uses_profile_subdirectory() {
         assert_eq!(
-            server_nsec_file_path(Some("dev-server")).unwrap(),
+            identity_file_path(Some("dev-server")).unwrap(),
             nostr_config_dir()
                 .join("profiles")
                 .join("dev-server")
-                .join("server.nsec")
+                .join("identity.bin")
         );
+    }
+
+    #[test]
+    fn encrypted_identity_file_roundtrips() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_identity, encrypted) = generate_encrypted_identity("profile passphrase").unwrap();
+
+        save_encrypted_identity_to_dir(dir.path(), &encrypted).unwrap();
+        let loaded = load_encrypted_identity_from_dir(dir.path())
+            .unwrap()
+            .expect("identity should exist");
+
+        assert_eq!(loaded.version, encrypted.version);
+        assert_eq!(loaded.ciphertext, encrypted.ciphertext);
+        assert!(identity_file_path_in_dir(dir.path()).exists());
+        assert!(!dir.path().join("identity.bin.tmp").exists());
+    }
+
+    #[test]
+    fn server_identity_loads_from_encrypted_profile_identity() {
+        let dir = tempfile::tempdir().unwrap();
+        let (client_identity, encrypted) =
+            generate_encrypted_identity("profile passphrase").unwrap();
+        save_encrypted_identity_to_dir(dir.path(), &encrypted).unwrap();
+
+        let server_identity =
+            load_server_identity_from_profile_dir(dir.path(), Some("profile passphrase")).unwrap();
+
+        assert_eq!(server_identity.keys.public_key(), client_identity.public);
+    }
+
+    #[test]
+    fn server_identity_profile_requires_passphrase() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_client_identity, encrypted) =
+            generate_encrypted_identity("profile passphrase").unwrap();
+        save_encrypted_identity_to_dir(dir.path(), &encrypted).unwrap();
+
+        let error = match load_server_identity_from_profile_dir(dir.path(), None) {
+            Ok(_) => panic!("profile identity should require passphrase"),
+            Err(error) => error,
+        };
+
+        assert!(error.contains("NOSTR_IDENTITY_PASSPHRASE"));
+    }
+    #[test]
+    fn server_nsec_override_still_decodes_raw_nsec() {
+        let secret = SecretKey::generate();
+        let nsec = secret.to_bech32().unwrap();
+
+        let identity = server_identity_from_secret_text(&nsec, None).unwrap();
+
+        assert_eq!(identity.keys.public_key(), Keys::new(secret).public_key());
     }
 
     #[test]

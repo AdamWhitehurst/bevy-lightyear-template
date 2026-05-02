@@ -1685,40 +1685,53 @@ cargo client -- --nostr-identity bob
 
 ---
 
-## Phase 5b: Server identity profile flag
+## Phase 5b: Unified client/server identity profiles
 
 ### Changes
 
-#### 1. Shared profile paths for server keys
+#### 1. Single profile identity file
 **File**: `crates/nostr_client/src/identity.rs`  
 **Action**: modify
 
-Add `server_nsec_file_path(profile: Option<&str>) -> Result<PathBuf, String>` using the same profile validation and root directory as client identities. Default remains `$XDG_CONFIG_HOME/nostr/server.nsec` (or `~/.config/nostr/server.nsec`). A named profile reads `$XDG_CONFIG_HOME/nostr/profiles/<profile>/server.nsec`.
+Make `nostr_client` own the canonical profile identity store. Profiles now use a single encrypted `identity.bin` file for both native client and server:
 
-#### 2. Native server CLI flag
+```text
+$XDG_CONFIG_HOME/nostr/identity.bin
+$XDG_CONFIG_HOME/nostr/profiles/<profile>/identity.bin
+```
+
+Remove profile `server.nsec` support. `SERVER_NSEC` remains as an optional deployment override and accepts raw `nsec1...` or `ncryptsec1...`; `NOSTR_IDENTITY_PASSPHRASE` decrypts both `SERVER_NSEC=ncryptsec1...` and profile `identity.bin`.
+
+#### 2. Native client delegates persistence to `nostr_client`
+**File**: `crates/client/src/persistence/fs_encrypted_identity.rs`  
+**Action**: modify
+
+Keep the Bevy/persistence adapter in `client`, but delegate `identity.bin` pathing, bincode serialization, atomic save, load, and version validation to `nostr_client`.
+
+#### 3. Native server loads the shared profile identity
 **File**: `crates/server/src/main.rs`  
 **Action**: modify
 
-Parse `--nostr-identity <profile>` and `--nostr-identity=<profile>`. Before loading `ServerIdentity`, override `ServerNetworkConfig.nsec_file_path` with `server_nsec_file_path(profile)`. `SERVER_NSEC` remains the highest-priority source; the flag only selects the fallback file when `SERVER_NSEC` is unset.
+Parse `--nostr-identity <profile>` and `--nostr-identity=<profile>`. Load server identity with `load_server_identity_from_env_or_profile(profile)`, which uses `SERVER_NSEC` first and otherwise unlocks the selected profile `identity.bin` using `NOSTR_IDENTITY_PASSPHRASE`.
 
-Example manual runs:
+#### 4. Remove server `.nsec` fallback config
+**File**: `crates/server_lightyear/src/connection.rs`  
+**Action**: modify
 
-```sh
-cargo server -- --nostr-identity staging
-cargo server -- --nostr-identity local-a
-```
+Remove `ServerNetworkConfig.nsec_file_path` and all default `server.nsec` path helpers. Server identity is no longer part of Lightyear network config.
 
 ### Verification
 #### Automated
 - [x] `pgrep -af 'cargo (build|check|test|run)|wasm-pack test'` shows no other active build/test before running cargo commands.
 - [x] `cargo test -p nostr_client identity` passes.
 - [x] `cargo test -p server parse_cli_options` passes.
-- [x] `cargo test -p client fs_encrypted_identity` passes after moving profile path rules into `nostr_client`.
+- [x] `cargo test -p client fs_encrypted_identity` passes.
 - [x] `cargo check-all` passes.
-Note: `cargo test-native` was also attempted and currently fails outside this change in `cargo test -p protocol --test physics_isolation entity_without_map_id_panics_in_filter_pairs` because that test no longer panics as expected.
+- [x] `cargo web-build` passes with `bincode` in `nostr_client`.
 
 #### Manual
-- [ ] Put a valid server `nsec1...` in `$XDG_CONFIG_HOME/nostr/profiles/staging/server.nsec` (or `~/.config/nostr/profiles/staging/server.nsec`), run `cargo server -- --nostr-identity staging`, and observe startup loads that profile when `SERVER_NSEC` is unset.
+- [ ] Create or copy an encrypted `identity.bin` into `$XDG_CONFIG_HOME/nostr/profiles/staging/identity.bin` (or `~/.config/nostr/profiles/staging/identity.bin`), set `NOSTR_IDENTITY_PASSPHRASE`, run `cargo server -- --nostr-identity staging`, and observe startup loads that shared profile when `SERVER_NSEC` is unset.
+- [ ] Set `SERVER_NSEC=nsec1...` and run `cargo server -- --nostr-identity staging`; observe the env override is used instead of profile `identity.bin`.
 
 ---
 

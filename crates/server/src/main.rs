@@ -13,9 +13,7 @@ use diagnostics::ServerDiagnosticsPlugin;
 use gameplay::ServerGameplayPlugin;
 use map::ServerMapPlugin;
 use nostr_announcement::ServerAnnouncementPlugin;
-use nostr_client::{
-    load_server_identity_from_env_or_file, server_nsec_file_path, NostrClientPlugin,
-};
+use nostr_client::{load_server_identity_from_env_or_profile, NostrClientPlugin};
 use protocol::diagnostics::SharedDiagnosticsPlugin;
 use protocol::*;
 use server_lightyear::{ServerNetworkConfig, ServerNetworkPlugin};
@@ -28,19 +26,14 @@ struct ServerCliOptions {
 
 fn main() {
     let cli_options = parse_cli_options();
-    let mut network_config = ServerNetworkConfig {
+    let network_config = ServerNetworkConfig {
         cert_pem_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../certificates/cert.pem").into(),
         key_pem_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../certificates/key.pem").into(),
         ..Default::default()
     };
-    network_config.nsec_file_path = Some(
-        server_nsec_file_path(cli_options.nostr_identity_profile.as_deref())
-            .expect("invalid --nostr-identity value"),
-    );
-    let server_identity = load_server_identity_from_env_or_file(
-        network_config.nsec_file_path.as_deref(),
-    )
-    .expect("SERVER_NSEC or ~/.config/nostr/server.nsec must contain a valid nsec/ncryptsec");
+    let server_identity =
+        load_server_identity_from_env_or_profile(cli_options.nostr_identity_profile.as_deref())
+            .expect("SERVER_NSEC or profile identity.bin must contain a valid Nostr identity");
 
     App::new()
         .add_plugins(MinimalPlugins)
