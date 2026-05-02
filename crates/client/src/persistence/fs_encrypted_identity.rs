@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf, sync::Arc};
 
-use nostr_client::{identity::ENCRYPTED_IDENTITY_VERSION, EncryptedIdentity};
+use nostr_client::{client_identity_dir, identity::ENCRYPTED_IDENTITY_VERSION, EncryptedIdentity};
 use persistence::{PersistenceError, Store};
 
 #[derive(Clone)]
@@ -9,60 +9,11 @@ pub struct FsEncryptedIdentityStore {
 }
 
 pub fn default_nostr_identity_dir() -> PathBuf {
-    nostr_identity_dir(None).expect("default identity profile is valid")
+    client_identity_dir(None).expect("default identity profile is valid")
 }
 
 pub fn nostr_identity_dir(profile: Option<&str>) -> Result<PathBuf, String> {
-    match profile {
-        Some(profile) => {
-            validate_identity_profile(profile)?;
-            Ok(nostr_config_dir().join("profiles").join(profile))
-        }
-        None => Ok(nostr_config_dir()),
-    }
-}
-
-fn validate_identity_profile(profile: &str) -> Result<(), String> {
-    if profile.is_empty() {
-        return Err("Nostr identity profile must not be empty".to_string());
-    }
-    let mut bytes = profile.bytes();
-    let first = bytes.next().expect("profile is non-empty");
-    if !first.is_ascii_alphanumeric() {
-        return Err(format!(
-            "Nostr identity profile '{profile}' must start with an ASCII letter or digit"
-        ));
-    }
-    if bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')) {
-        Ok(())
-    } else {
-        Err(format!(
-            "Nostr identity profile '{profile}' must contain only ASCII letters, digits, '.', '_', or '-'"
-        ))
-    }
-}
-
-fn nostr_config_dir() -> PathBuf {
-    nostr_config_dir_from(
-        non_empty_env_path("XDG_CONFIG_HOME"),
-        non_empty_env_path("HOME"),
-    )
-}
-
-fn nostr_config_dir_from(xdg_config_home: Option<PathBuf>, home: Option<PathBuf>) -> PathBuf {
-    if let Some(path) = xdg_config_home {
-        return path.join("nostr");
-    }
-    if let Some(home) = home {
-        return home.join(".config").join("nostr");
-    }
-    PathBuf::from(".config").join("nostr")
-}
-
-fn non_empty_env_path(name: &str) -> Option<PathBuf> {
-    std::env::var_os(name)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
+    client_identity_dir(profile)
 }
 
 impl Store<(), EncryptedIdentity> for FsEncryptedIdentityStore {
@@ -107,45 +58,18 @@ mod tests {
     use super::*;
     use nostr_client::{generate_encrypted_identity, EncryptedIdentity};
 
-    #[test]
-    fn default_identity_dir_prefers_xdg_config_home() {
-        assert_eq!(
-            nostr_config_dir_from(
-                Some(PathBuf::from("/tmp/xdg")),
-                Some(PathBuf::from("/tmp/home"))
-            ),
-            PathBuf::from("/tmp/xdg/nostr")
-        );
-    }
-
-    #[test]
-    fn default_identity_dir_falls_back_to_home_config() {
-        assert_eq!(
-            nostr_config_dir_from(None, Some(PathBuf::from("/tmp/home"))),
-            PathBuf::from("/tmp/home/.config/nostr")
-        );
-    }
-
-    #[test]
-    fn named_identity_dir_uses_profile_subdirectory() {
-        assert_eq!(
-            nostr_identity_dir(Some("alice_1")).unwrap(),
-            nostr_config_dir().join("profiles").join("alice_1")
-        );
-    }
-
-    #[test]
-    fn named_identity_dir_rejects_paths() {
-        assert!(nostr_identity_dir(Some("../alice")).is_err());
-        assert!(nostr_identity_dir(Some("alice/bob")).is_err());
-        assert!(nostr_identity_dir(Some("")).is_err());
-        assert!(nostr_identity_dir(Some("--client-id")).is_err());
-    }
-
     fn test_store(dir: &std::path::Path) -> FsEncryptedIdentityStore {
         FsEncryptedIdentityStore {
             base_dir: Arc::new(dir.to_path_buf()),
         }
+    }
+
+    #[test]
+    fn named_identity_dir_delegates_to_shared_profile_path() {
+        assert_eq!(
+            nostr_identity_dir(Some("alice_1")).unwrap(),
+            client_identity_dir(Some("alice_1")).unwrap()
+        );
     }
 
     #[test]

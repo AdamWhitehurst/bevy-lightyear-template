@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use nostr_sdk::nips::nip49::EncryptedSecretKey;
 use nostr_sdk::{FromBech32, Keys, PublicKey, SecretKey, ToBech32};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const ENCRYPTED_IDENTITY_VERSION: u32 = 1;
 
@@ -123,6 +123,68 @@ pub fn load_server_identity_from_env_or_file(
     })
 }
 
+pub fn nostr_config_dir() -> PathBuf {
+    nostr_config_dir_from(
+        non_empty_env_path("XDG_CONFIG_HOME"),
+        non_empty_env_path("HOME"),
+    )
+}
+
+pub fn client_identity_dir(profile: Option<&str>) -> Result<PathBuf, String> {
+    match profile {
+        Some(profile) => Ok(profile_config_dir(profile)?),
+        None => Ok(nostr_config_dir()),
+    }
+}
+
+pub fn server_nsec_file_path(profile: Option<&str>) -> Result<PathBuf, String> {
+    match profile {
+        Some(profile) => Ok(profile_config_dir(profile)?.join("server.nsec")),
+        None => Ok(nostr_config_dir().join("server.nsec")),
+    }
+}
+
+fn profile_config_dir(profile: &str) -> Result<PathBuf, String> {
+    validate_identity_profile(profile)?;
+    Ok(nostr_config_dir().join("profiles").join(profile))
+}
+
+fn validate_identity_profile(profile: &str) -> Result<(), String> {
+    if profile.is_empty() {
+        return Err("Nostr identity profile must not be empty".to_string());
+    }
+    let mut bytes = profile.bytes();
+    let first = bytes.next().expect("profile is non-empty");
+    if !first.is_ascii_alphanumeric() {
+        return Err(format!(
+            "Nostr identity profile '{profile}' must start with an ASCII letter or digit"
+        ));
+    }
+    if bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Nostr identity profile '{profile}' must contain only ASCII letters, digits, '.', '_', or '-'"
+        ))
+    }
+}
+
+fn nostr_config_dir_from(xdg_config_home: Option<PathBuf>, home: Option<PathBuf>) -> PathBuf {
+    if let Some(path) = xdg_config_home {
+        return path.join("nostr");
+    }
+    if let Some(home) = home {
+        return home.join(".config").join("nostr");
+    }
+    PathBuf::from(".config").join("nostr")
+}
+
+fn non_empty_env_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
 fn encrypt_identity(
     secret: SecretKey,
     passphrase: &str,
@@ -191,5 +253,51 @@ mod tests {
         let error = decode_nsec_or_ncryptsec(&ncryptsec, None).unwrap_err();
 
         assert!(error.contains("SERVER_NSEC_PASSPHRASE"));
+    }
+
+    #[test]
+    fn nostr_config_dir_prefers_xdg_config_home() {
+        assert_eq!(
+            nostr_config_dir_from(
+                Some(PathBuf::from("/tmp/xdg")),
+                Some(PathBuf::from("/tmp/home"))
+            ),
+            PathBuf::from("/tmp/xdg/nostr")
+        );
+    }
+
+    #[test]
+    fn nostr_config_dir_falls_back_to_home_config() {
+        assert_eq!(
+            nostr_config_dir_from(None, Some(PathBuf::from("/tmp/home"))),
+            PathBuf::from("/tmp/home/.config/nostr")
+        );
+    }
+
+    #[test]
+    fn client_identity_dir_uses_profile_subdirectory() {
+        assert_eq!(
+            client_identity_dir(Some("alice_1")).unwrap(),
+            nostr_config_dir().join("profiles").join("alice_1")
+        );
+    }
+
+    #[test]
+    fn server_nsec_file_path_uses_profile_subdirectory() {
+        assert_eq!(
+            server_nsec_file_path(Some("dev-server")).unwrap(),
+            nostr_config_dir()
+                .join("profiles")
+                .join("dev-server")
+                .join("server.nsec")
+        );
+    }
+
+    #[test]
+    fn identity_profile_rejects_path_like_values() {
+        assert!(client_identity_dir(Some("../alice")).is_err());
+        assert!(client_identity_dir(Some("alice/bob")).is_err());
+        assert!(client_identity_dir(Some("")).is_err());
+        assert!(client_identity_dir(Some("--client-id")).is_err());
     }
 }

@@ -13,18 +13,30 @@ use diagnostics::ServerDiagnosticsPlugin;
 use gameplay::ServerGameplayPlugin;
 use map::ServerMapPlugin;
 use nostr_announcement::ServerAnnouncementPlugin;
-use nostr_client::{load_server_identity_from_env_or_file, NostrClientPlugin};
+use nostr_client::{
+    load_server_identity_from_env_or_file, server_nsec_file_path, NostrClientPlugin,
+};
 use protocol::diagnostics::SharedDiagnosticsPlugin;
 use protocol::*;
 use server_lightyear::{ServerNetworkConfig, ServerNetworkPlugin};
 use std::time::Duration;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ServerCliOptions {
+    nostr_identity_profile: Option<String>,
+}
+
 fn main() {
-    let network_config = ServerNetworkConfig {
+    let cli_options = parse_cli_options();
+    let mut network_config = ServerNetworkConfig {
         cert_pem_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../certificates/cert.pem").into(),
         key_pem_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../certificates/key.pem").into(),
         ..Default::default()
     };
+    network_config.nsec_file_path = Some(
+        server_nsec_file_path(cli_options.nostr_identity_profile.as_deref())
+            .expect("invalid --nostr-identity value"),
+    );
     let server_identity = load_server_identity_from_env_or_file(
         network_config.nsec_file_path.as_deref(),
     )
@@ -64,4 +76,69 @@ fn main() {
         .add_plugins(SharedDiagnosticsPlugin)
         .add_plugins(ServerDiagnosticsPlugin)
         .run();
+}
+
+fn parse_cli_options() -> ServerCliOptions {
+    let args: Vec<String> = std::env::args().collect();
+    parse_cli_options_from(&args).unwrap_or_else(|error| panic!("{error}"))
+}
+
+fn parse_cli_options_from(args: &[String]) -> Result<ServerCliOptions, String> {
+    let mut options = ServerCliOptions {
+        nostr_identity_profile: None,
+    };
+    let mut index = 1;
+    while index < args.len() {
+        let arg = &args[index];
+        if arg == "--nostr-identity" {
+            index += 1;
+            let Some(profile) = args.get(index) else {
+                return Err("--nostr-identity requires a profile name".to_string());
+            };
+            options.nostr_identity_profile = Some(profile.clone());
+        } else if let Some(profile) = arg.strip_prefix("--nostr-identity=") {
+            options.nostr_identity_profile = Some(profile.to_string());
+        }
+        index += 1;
+    }
+    Ok(options)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn parse_cli_options_defaults_to_default_server_identity() {
+        assert_eq!(
+            parse_cli_options_from(&args(&["server"])).unwrap(),
+            ServerCliOptions {
+                nostr_identity_profile: None,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_cli_options_reads_nostr_identity_profile() {
+        assert_eq!(
+            parse_cli_options_from(&args(&["server", "--nostr-identity", "staging"])).unwrap(),
+            ServerCliOptions {
+                nostr_identity_profile: Some("staging".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_cli_options_supports_equals_form() {
+        assert_eq!(
+            parse_cli_options_from(&args(&["server", "--nostr-identity=staging"])).unwrap(),
+            ServerCliOptions {
+                nostr_identity_profile: Some("staging".to_string()),
+            }
+        );
+    }
 }
