@@ -6,9 +6,7 @@ pub mod world_object;
 
 use bevy::prelude::*;
 use client::auth::ClientAuthPlugin;
-use client::persistence::fs_encrypted_identity::{
-    default_nostr_identity_dir, FsEncryptedIdentityStore,
-};
+use client::persistence::fs_encrypted_identity::{nostr_identity_dir, FsEncryptedIdentityStore};
 use client_lightyear::{ClientNetworkConfig, ClientNetworkPlugin};
 use dev::DevPlugin;
 use diagnostics::ClientDiagnosticsPlugin;
@@ -23,18 +21,35 @@ use persistence::{PendingStoreOps, StoreBackend};
 use protocol::diagnostics::SharedDiagnosticsPlugin;
 use protocol::*;
 use render::RenderPlugin;
-use std::{sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use ui::{UiClientConfig, UiPlugin};
 
+#[derive(Resource, Clone, Debug)]
+struct IdentityStoreConfig {
+    base_dir: Arc<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ClientCliOptions {
+    client_id: u64,
+    nostr_identity_profile: Option<String>,
+}
+
 fn main() {
-    let client_id = parse_client_id();
+    let cli_options = parse_cli_options();
 
     let network_config = ClientNetworkConfig {
-        client_id,
+        client_id: cli_options.client_id,
         certificate_digest: include_str!("../../../certificates/digest.txt")
             .trim()
             .to_string(),
         ..Default::default()
+    };
+    let identity_store_config = IdentityStoreConfig {
+        base_dir: Arc::new(
+            nostr_identity_dir(cli_options.nostr_identity_profile.as_deref())
+                .expect("invalid --nostr-identity value"),
+        ),
     };
 
     // Create UI config from network config to keep them in sync
@@ -68,6 +83,7 @@ fn main() {
         .add_message::<SaveEncryptedIdentity>()
         .init_resource::<StoredEncryptedIdentity>()
         .init_resource::<LoginError>()
+        .insert_resource(identity_store_config)
         .add_systems(Startup, spawn_identity_store)
         .add_systems(
             Update,
@@ -85,21 +101,48 @@ fn main() {
         .run();
 }
 
-fn parse_client_id() -> u64 {
+fn parse_cli_options() -> ClientCliOptions {
     let args: Vec<String> = std::env::args().collect();
-    for i in 0..args.len() {
-        if args[i] == "-c" || args[i] == "--client-id" {
-            if let Some(id_str) = args.get(i + 1) {
-                return id_str.parse().expect("Invalid client ID");
-            }
-        }
-    }
-    0
+    parse_cli_options_from(&args).unwrap_or_else(|error| panic!("{error}"))
 }
 
-fn spawn_identity_store(mut commands: Commands) {
+fn parse_cli_options_from(args: &[String]) -> Result<ClientCliOptions, String> {
+    let mut options = ClientCliOptions {
+        client_id: 0,
+        nostr_identity_profile: None,
+    };
+    let mut index = 1;
+    while index < args.len() {
+        let arg = &args[index];
+        if arg == "-c" || arg == "--client-id" {
+            index += 1;
+            let Some(id_str) = args.get(index) else {
+                return Err(format!("{arg} requires a client id"));
+            };
+            options.client_id = id_str
+                .parse()
+                .map_err(|error| format!("invalid client id '{id_str}': {error}"))?;
+        } else if let Some(id_str) = arg.strip_prefix("--client-id=") {
+            options.client_id = id_str
+                .parse()
+                .map_err(|error| format!("invalid client id '{id_str}': {error}"))?;
+        } else if arg == "--nostr-identity" {
+            index += 1;
+            let Some(profile) = args.get(index) else {
+                return Err("--nostr-identity requires a profile name".to_string());
+            };
+            options.nostr_identity_profile = Some(profile.clone());
+        } else if let Some(profile) = arg.strip_prefix("--nostr-identity=") {
+            options.nostr_identity_profile = Some(profile.to_string());
+        }
+        index += 1;
+    }
+    Ok(options)
+}
+
+fn spawn_identity_store(mut commands: Commands, config: Res<IdentityStoreConfig>) {
     let store = FsEncryptedIdentityStore {
-        base_dir: Arc::new(default_nostr_identity_dir()),
+        base_dir: config.base_dir.clone(),
     };
     let mut ops = PendingStoreOps::<(), EncryptedIdentity>::default();
     ops.spawn_load(&store, ());
@@ -148,5 +191,55 @@ fn handle_identity_save_requests(
 
     for request in requests.read() {
         ops.spawn_save(&store.0, (), request.0.clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn parse_cli_options_defaults_to_client_zero_and_default_identity() {
+        assert_eq!(
+            parse_cli_options_from(&args(&["client"])).unwrap(),
+            ClientCliOptions {
+                client_id: 0,
+                nostr_identity_profile: None,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_cli_options_reads_client_id_and_nostr_identity_profile() {
+        assert_eq!(
+            parse_cli_options_from(&args(
+                &["client", "-c", "999", "--nostr-identity", "alice",]
+            ))
+            .unwrap(),
+            ClientCliOptions {
+                client_id: 999,
+                nostr_identity_profile: Some("alice".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_cli_options_supports_equals_forms() {
+        assert_eq!(
+            parse_cli_options_from(&args(&[
+                "client",
+                "--client-id=123",
+                "--nostr-identity=bob",
+            ]))
+            .unwrap(),
+            ClientCliOptions {
+                client_id: 123,
+                nostr_identity_profile: Some("bob".to_string()),
+            }
+        );
     }
 }

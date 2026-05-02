@@ -9,7 +9,37 @@ pub struct FsEncryptedIdentityStore {
 }
 
 pub fn default_nostr_identity_dir() -> PathBuf {
-    nostr_config_dir()
+    nostr_identity_dir(None).expect("default identity profile is valid")
+}
+
+pub fn nostr_identity_dir(profile: Option<&str>) -> Result<PathBuf, String> {
+    match profile {
+        Some(profile) => {
+            validate_identity_profile(profile)?;
+            Ok(nostr_config_dir().join("profiles").join(profile))
+        }
+        None => Ok(nostr_config_dir()),
+    }
+}
+
+fn validate_identity_profile(profile: &str) -> Result<(), String> {
+    if profile.is_empty() {
+        return Err("Nostr identity profile must not be empty".to_string());
+    }
+    let mut bytes = profile.bytes();
+    let first = bytes.next().expect("profile is non-empty");
+    if !first.is_ascii_alphanumeric() {
+        return Err(format!(
+            "Nostr identity profile '{profile}' must start with an ASCII letter or digit"
+        ));
+    }
+    if bytes.all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-')) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Nostr identity profile '{profile}' must contain only ASCII letters, digits, '.', '_', or '-'"
+        ))
+    }
 }
 
 fn nostr_config_dir() -> PathBuf {
@@ -94,6 +124,22 @@ mod tests {
             nostr_config_dir_from(None, Some(PathBuf::from("/tmp/home"))),
             PathBuf::from("/tmp/home/.config/nostr")
         );
+    }
+
+    #[test]
+    fn named_identity_dir_uses_profile_subdirectory() {
+        assert_eq!(
+            nostr_identity_dir(Some("alice_1")).unwrap(),
+            nostr_config_dir().join("profiles").join("alice_1")
+        );
+    }
+
+    #[test]
+    fn named_identity_dir_rejects_paths() {
+        assert!(nostr_identity_dir(Some("../alice")).is_err());
+        assert!(nostr_identity_dir(Some("alice/bob")).is_err());
+        assert!(nostr_identity_dir(Some("")).is_err());
+        assert!(nostr_identity_dir(Some("--client-id")).is_err());
     }
 
     fn test_store(dir: &std::path::Path) -> FsEncryptedIdentityStore {

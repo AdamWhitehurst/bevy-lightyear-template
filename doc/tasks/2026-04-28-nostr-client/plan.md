@@ -1640,11 +1640,48 @@ use client::auth::ClientAuthPlugin;
 - [x] `cargo test -p client auth` covers client proof JSON includes kind `22242` and challenge tag.
 
 #### Manual
-- [ ] Run server and two clients with distinct generated identities; both pass login, connect, reach `InGame`, and have characters spawned only after proof success.
+- [ ] Run server and two clients with `--nostr-identity alice` and `--nostr-identity bob`; generate/unlock distinct identities, connect both, reach `InGame`, and have characters spawned only after proof success.
 - [ ] Server log shows challenge sent, proof verified, and `PlayerIdentity(NostrPublicKey)` inserted before character spawn.
 - [ ] Run native client with `-c 999` after login to force mismatch; server disconnects during challenge and logs pubkey/client_id mismatch.
 - [ ] Kill a client after connect but before proof completes; server logs cleanup for a pending-auth disconnected entity.
 - [ ] Confirm no character entity spawns for an unauthenticated or failed-auth connection.
+
+---
+
+## Phase 5a: Native client identity profile flag
+
+### Changes
+
+#### 1. Scoped native identity directory
+**File**: `crates/client/src/persistence/fs_encrypted_identity.rs`  
+**Action**: modify
+
+Add `nostr_identity_dir(profile: Option<&str>) -> Result<PathBuf, String>`. Default behavior remains `$XDG_CONFIG_HOME/nostr/identity.bin` (or `~/.config/nostr/identity.bin`). When a profile is provided, store the encrypted key under `$XDG_CONFIG_HOME/nostr/profiles/<profile>/identity.bin`. Profile names must be non-empty, start with an ASCII letter or digit, and contain only ASCII letters, digits, `.`, `_`, or `-`.
+
+#### 2. Native client CLI flag
+**File**: `crates/client/src/main.rs`  
+**Action**: modify
+
+Parse `--nostr-identity <profile>` and `--nostr-identity=<profile>` alongside the existing `-c` / `--client-id` flag. Insert an `IdentityStoreConfig` resource so `spawn_identity_store` can select the scoped profile directory before loading or saving `identity.bin`.
+
+Example manual runs:
+
+```sh
+cargo client -- --nostr-identity alice
+cargo client -- --nostr-identity bob
+```
+
+### Verification
+#### Automated
+- [x] `pgrep -af 'cargo (build|check|test|run)|wasm-pack test'` shows no other active build/test before running cargo commands.
+- [x] `cargo test -p client parse_cli_options` passes.
+- [x] `cargo test -p client named_identity_dir` passes.
+- [x] `cargo test -p client fs_encrypted_identity` passes.
+- [x] `cargo check-all` passes.
+- [x] `cargo test-native` passes.
+
+#### Manual
+- [ ] Run two native clients as `cargo client -- --nostr-identity alice` and `cargo client -- --nostr-identity bob`; each profile loads or creates an independent encrypted identity.
 
 ---
 
