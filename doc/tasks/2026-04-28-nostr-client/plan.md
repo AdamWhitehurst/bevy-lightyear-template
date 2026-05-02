@@ -505,7 +505,7 @@ pub mod fs_encrypted_identity;
 **File**: `crates/client/src/persistence/fs_encrypted_identity.rs`  
 **Action**: create
 
-Mirror `FsMapMetaStore`, writing `worlds/identity.bin.tmp` then rename to `worlds/identity.bin`.
+Mirror `FsMapMetaStore`, writing the encrypted identity to the Nostr config directory (`$XDG_CONFIG_HOME/nostr/identity.bin` or `~/.config/nostr/identity.bin`) via `identity.bin.tmp` then rename to `identity.bin`.
 
 ```rust
 use std::{fs, path::PathBuf, sync::Arc};
@@ -576,14 +576,14 @@ pub mod persistence;
 Spawn a singleton persistence entity on native client startup and initiate one load for key `()`.
 
 ```rust
-use client::persistence::fs_encrypted_identity::FsEncryptedIdentityStore;
+use client::persistence::fs_encrypted_identity::{default_nostr_identity_dir, FsEncryptedIdentityStore};
 use nostr_client::{EncryptedIdentity, SaveEncryptedIdentity, StoredEncryptedIdentity, LoginError};
 use persistence::{PendingStoreOps, StoreBackend};
 use protocol::IdentityLoadComplete;
 use std::{path::PathBuf, sync::Arc};
 
 fn spawn_identity_store(mut commands: Commands) {
-    let store = FsEncryptedIdentityStore { base_dir: Arc::new(PathBuf::from("worlds")) };
+    let store = FsEncryptedIdentityStore { base_dir: Arc::new(default_nostr_identity_dir()) };
     let mut ops = PendingStoreOps::<(), EncryptedIdentity>::default();
     ops.spawn_load(&store, ());
     commands.spawn((
@@ -869,12 +869,12 @@ Adjust `on_client_disconnected` so disconnect returns to `MainMenu` only if a `C
 - [x] `bevy run web -p 4001` plus browser reload reaches `AppState::Ready`/`ClientState::Login` without the `async-compat` wasm panic.
 
 #### Manual
-- [x] Delete or move `worlds/identity.bin`, then run `cargo client`; app opens to `Login` with Generate and Import choices.
-- [x] Generate flow: enter passphrase, click Generate; app transitions to `MainMenu`, and `worlds/identity.bin` exists with no plaintext `nsec1` string visible when inspected as binary.
+- [x] Delete or move `$XDG_CONFIG_HOME/nostr/identity.bin` (or `~/.config/nostr/identity.bin`), then run `cargo client`; app opens to `Login` with Generate and Import choices.
+- [x] Generate flow: enter passphrase, click Generate; app transitions to `MainMenu`, and `$XDG_CONFIG_HOME/nostr/identity.bin` (or `~/.config/nostr/identity.bin`) exists with no plaintext `nsec1` string visible when inspected as binary.
 - [x] Restart client; Unlock screen appears; correct passphrase transitions to `MainMenu`.
 - [x] Wrong passphrase shows error feedback and remains in `Login`.
-- [x] Import flow: remove `worlds/identity.bin`, paste an `nsec1...`, enter passphrase, click Import; app stores encrypted identity and transitions to `MainMenu`.
-- [x] Web build still passes; web client reaches Login and can use session-only Generate/Import without writing `worlds/identity.bin`.
+- [x] Import flow: remove `$XDG_CONFIG_HOME/nostr/identity.bin` (or `~/.config/nostr/identity.bin`), paste an `nsec1...`, enter passphrase, click Import; app stores encrypted identity and transitions to `MainMenu`.
+- [x] Web build still passes; web client reaches Login and can use session-only Generate/Import without writing a native identity file.
 
 ---
 
@@ -905,7 +905,7 @@ impl Default for ServerNetworkConfig {
     fn default() -> Self {
         Self {
             // existing fields...
-            nsec_file_path: Some(PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../keys/server.nsec"))),
+            nsec_file_path: Some(default_server_nsec_file_path()),
             replication_interval: REPLICATION_INTERVAL,
         }
     }
@@ -1079,7 +1079,7 @@ fn main() {
         ..Default::default()
     };
     let server_identity = load_server_identity_from_env_or_file(network_config.nsec_file_path.as_deref())
-        .expect("SERVER_NSEC or keys/server.nsec must contain a valid nsec/ncryptsec");
+        .expect("SERVER_NSEC or ~/.config/nostr/server.nsec must contain a valid nsec/ncryptsec");
 
     App::new()
         // existing plugins...
@@ -1101,7 +1101,7 @@ fn main() {
 #### Manual
 - [x] `SERVER_NSEC=nsec1... RUST_LOG=nostr_client=debug,server=debug cargo server-log` logs a published announcement event id.
 - [x] `SERVER_NSEC=ncryptsec1... SERVER_NSEC_PASSPHRASE=... RUST_LOG=nostr_client=debug,server=debug cargo server-log` logs the same publish success path.
-- [x] With neither `SERVER_NSEC` nor `keys/server.nsec`, `cargo server-log` panics at startup with a clear error mentioning both sources.
+- [x] With neither `SERVER_NSEC` nor `~/.config/nostr/server.nsec`, `cargo server-log` panics at startup with a clear error mentioning both sources.
 - [x] Use `nak` or `nostr-tool` to subscribe to kind `30078` for the server pubkey; event exists and `content` parses as JSON with `server_addr`, `cert_digest`, `display_name`, and `version`.
 
 ---

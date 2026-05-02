@@ -25,9 +25,10 @@ fn main() {
         key_pem_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../certificates/key.pem").into(),
         ..Default::default()
     };
-    let server_identity =
-        load_server_identity_from_env_or_file(network_config.nsec_file_path.as_deref())
-            .expect("SERVER_NSEC or keys/server.nsec must contain a valid nsec/ncryptsec");
+    let server_identity = load_server_identity_from_env_or_file(
+        network_config.nsec_file_path.as_deref(),
+    )
+    .expect("SERVER_NSEC or ~/.config/nostr/server.nsec must contain a valid nsec/ncryptsec");
 
     App::new()
         .add_plugins(MinimalPlugins)

@@ -29,13 +29,37 @@ impl Default for ServerNetworkConfig {
             private_key: PRIVATE_KEY,
             cert_pem_path: PathBuf::new(),
             key_pem_path: PathBuf::new(),
-            nsec_file_path: Some(PathBuf::from(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/../../keys/server.nsec"
-            ))),
+            nsec_file_path: Some(default_server_nsec_file_path()),
             replication_interval: REPLICATION_INTERVAL,
         }
     }
+}
+
+fn default_server_nsec_file_path() -> PathBuf {
+    nostr_config_dir().join("server.nsec")
+}
+
+fn nostr_config_dir() -> PathBuf {
+    nostr_config_dir_from(
+        non_empty_env_path("XDG_CONFIG_HOME"),
+        non_empty_env_path("HOME"),
+    )
+}
+
+fn nostr_config_dir_from(xdg_config_home: Option<PathBuf>, home: Option<PathBuf>) -> PathBuf {
+    if let Some(path) = xdg_config_home {
+        return path.join("nostr");
+    }
+    if let Some(home) = home {
+        return home.join(".config").join("nostr");
+    }
+    PathBuf::from(".config").join("nostr")
+}
+
+fn non_empty_env_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 pub struct ServerNetworkPlugin {
@@ -81,4 +105,29 @@ fn start_server(mut commands: Commands, config: ServerNetworkConfig) {
         "WebTransport server listening on {}:{}",
         config.bind_addr, config.port
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_nsec_path_prefers_xdg_config_home() {
+        assert_eq!(
+            nostr_config_dir_from(
+                Some(PathBuf::from("/tmp/xdg")),
+                Some(PathBuf::from("/tmp/home"))
+            )
+            .join("server.nsec"),
+            PathBuf::from("/tmp/xdg/nostr/server.nsec")
+        );
+    }
+
+    #[test]
+    fn server_nsec_path_falls_back_to_home_config() {
+        assert_eq!(
+            nostr_config_dir_from(None, Some(PathBuf::from("/tmp/home"))).join("server.nsec"),
+            PathBuf::from("/tmp/home/.config/nostr/server.nsec")
+        );
+    }
 }

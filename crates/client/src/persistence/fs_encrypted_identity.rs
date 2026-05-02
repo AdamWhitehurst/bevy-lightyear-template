@@ -8,6 +8,33 @@ pub struct FsEncryptedIdentityStore {
     pub base_dir: Arc<PathBuf>,
 }
 
+pub fn default_nostr_identity_dir() -> PathBuf {
+    nostr_config_dir()
+}
+
+fn nostr_config_dir() -> PathBuf {
+    nostr_config_dir_from(
+        non_empty_env_path("XDG_CONFIG_HOME"),
+        non_empty_env_path("HOME"),
+    )
+}
+
+fn nostr_config_dir_from(xdg_config_home: Option<PathBuf>, home: Option<PathBuf>) -> PathBuf {
+    if let Some(path) = xdg_config_home {
+        return path.join("nostr");
+    }
+    if let Some(home) = home {
+        return home.join(".config").join("nostr");
+    }
+    PathBuf::from(".config").join("nostr")
+}
+
+fn non_empty_env_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
 impl Store<(), EncryptedIdentity> for FsEncryptedIdentityStore {
     fn save(&self, _key: &(), value: &EncryptedIdentity) -> Result<(), PersistenceError> {
         fs::create_dir_all(self.base_dir.as_ref())
@@ -49,6 +76,25 @@ impl Store<(), EncryptedIdentity> for FsEncryptedIdentityStore {
 mod tests {
     use super::*;
     use nostr_client::{generate_encrypted_identity, EncryptedIdentity};
+
+    #[test]
+    fn default_identity_dir_prefers_xdg_config_home() {
+        assert_eq!(
+            nostr_config_dir_from(
+                Some(PathBuf::from("/tmp/xdg")),
+                Some(PathBuf::from("/tmp/home"))
+            ),
+            PathBuf::from("/tmp/xdg/nostr")
+        );
+    }
+
+    #[test]
+    fn default_identity_dir_falls_back_to_home_config() {
+        assert_eq!(
+            nostr_config_dir_from(None, Some(PathBuf::from("/tmp/home"))),
+            PathBuf::from("/tmp/home/.config/nostr")
+        );
+    }
 
     fn test_store(dir: &std::path::Path) -> FsEncryptedIdentityStore {
         FsEncryptedIdentityStore {

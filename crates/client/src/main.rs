@@ -6,7 +6,9 @@ pub mod world_object;
 
 use bevy::prelude::*;
 use client::auth::ClientAuthPlugin;
-use client::persistence::fs_encrypted_identity::FsEncryptedIdentityStore;
+use client::persistence::fs_encrypted_identity::{
+    default_nostr_identity_dir, FsEncryptedIdentityStore,
+};
 use client_lightyear::{ClientNetworkConfig, ClientNetworkPlugin};
 use dev::DevPlugin;
 use diagnostics::ClientDiagnosticsPlugin;
@@ -21,7 +23,7 @@ use persistence::{PendingStoreOps, StoreBackend};
 use protocol::diagnostics::SharedDiagnosticsPlugin;
 use protocol::*;
 use render::RenderPlugin;
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use ui::{UiClientConfig, UiPlugin};
 
 fn main() {
@@ -97,7 +99,7 @@ fn parse_client_id() -> u64 {
 
 fn spawn_identity_store(mut commands: Commands) {
     let store = FsEncryptedIdentityStore {
-        base_dir: Arc::new(PathBuf::from("worlds")),
+        base_dir: Arc::new(default_nostr_identity_dir()),
     };
     let mut ops = PendingStoreOps::<(), EncryptedIdentity>::default();
     ops.spawn_load(&store, ());
