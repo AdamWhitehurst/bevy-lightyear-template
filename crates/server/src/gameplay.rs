@@ -3,7 +3,6 @@ use bevy::color::palettes::css;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
 use lightyear::connection::client::Connected;
-use lightyear::prelude::server::ClientOf;
 use lightyear::prelude::*;
 use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
 use protocol::world_object::{
@@ -22,6 +21,8 @@ pub struct ServerGameplayPlugin;
 impl Plugin for ServerGameplayPlugin {
     fn build(&self, app: &mut App) {
         app.add_observer(handle_connected);
+        app.add_observer(crate::auth::cleanup_pending_auth_on_disconnect);
+        app.add_systems(Update, crate::auth::handle_identity_proof);
         // app.add_systems(OnEnter(AppState::Ready), spawn_dummy_target);
         app.add_systems(
             Update,
@@ -340,23 +341,51 @@ fn expire_invulnerability(
 fn handle_connected(
     trigger: On<Add, Connected>,
     mut commands: Commands,
-    character_query: Query<Entity, (With<CharacterMarker>, Without<DummyTarget>)>,
-    remote_id_query: Query<&RemoteId, With<ClientOf>>,
-    registry: Res<MapRegistry>,
-    mut room_registry: ResMut<crate::map::RoomRegistry>,
-    respawn_query: Query<(&Position, &MapInstanceId), With<RespawnPoint>>,
-    map_params_query: Query<(
+    mut challenge_senders: Query<&mut MessageSender<IdentityChallenge>>,
+) {
+    let client_entity = trigger.entity;
+    let mut nonce = [0; 32];
+    getrandom::fill(&mut nonce).expect("server must be able to generate identity challenge nonce");
+
+    commands
+        .entity(client_entity)
+        .insert(crate::auth::PendingAuth {
+            nonce,
+            issued_at: std::time::Instant::now(),
+        });
+
+    challenge_senders
+        .get_mut(client_entity)
+        .expect("Client entity must have MessageSender<IdentityChallenge>")
+        .send::<AuthChannel>(IdentityChallenge { nonce });
+
+    info!(?client_entity, "sent identity challenge");
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_authenticated_character(
+    commands: &mut Commands,
+    client_entity: Entity,
+    remote_id: RemoteId,
+    player_identity: PlayerIdentity,
+    character_query: &Query<Entity, (With<CharacterMarker>, Without<DummyTarget>)>,
+    registry: &MapRegistry,
+    room_registry: &mut crate::map::RoomRegistry,
+    respawn_query: &Query<(&Position, &MapInstanceId), With<RespawnPoint>>,
+    map_params_query: &Query<(
         &voxel_map_engine::prelude::VoxelMapConfig,
         &voxel_map_engine::prelude::MapDimensions,
     )>,
-    mut start_senders: Query<&mut MessageSender<protocol::map::MapTransitionStart>>,
+    start_senders: &mut Query<&mut MessageSender<protocol::map::MapTransitionStart>>,
 ) {
-    let client_entity = trigger.entity;
-    let peer_id = remote_id_query
-        .get(client_entity)
-        .expect("Connected client should have RemoteId")
-        .0;
-    info!("Client {peer_id} connected. Spawning character entity.");
+    let peer_id = remote_id.0;
+    commands.entity(client_entity).insert(player_identity);
+    info!(
+        ?client_entity,
+        ?peer_id,
+        ?player_identity,
+        "spawning authenticated character entity"
+    );
 
     let num_characters = character_query.iter().count();
 
@@ -405,7 +434,7 @@ fn handle_connected(
         .id();
 
     // Phase 2 (complete_map_transition) will AddSender when client reports ready
-    let room = room_registry.get_or_create(&MapInstanceId::Overworld, &mut commands);
+    let room = room_registry.get_or_create(&MapInstanceId::Overworld, commands);
     commands
         .entity(character_entity)
         .insert(protocol::transition::TransitionPending {

@@ -1632,12 +1632,12 @@ use client::auth::ClientAuthPlugin;
 
 ### Verification
 #### Automated
-- [ ] `pgrep -af 'cargo (build|check|test|run)|wasm-pack test'` shows no other active build/test before running cargo commands.
-- [ ] `cargo check-all` passes.
-- [ ] `cargo test-native` passes.
-- [ ] `cargo test -p protocol` covers `NostrPublicKey::client_id_prefix`.
-- [ ] `cargo test -p server auth` covers valid proof, wrong nonce, wrong pubkey, invalid signature, and pubkey/client_id mismatch.
-- [ ] `cargo test -p client auth` covers client proof JSON includes kind `22242` and challenge tag.
+- [x] `pgrep -af 'cargo (build|check|test|run)|wasm-pack test'` shows no other active build/test before running cargo commands.
+- [x] `cargo check-all` passes.
+- [x] `cargo test-native` passes.
+- [x] `cargo test -p protocol` covers `NostrPublicKey::client_id_prefix`.
+- [x] `cargo test -p server auth` covers valid proof, wrong nonce, wrong pubkey, invalid signature, and pubkey/client_id mismatch.
+- [x] `cargo test -p client auth` covers client proof JSON includes kind `22242` and challenge tag.
 
 #### Manual
 - [ ] Run server and two clients with distinct generated identities; both pass login, connect, reach `InGame`, and have characters spawned only after proof success.

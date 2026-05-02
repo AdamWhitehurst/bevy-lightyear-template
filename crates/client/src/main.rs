@@ -5,6 +5,7 @@ pub mod transition;
 pub mod world_object;
 
 use bevy::prelude::*;
+use client::auth::ClientAuthPlugin;
 use client::persistence::fs_encrypted_identity::FsEncryptedIdentityStore;
 use client_lightyear::{ClientNetworkConfig, ClientNetworkPlugin};
 use dev::DevPlugin;
@@ -61,6 +62,7 @@ fn main() {
         .add_plugins(ClientNetworkPlugin {
             config: network_config,
         })
+        .add_plugins(ClientAuthPlugin)
         .add_message::<SaveEncryptedIdentity>()
         .init_resource::<StoredEncryptedIdentity>()
         .init_resource::<LoginError>()

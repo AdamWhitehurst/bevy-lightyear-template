@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod chunk_entities;
 pub mod diagnostics;
 pub mod gameplay;

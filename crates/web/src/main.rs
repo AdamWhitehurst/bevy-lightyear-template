@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use client::auth::ClientAuthPlugin;
 use client::gameplay::ClientGameplayPlugin;
 use client::map::ClientMapPlugin;
 use client::transition::ClientTransitionPlugin;
@@ -36,6 +37,7 @@ fn main() {
         .add_plugins(SharedGameplayPlugin)
         .add_plugins(NostrClientPlugin::default())
         .add_plugins(WebClientPlugin::default())
+        .add_plugins(ClientAuthPlugin)
         .insert_resource(UiClientConfig {
             server_addr: std::net::SocketAddr::from(([127, 0, 0, 1], 5001)),
             client_id: 0,

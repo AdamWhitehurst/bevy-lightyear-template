@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod gameplay;
 pub mod map;
 pub mod persistence;

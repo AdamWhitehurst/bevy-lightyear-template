@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod ability;
 pub mod app_state;
+pub mod auth;
 pub mod billboard;
 pub mod character;
 pub mod diagnostics;
@@ -32,6 +33,7 @@ pub use ability::{
 pub use app_state::{
     AppState, AppStatePlugin, IdentityLoadComplete, RelayPoolReady, TrackedAssets,
 };
+pub use auth::{AuthChannel, IdentityChallenge, IdentityProof, NostrPublicKey, PlayerIdentity};
 pub use character::{apply_movement, detect_grounded, update_facing};
 pub use character::{
     CharacterMarker, CharacterPhysicsBundle, CharacterType, ColorComponent, DeathEvent,
@@ -150,6 +152,21 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::ClientToServer);
         app.register_message::<MapTransitionEnd>()
             .add_direction(NetworkDirection::ServerToClient);
+
+        // Nostr post-connect authentication channel
+        app.add_channel::<AuthChannel>(ChannelSettings {
+            mode: ChannelMode::OrderedReliable(ReliableSettings::default()),
+            ..default()
+        })
+        .add_direction(NetworkDirection::Bidirectional);
+
+        app.register_message::<IdentityChallenge>()
+            .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<IdentityProof>()
+            .add_direction(NetworkDirection::ClientToServer);
+
+        app.register_component::<PlayerIdentity>();
+        app.register_type::<NostrPublicKey>();
 
         #[cfg(feature = "test_utils")]
         app.register_event::<TestTrigger>()
