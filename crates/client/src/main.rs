@@ -29,9 +29,8 @@ struct IdentityStoreConfig {
     base_dir: Arc<PathBuf>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct ClientCliOptions {
-    client_id: u64,
     nostr_identity_profile: Option<String>,
 }
 
@@ -39,7 +38,6 @@ fn main() {
     let cli_options = parse_cli_options();
 
     let network_config = ClientNetworkConfig {
-        client_id: cli_options.client_id,
         certificate_digest: include_str!("../../../certificates/digest.txt")
             .trim()
             .to_string(),
@@ -52,7 +50,7 @@ fn main() {
         ),
     };
 
-    // Create UI config from network config to keep them in sync
+    // UI fills server_addr, certificate_digest, and client_id from the selected Nostr server and identity before connecting.
     let ui_config = UiClientConfig {
         server_addr: network_config.server_addr,
         client_id: network_config.client_id,
@@ -107,26 +105,11 @@ fn parse_cli_options() -> ClientCliOptions {
 }
 
 fn parse_cli_options_from(args: &[String]) -> Result<ClientCliOptions, String> {
-    let mut options = ClientCliOptions {
-        client_id: 0,
-        nostr_identity_profile: None,
-    };
+    let mut options = ClientCliOptions::default();
     let mut index = 1;
     while index < args.len() {
         let arg = &args[index];
-        if arg == "-c" || arg == "--client-id" {
-            index += 1;
-            let Some(id_str) = args.get(index) else {
-                return Err(format!("{arg} requires a client id"));
-            };
-            options.client_id = id_str
-                .parse()
-                .map_err(|error| format!("invalid client id '{id_str}': {error}"))?;
-        } else if let Some(id_str) = arg.strip_prefix("--client-id=") {
-            options.client_id = id_str
-                .parse()
-                .map_err(|error| format!("invalid client id '{id_str}': {error}"))?;
-        } else if arg == "--nostr-identity" {
+        if arg == "--nostr-identity" {
             index += 1;
             let Some(profile) = args.get(index) else {
                 return Err("--nostr-identity requires a profile name".to_string());
@@ -203,41 +186,30 @@ mod tests {
     }
 
     #[test]
-    fn parse_cli_options_defaults_to_client_zero_and_default_identity() {
+    fn parse_cli_options_defaults_to_default_identity() {
         assert_eq!(
             parse_cli_options_from(&args(&["client"])).unwrap(),
             ClientCliOptions {
-                client_id: 0,
                 nostr_identity_profile: None,
             }
         );
     }
 
     #[test]
-    fn parse_cli_options_reads_client_id_and_nostr_identity_profile() {
+    fn parse_cli_options_reads_nostr_identity_profile() {
         assert_eq!(
-            parse_cli_options_from(&args(
-                &["client", "-c", "999", "--nostr-identity", "alice",]
-            ))
-            .unwrap(),
+            parse_cli_options_from(&args(&["client", "--nostr-identity", "alice"])).unwrap(),
             ClientCliOptions {
-                client_id: 999,
                 nostr_identity_profile: Some("alice".to_string()),
             }
         );
     }
 
     #[test]
-    fn parse_cli_options_supports_equals_forms() {
+    fn parse_cli_options_supports_equals_form() {
         assert_eq!(
-            parse_cli_options_from(&args(&[
-                "client",
-                "--client-id=123",
-                "--nostr-identity=bob",
-            ]))
-            .unwrap(),
+            parse_cli_options_from(&args(&["client", "--nostr-identity=bob"])).unwrap(),
             ClientCliOptions {
-                client_id: 123,
                 nostr_identity_profile: Some("bob".to_string()),
             }
         );

@@ -90,14 +90,14 @@ fn test_main_menu_spawns_buttons() {
 
     app.update();
 
-    // Verify Connect button exists
-    let mut connect_query = app
+    // Verify server list container exists
+    let mut server_list_query = app
         .world_mut()
-        .query_filtered::<Entity, With<ConnectButton>>();
+        .query_filtered::<Entity, With<ServerListContainer>>();
     assert_eq!(
-        connect_query.iter(app.world()).count(),
+        server_list_query.iter(app.world()).count(),
         1,
-        "Should have one Connect button"
+        "Should have one server list container"
     );
 
     // Verify Quit button exists
@@ -107,40 +107,6 @@ fn test_main_menu_spawns_buttons() {
         1,
         "Should have one Quit button"
     );
-}
-
-#[test]
-fn test_connect_button_triggers_state_transition() {
-    let mut app = App::new();
-    add_ui_test_plugin(&mut app);
-
-    // Setup dummy client entity (needed for Connecting state)
-    app.world_mut()
-        .spawn((Name::new("Test Client"), Client::default()));
-    enter_main_menu(&mut app);
-
-    app.update();
-
-    // Get connect button
-    let button = {
-        let mut query = app
-            .world_mut()
-            .query_filtered::<Entity, With<ConnectButton>>();
-        query
-            .single(app.world())
-            .expect("Connect button should exist")
-    };
-
-    // Simulate button press
-    app.world_mut()
-        .entity_mut(button)
-        .insert(Interaction::Pressed);
-    app.update();
-    app.update(); // Second update for state transition
-
-    // Verify state transitioned to Connecting
-    let state = app.world().resource::<State<ClientState>>();
-    assert_eq!(*state.get(), ClientState::Connecting);
 }
 
 #[test]
@@ -456,9 +422,7 @@ fn test_state_cleanup() {
     app.update();
 
     // Verify main menu UI exists
-    let mut main_menu_ui = app
-        .world_mut()
-        .query_filtered::<Entity, With<ConnectButton>>();
+    let mut main_menu_ui = app.world_mut().query_filtered::<Entity, With<QuitButton>>();
     assert_eq!(main_menu_ui.iter(app.world()).count(), 1);
 
     // Transition to Connecting state
@@ -468,9 +432,7 @@ fn test_state_cleanup() {
     app.update();
 
     // Verify main menu UI is despawned
-    let mut main_menu_ui = app
-        .world_mut()
-        .query_filtered::<Entity, With<ConnectButton>>();
+    let mut main_menu_ui = app.world_mut().query_filtered::<Entity, With<QuitButton>>();
     assert_eq!(
         main_menu_ui.iter(app.world()).count(),
         0,

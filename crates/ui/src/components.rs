@@ -1,9 +1,5 @@
 use bevy::prelude::*;
 
-/// Marker for Connect button in main menu
-#[derive(Component)]
-pub struct ConnectButton;
-
 /// Marker for Quit button (appears in main menu and in-game)
 #[derive(Component)]
 pub struct QuitButton;

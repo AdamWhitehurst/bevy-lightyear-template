@@ -242,33 +242,6 @@ fn setup_main_menu(mut commands: Commands, server_list: Res<ServerList>) {
                 .with_children(|parent| {
                     spawn_server_list_buttons(parent, &server_list);
                 });
-            // Connect Button
-            parent
-                .spawn((
-                    Button,
-                    Node {
-                        width: Val::Px(200.0),
-                        height: Val::Px(65.0),
-                        border: UiRect::all(Val::Px(5.0)),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                    BorderColor::all(Color::WHITE),
-                    BackgroundColor(Color::srgb(0.2, 0.2, 0.2)),
-                    ConnectButton,
-                ))
-                .with_children(|parent| {
-                    parent.spawn((
-                        Text::new("Connect"),
-                        TextFont {
-                            font_size: 33.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
-                });
-
             // Quit Button
             parent
                 .spawn((
@@ -337,7 +310,6 @@ fn main_menu_button_interaction(
     mut config: ResMut<UiClientConfig>,
     identity: Option<Res<ClientIdentity>>,
     entry_query: Query<(&Interaction, &ServerListEntryButton), Changed<Interaction>>,
-    connect_query: Query<&Interaction, (Changed<Interaction>, With<ConnectButton>)>,
     quit_query: Query<&Interaction, (Changed<Interaction>, With<QuitButton>)>,
 ) {
     for (interaction, entry) in &entry_query {
@@ -354,14 +326,6 @@ fn main_menu_button_interaction(
                 addr = %entry.0.addr,
                 "selected Nostr server"
             );
-            next_state.set(ClientState::Connecting);
-        }
-    }
-
-    // Handle Connect button
-    for interaction in connect_query.iter() {
-        if *interaction == Interaction::Pressed {
-            trace!("Connect button pressed");
             next_state.set(ClientState::Connecting);
         }
     }
