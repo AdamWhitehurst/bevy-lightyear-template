@@ -17,7 +17,10 @@ impl CollisionHooks for MapCollisionHooks<'_, '_> {
         let entity2_id = self.map_ids.get(entity2).ok();
         match (entity1_id, entity2_id) {
             (Some(a), Some(b)) => a == b,
-            _ => panic!("Entity missing MapInstanceId. Entity {entity1:?}: {entity1_id:?}. Entity {entity2:?}: {entity2_id:?}"),
+            _ => {
+                warn!("Entity missing MapInstanceId. Entity {entity1:?}: {entity1_id:?}. Entity {entity2:?}: {entity2_id:?}");
+                false
+            }
         }
     }
 }

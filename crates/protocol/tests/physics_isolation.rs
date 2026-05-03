@@ -113,19 +113,6 @@ fn different_map_entities_do_not_collide() {
 }
 
 #[test]
-#[should_panic(expected = "Entity missing MapInstanceId")]
-fn entity_without_map_id_panics_in_filter_pairs() {
-    let mut app = test_app();
-    app.world_mut()
-        .spawn((spawn_body_bundle(Vec3::ZERO), MapInstanceId::Overworld));
-    // b has no MapInstanceId — filter_pairs should panic to catch the bug
-    app.world_mut()
-        .spawn(spawn_body_bundle(Vec3::new(0.5, 0.0, 0.0)));
-
-    run_physics(&mut app);
-}
-
-#[test]
 fn chunk_target_derived_from_map_registry() {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
