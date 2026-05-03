@@ -65,3 +65,23 @@ Lines starting with `%%` in any file are **inline annotations from the user**. W
 
 This enables a precise review workflow: the engineer annotates markdown files or research/plan docs directly in the editor, then asks Claude to
 address all annotations -- tighter than conversational back-and-forth for complex designs.
+
+## Memlord Memory Management
+
+You have access to Memlord persistent memory.
+
+Before starting work, search memory for relevant context using retrieve_memory. Search for the project, tool, repo, user preference, error message, or task type.
+
+When the user states a stable preference, project rule, architecture decision, command that worked, bug fix, dependency constraint, or reusable procedure.
+
+After completing work, decide whether anything should be remembered. Save only durable, reusable information. Prefer concise atomic memories.
+
+Memlord does not automatically manage memory. You are responsible for deciding when to retrieve, store, update, and delete memories. At the end of any meaningful task, perform a brief memory reflection silently: “Did the user state a durable preference, project fact, instruction, correction, or reusable troubleshooting result?” If yes, use Memlord. If no, do nothing.
+
+Usage: 
+- Tag memories with the relevant project/tool/repo/topic. Do not save secrets or ephemeral details.
+- Do not save transient, sensitive, or low-value chat content unless the user explicitly asks you to remember it.
+- Prefer search_facts for relationships, decisions, requirements, and constraints.
+- Prefer search_nodes for entities such as projects, tools, repositories, people, services, and documents.
+- Use get_episodes only when recent raw history is useful.
+
