@@ -4,10 +4,15 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 use protocol::map::{attach_chunk_colliders, MapInstanceId, MapRegistry, VoxelChunk};
 use protocol::physics::MapCollisionHooks;
+use protocol::NostrPublicKey;
 use voxel_map_engine::prelude::{
     ChunkTicket, FlatGenerator, MapDimensions, RuntimeShape, TicketType, VoxelGenerator,
     VoxelMapConfig, VoxelMapInstance, VoxelPlugin,
 };
+
+fn owner(byte: u8) -> NostrPublicKey {
+    NostrPublicKey([byte; 32])
+}
 
 fn test_app() -> App {
     let mut app = App::new();
@@ -100,7 +105,7 @@ fn different_map_entities_do_not_collide() {
         .world_mut()
         .spawn((
             spawn_body_bundle(Vec3::new(0.5, 0.0, 0.0)),
-            MapInstanceId::Homebase { owner: 0 },
+            MapInstanceId::Homebase { owner: owner(0) },
         ))
         .id();
 
@@ -157,7 +162,7 @@ fn chunk_target_derived_from_map_registry() {
     {
         let mut registry = app.world_mut().resource_mut::<MapRegistry>();
         registry.insert(MapInstanceId::Overworld, map_a);
-        registry.insert(MapInstanceId::Homebase { owner: 12345 }, map_b);
+        registry.insert(MapInstanceId::Homebase { owner: owner(123) }, map_b);
     }
 
     let target_map = app
@@ -196,7 +201,7 @@ fn chunk_target_derived_from_map_registry() {
     let new_map = app
         .world()
         .resource::<MapRegistry>()
-        .get(&MapInstanceId::Homebase { owner: 12345 });
+        .get(&MapInstanceId::Homebase { owner: owner(123) });
     app.world_mut()
         .entity_mut(target)
         .insert(ChunkTicket::new(new_map, TicketType::Player, 0));

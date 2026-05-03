@@ -6,22 +6,22 @@ use avian3d::prelude::Position;
 use bevy::app::AppExit;
 use bevy::prelude::*;
 use lightyear::prelude::{
-    ControlledBy, MessageReceiver, MessageSender, NetworkVisibility, RemoteId, Room, RoomEvent,
-    RoomTarget, ServerMultiMessageSender,
+    ControlledBy, MessageReceiver, MessageSender, NetworkVisibility, Room, RoomEvent, RoomTarget,
+    ServerMultiMessageSender,
 };
 use protocol::map::{MapSwitchTarget, MapTransitionStart, PlayerMapSwitchRequest};
 use protocol::{
-    CharacterMarker, ChunkChannel, ChunkDataSync, MapInstanceId, MapRegistry, PendingTransition,
-    SectionBlocksUpdate, UnloadColumn, VoxelChannel, VoxelEditAck, VoxelEditBroadcast,
-    VoxelEditReject, VoxelEditRequest, VoxelType,
+    CharacterMarker, ChunkChannel, ChunkDataSync, MapInstanceId, MapRegistry, NostrPublicKey,
+    PendingTransition, PlayerIdentity, SectionBlocksUpdate, UnloadColumn, VoxelChannel,
+    VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
 };
 #[allow(unused_imports)]
 use tracy_client::plot;
 use voxel_map_engine::lifecycle::{self, PendingSaves};
 use voxel_map_engine::prelude::{
-    bounds_to_spawning_distance, build_generator_from_components, seed_from_id, BiomeRules,
-    ChunkTicket, HeightMap, Homebase, MapDimensions, MoistureMap, PlacementRules, RuntimeShape,
-    VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
+    bounds_to_spawning_distance, build_generator_from_components, BiomeRules, ChunkTicket,
+    HeightMap, Homebase, MapDimensions, MoistureMap, PlacementRules, RuntimeShape, VoxelGenerator,
+    VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
 };
 
 use crate::persistence::fs_map_entities::FsMapEntitiesStore;
@@ -106,12 +106,15 @@ fn init_overworld_entity(
     mut commands: Commands,
     mut registry: ResMut<MapRegistry>,
     save_path: Res<WorldSavePath>,
+    server_identity: Res<nostr_client::ServerIdentity>,
 ) {
     let map_dir = Arc::new(map_save_dir(&save_path.0, &MapInstanceId::Overworld));
+    let owner = NostrPublicKey(*server_identity.keys.public_key().as_bytes());
 
     let map = commands
         .spawn((
             MapInstanceId::Overworld,
+            protocol::map::Owner(owner),
             MapLoadState::AwaitingMeta,
             Transform::default(),
             StoreBackend::new(FsMapMetaStore {
@@ -1057,7 +1060,7 @@ pub fn handle_map_switch_requests(
     mut senders: Query<&mut MessageSender<MapTransitionStart>>,
     controlled_query: Query<(Entity, &ControlledBy, &MapInstanceId), With<CharacterMarker>>,
     pending: Query<(), With<PendingTransition>>,
-    remote_ids: Query<&RemoteId>,
+    player_identities: Query<&PlayerIdentity>,
     mut registry: ResMut<MapRegistry>,
     mut room_registry: ResMut<RoomRegistry>,
     map_params_query: Query<(&VoxelMapConfig, &MapDimensions)>,
@@ -1093,10 +1096,10 @@ pub fn handle_map_switch_requests(
                 continue;
             }
 
-            let remote_id = remote_ids
+            let identity = player_identities
                 .get(client_entity)
-                .expect("Client entity must have RemoteId during map switch");
-            let target_map_id = resolve_switch_target(&request.target, remote_id.0.to_bits());
+                .expect("Authenticated client must have PlayerIdentity before map switch");
+            let target_map_id = resolve_switch_target(&request.target, identity.0);
 
             if *current_map_id == target_map_id {
                 warn!("Player {player_entity:?} already on target map {target_map_id:?}");
@@ -1122,13 +1125,11 @@ pub fn handle_map_switch_requests(
     }
 }
 
-/// Resolves a `MapSwitchTarget` to a `MapInstanceId` using the client's stable PeerId bits.
-fn resolve_switch_target(target: &MapSwitchTarget, client_id_bits: u64) -> MapInstanceId {
+/// Resolves a `MapSwitchTarget` to a `MapInstanceId` using the authenticated player's public key.
+fn resolve_switch_target(target: &MapSwitchTarget, owner: NostrPublicKey) -> MapInstanceId {
     match target {
         MapSwitchTarget::Overworld => MapInstanceId::Overworld,
-        MapSwitchTarget::Homebase => MapInstanceId::Homebase {
-            owner: client_id_bits,
-        },
+        MapSwitchTarget::Homebase => MapInstanceId::Homebase { owner },
     }
 }
 
@@ -1190,7 +1191,7 @@ pub fn ensure_map_exists(
 /// Spawns a new homebase map, loading seed and entities from disk if saved.
 fn spawn_homebase(
     commands: &mut Commands,
-    owner: u64,
+    owner: NostrPublicKey,
     save_path: &WorldSavePath,
     registry: &mut MapRegistry,
     map_id: &MapInstanceId,
@@ -1230,7 +1231,8 @@ fn spawn_homebase(
             instance,
             config,
             dimensions.clone(),
-            Homebase { owner },
+            Homebase,
+            protocol::map::Owner(owner),
             Transform::default(),
             map_id.clone(),
             StoreBackend::new(FsMapMetaStore {
@@ -1268,15 +1270,15 @@ fn spawn_homebase(
 
     let entity_count = load_map_entities_sync(commands, &map_dir, map_id);
     if entity_count > 0 {
-        trace!("Loaded {entity_count} entities for homebase-{owner}");
+        trace!("Loaded {entity_count} entities for homebase {owner:?}");
     }
 
-    trace!("Spawned server homebase for owner {owner}: {entity:?}");
+    trace!("Spawned server homebase for owner {owner:?}: {entity:?}");
     (entity, params)
 }
 
-/// Loads the seed for a homebase from saved metadata, falling back to `seed_from_id`.
-fn load_homebase_seed(map_dir: &Arc<PathBuf>, owner: u64) -> u64 {
+/// Loads the seed for a homebase from saved metadata, falling back to `seed_from_nostr_public_key`.
+fn load_homebase_seed(map_dir: &Arc<PathBuf>, owner: NostrPublicKey) -> u64 {
     use persistence::Store;
     let store = FsMapMetaStore {
         map_dir: map_dir.clone(),
@@ -1284,17 +1286,26 @@ fn load_homebase_seed(map_dir: &Arc<PathBuf>, owner: u64) -> u64 {
     match store.load(&()) {
         Ok(Some(meta)) => {
             trace!(
-                "Loading homebase-{owner} from saved metadata (seed={})",
+                ?owner,
+                "Loading homebase from saved metadata (seed={})",
                 meta.seed
             );
             meta.seed
         }
         _ => {
-            let seed = seed_from_id(owner);
-            trace!("Creating new homebase-{owner} (seed={seed})");
+            let seed = seed_from_nostr_public_key(owner);
+            trace!(?owner, "Creating new homebase (seed={seed})");
             seed
         }
     }
+}
+
+fn seed_from_nostr_public_key(owner: NostrPublicKey) -> u64 {
+    u64::from_le_bytes(
+        owner.0[0..8]
+            .try_into()
+            .expect("NostrPublicKey has 32 bytes"),
+    )
 }
 
 #[cfg(test)]
@@ -1309,6 +1320,17 @@ mod tests {
             originator: Entity::PLACEHOLDER,
             map_id: MapInstanceId::Overworld,
         }
+    }
+
+    #[test]
+    fn seed_from_nostr_public_key_uses_first_eight_bytes_little_endian() {
+        let owner = NostrPublicKey([
+            0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff,
+        ]);
+
+        assert_eq!(seed_from_nostr_public_key(owner), 0x0102_0304_0506_0708);
     }
 
     #[test]

@@ -1,8 +1,12 @@
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use lightyear::prelude::{ReplicationSender, Room, RoomEvent, RoomPlugin, RoomTarget};
-use protocol::MapInstanceId;
+use protocol::{MapInstanceId, NostrPublicKey};
 use server::map::RoomRegistry;
+
+fn owner(byte: u8) -> NostrPublicKey {
+    NostrPublicKey([byte; 32])
+}
 
 fn room_test_app() -> App {
     let mut app = App::new();
@@ -75,8 +79,8 @@ fn registry_creates_separate_rooms_per_map() {
         .run_system_once(
             |mut registry: ResMut<RoomRegistry>, mut commands: Commands| {
                 let overworld = registry.get_or_create(&MapInstanceId::Overworld, &mut commands);
-                let homebase =
-                    registry.get_or_create(&MapInstanceId::Homebase { owner: 42 }, &mut commands);
+                let homebase = registry
+                    .get_or_create(&MapInstanceId::Homebase { owner: owner(42) }, &mut commands);
                 assert_ne!(
                     overworld, homebase,
                     "Different maps must produce different rooms"
@@ -93,10 +97,10 @@ fn registry_distinguishes_homebase_owners() {
     app.world_mut()
         .run_system_once(
             |mut registry: ResMut<RoomRegistry>, mut commands: Commands| {
-                let a =
-                    registry.get_or_create(&MapInstanceId::Homebase { owner: 1 }, &mut commands);
-                let b =
-                    registry.get_or_create(&MapInstanceId::Homebase { owner: 2 }, &mut commands);
+                let a = registry
+                    .get_or_create(&MapInstanceId::Homebase { owner: owner(1) }, &mut commands);
+                let b = registry
+                    .get_or_create(&MapInstanceId::Homebase { owner: owner(2) }, &mut commands);
                 assert_ne!(
                     a, b,
                     "Homebases with different owners must be separate rooms"
@@ -131,7 +135,7 @@ fn observer_routes_entities_to_correct_rooms() {
     let overworld_ent = app.world_mut().spawn(MapInstanceId::Overworld).id();
     let homebase_ent = app
         .world_mut()
-        .spawn(MapInstanceId::Homebase { owner: 99 })
+        .spawn(MapInstanceId::Homebase { owner: owner(99) })
         .id();
     app.update();
 
@@ -143,7 +147,7 @@ fn observer_routes_entities_to_correct_rooms() {
         .unwrap();
     let hb_room = app
         .world()
-        .get::<Room>(registry.0[&MapInstanceId::Homebase { owner: 99 }])
+        .get::<Room>(registry.0[&MapInstanceId::Homebase { owner: owner(99) }])
         .unwrap();
 
     assert!(ow_room.entities.contains(&overworld_ent));
@@ -235,8 +239,8 @@ fn entity_not_in_unrelated_room() {
     app.world_mut()
         .run_system_once(
             move |mut registry: ResMut<RoomRegistry>, mut commands: Commands| {
-                let hb_room =
-                    registry.get_or_create(&MapInstanceId::Homebase { owner: 1 }, &mut commands);
+                let hb_room = registry
+                    .get_or_create(&MapInstanceId::Homebase { owner: owner(1) }, &mut commands);
                 commands.trigger(RoomEvent {
                     room: hb_room,
                     target: RoomTarget::AddSender(sender),
@@ -253,7 +257,7 @@ fn entity_not_in_unrelated_room() {
     let registry = app.world().resource::<RoomRegistry>();
     let hb_room = app
         .world()
-        .get::<Room>(registry.0[&MapInstanceId::Homebase { owner: 1 }])
+        .get::<Room>(registry.0[&MapInstanceId::Homebase { owner: owner(1) }])
         .unwrap();
 
     assert!(

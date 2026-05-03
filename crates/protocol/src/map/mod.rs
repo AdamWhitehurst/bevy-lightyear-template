@@ -5,7 +5,11 @@ mod transition;
 mod types;
 mod voxel;
 
+use serde::{Deserialize, Serialize};
+
 use bevy::prelude::*;
+
+use crate::auth::NostrPublicKey;
 
 pub use voxel_map_engine::prelude::{VoxelChunk, VoxelType};
 
@@ -16,6 +20,10 @@ pub use transition::{
     MapChannel, MapTransitionEnd, MapTransitionReady, MapTransitionStart, PendingTransition,
     PlayerMapSwitchRequest, TransitionReadySent,
 };
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+#[type_path = "protocol::map"]
+pub struct Owner(pub NostrPublicKey);
+
 pub use types::{MapInstanceId, MapRegistry, MapSwitchTarget};
 pub use voxel::{
     SectionBlocksUpdate, VoxelChannel, VoxelEditAck, VoxelEditBroadcast, VoxelEditReject,

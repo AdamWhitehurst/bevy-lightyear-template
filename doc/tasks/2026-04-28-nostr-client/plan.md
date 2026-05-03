@@ -1936,13 +1936,13 @@ Update all `MapInstanceId::Homebase { owner: 42 }` test fixtures to `NostrPublic
 
 ### Verification
 #### Automated
-- [ ] `pgrep -af 'cargo (build|check|test|run)|wasm-pack test'` shows no other active build/test before running cargo commands.
-- [ ] `cargo check-all` passes.
-- [ ] `cargo test-native` passes.
-- [ ] `cargo test -p protocol map_instance_id_equality` passes with `NostrPublicKey` owner.
-- [ ] `cargo test -p server map_save_dir_homebase` passes with `homebase_<hex>` naming.
-- [ ] `cargo test -p server map_transition` passes after map-switch authorization reads `PlayerIdentity`.
-- [ ] Search verification: no remaining source references to `RemoteId.to_bits()` for map ownership and no `homebase-` save-dir format in server source/tests.
+- [x] `pgrep -af 'cargo (build|check|test|run)|wasm-pack test'` shows no other active build/test before running cargo commands.
+- [x] `cargo check-all` passes.
+- [x] `cargo test-native` passes.
+- [x] `cargo test -p protocol map_instance_id_equality` passes with `NostrPublicKey` owner.
+- [x] `cargo test -p server map_save_dir_homebase` passes with `homebase_<hex>` naming.
+- [x] `cargo test -p server map_transition` passes after map-switch authorization reads `PlayerIdentity`.
+- [x] Search verification: no remaining source references to `RemoteId.to_bits()` for map ownership and no `homebase-` save-dir format in server source/tests.
 
 #### Manual
 - [ ] Start server with `SERVER_NSEC`, start two clients with distinct identities, connect both, switch each to Homebase; directories under `worlds/homebase_<hex>/` are distinct.

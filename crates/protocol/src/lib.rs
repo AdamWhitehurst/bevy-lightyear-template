@@ -47,9 +47,9 @@ pub use hit_detection::{
 pub use map::{
     attach_chunk_colliders, ChunkChannel, ChunkDataSync, MapChannel, MapInstanceId, MapRegistry,
     MapSaveTarget, MapSwitchTarget, MapTransitionEnd, MapTransitionReady, MapTransitionStart,
-    PendingTransition, PlayerMapSwitchRequest, SavedEntity, SavedEntityKind, SectionBlocksUpdate,
-    TransitionReadySent, UnloadColumn, VoxelChannel, VoxelChunk, VoxelEditAck, VoxelEditBroadcast,
-    VoxelEditReject, VoxelEditRequest, VoxelType,
+    Owner, PendingTransition, PlayerMapSwitchRequest, SavedEntity, SavedEntityKind,
+    SectionBlocksUpdate, TransitionReadySent, UnloadColumn, VoxelChannel, VoxelChunk, VoxelEditAck,
+    VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
 };
 pub use terrain::{TerrainDefRegistry, TerrainPlugin};
 pub use transition::{MapTransitionEntity, TransitionPlugin};
@@ -174,6 +174,7 @@ impl Plugin for ProtocolPlugin {
 
         // Map instance identity
         app.register_component::<MapInstanceId>().add_prediction();
+        app.register_component::<Owner>();
 
         // World objects — static, no prediction needed
         app.register_component::<world_object::WorldObjectId>();

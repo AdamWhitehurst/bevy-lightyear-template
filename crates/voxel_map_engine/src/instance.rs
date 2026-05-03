@@ -12,10 +12,7 @@ pub struct Overworld;
 
 /// Marker: this map is a player's homebase.
 #[derive(Component)]
-pub struct Homebase {
-    /// PeerId bits -- using u64 because voxel_map_engine doesn't depend on lightyear.
-    pub owner: u64,
-}
+pub struct Homebase;
 
 /// Marker: this map is a competition arena.
 #[derive(Component)]

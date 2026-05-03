@@ -2,7 +2,12 @@ use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use lightyear::prelude::{Room, RoomEvent, RoomPlugin, RoomTarget};
 use protocol::map::{MapInstanceId, PendingTransition};
+use protocol::NostrPublicKey;
 use server::map::RoomRegistry;
+
+fn owner(byte: u8) -> NostrPublicKey {
+    NostrPublicKey([byte; 32])
+}
 
 #[test]
 fn room_registry_creates_separate_rooms_for_different_maps() {
@@ -15,8 +20,8 @@ fn room_registry_creates_separate_rooms_for_different_maps() {
         .run_system_once(
             |mut registry: ResMut<RoomRegistry>, mut commands: Commands| {
                 let ow = registry.get_or_create(&MapInstanceId::Overworld, &mut commands);
-                let hb =
-                    registry.get_or_create(&MapInstanceId::Homebase { owner: 42 }, &mut commands);
+                let hb = registry
+                    .get_or_create(&MapInstanceId::Homebase { owner: owner(42) }, &mut commands);
                 assert_ne!(ow, hb, "Different maps should have different rooms");
 
                 let ow2 = registry.get_or_create(&MapInstanceId::Overworld, &mut commands);
@@ -100,10 +105,10 @@ fn pending_transition_marker_can_be_added_and_removed() {
 }
 
 #[test]
-fn different_homebase_owners_produce_different_seeds() {
+fn different_homebase_owners_produce_distinct_map_ids() {
     assert_ne!(
-        voxel_map_engine::prelude::seed_from_id(111),
-        voxel_map_engine::prelude::seed_from_id(222),
-        "Different owners must produce different seeds"
+        MapInstanceId::Homebase { owner: owner(111) },
+        MapInstanceId::Homebase { owner: owner(222) },
+        "Different owners must produce different homebase map ids"
     );
 }

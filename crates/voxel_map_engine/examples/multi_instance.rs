@@ -89,7 +89,7 @@ fn spawn_homebase(commands: &mut Commands) -> Entity {
             VoxelMapConfig::new(0, 0, bounds_to_spawning_distance(bounds), true),
             dimensions,
             VoxelGenerator(Arc::new(RaisedGenerator)),
-            Homebase { owner: 0 },
+            Homebase,
             PendingChunks::default(),
             Transform::from_translation(Vec3::new(200.0, 0.0, 0.0)),
         ))

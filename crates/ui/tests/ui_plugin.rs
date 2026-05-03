@@ -333,7 +333,9 @@ fn map_switch_button_label_shows_overworld_when_on_homebase() {
         CharacterMarker,
         Predicted,
         Controlled,
-        MapInstanceId::Homebase { owner: 42 },
+        MapInstanceId::Homebase {
+            owner: NostrPublicKey([42; 32]),
+        },
     ));
     app.update();
 

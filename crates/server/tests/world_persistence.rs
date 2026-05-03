@@ -10,10 +10,14 @@ use voxel_map_engine::persistence::{chunk_file_path, ChunkFileEnvelope, CHUNK_SA
 use voxel_map_engine::prelude::*;
 
 use protocol::map::{SavedEntity, SavedEntityKind};
-use protocol::MapInstanceId;
+use protocol::{MapInstanceId, NostrPublicKey};
 
 /// Padded chunk volume for the default `chunk_size=16`, used by tests.
 const PADDED_VOLUME_16: usize = 18 * 18 * 18;
+
+fn owner(byte: u8) -> NostrPublicKey {
+    NostrPublicKey([byte; 32])
+}
 
 fn test_chunk_store(dir: &std::path::Path) -> FsChunkStore {
     FsChunkStore {
@@ -137,8 +141,11 @@ fn map_save_dir_routes_correctly() {
         std::path::PathBuf::from("/tmp/test_worlds/overworld")
     );
     assert_eq!(
-        map_save_dir(base, &MapInstanceId::Homebase { owner: 42 }),
-        std::path::PathBuf::from("/tmp/test_worlds/homebase-42")
+        map_save_dir(base, &MapInstanceId::Homebase { owner: owner(0x2a) }),
+        std::path::PathBuf::from(format!(
+            "/tmp/test_worlds/homebase_{}",
+            hex::encode([0x2a; 32])
+        ))
     );
 }
 
@@ -224,7 +231,7 @@ fn meta_and_chunks_coexist_in_map_directory() {
 fn multiple_maps_save_independently() {
     let tmp = tempfile::tempdir().unwrap();
     let ow_dir = map_save_dir(tmp.path(), &MapInstanceId::Overworld);
-    let hb_dir = map_save_dir(tmp.path(), &MapInstanceId::Homebase { owner: 42 });
+    let hb_dir = map_save_dir(tmp.path(), &MapInstanceId::Homebase { owner: owner(42) });
     let ow_store = test_chunk_store(&ow_dir);
     let hb_store = test_chunk_store(&hb_dir);
 
@@ -255,7 +262,7 @@ fn multiple_maps_save_independently() {
 #[test]
 fn homebase_metadata_roundtrip() {
     let tmp = tempfile::tempdir().unwrap();
-    let hb_dir = map_save_dir(tmp.path(), &MapInstanceId::Homebase { owner: 123 });
+    let hb_dir = map_save_dir(tmp.path(), &MapInstanceId::Homebase { owner: owner(123) });
     let store = test_meta_store(&hb_dir);
 
     let meta = MapMeta {
@@ -274,7 +281,7 @@ fn homebase_metadata_roundtrip() {
 fn homebase_entities_saved_separately() {
     let tmp = tempfile::tempdir().unwrap();
     let ow_dir = map_save_dir(tmp.path(), &MapInstanceId::Overworld);
-    let hb_dir = map_save_dir(tmp.path(), &MapInstanceId::Homebase { owner: 1 });
+    let hb_dir = map_save_dir(tmp.path(), &MapInstanceId::Homebase { owner: owner(1) });
     let ow_store = test_entity_store(&ow_dir);
     let hb_store = test_entity_store(&hb_dir);
 
@@ -310,18 +317,24 @@ fn homebase_entities_saved_separately() {
 #[test]
 fn map_save_dir_different_homebases_are_isolated() {
     let base = std::path::Path::new("worlds");
-    let dir1 = map_save_dir(base, &MapInstanceId::Homebase { owner: 1 });
-    let dir2 = map_save_dir(base, &MapInstanceId::Homebase { owner: 2 });
+    let dir1 = map_save_dir(base, &MapInstanceId::Homebase { owner: owner(1) });
+    let dir2 = map_save_dir(base, &MapInstanceId::Homebase { owner: owner(2) });
     assert_ne!(dir1, dir2);
-    assert_eq!(dir1, std::path::PathBuf::from("worlds/homebase-1"));
-    assert_eq!(dir2, std::path::PathBuf::from("worlds/homebase-2"));
+    assert_eq!(
+        dir1,
+        std::path::PathBuf::from(format!("worlds/homebase_{}", hex::encode([1; 32])))
+    );
+    assert_eq!(
+        dir2,
+        std::path::PathBuf::from(format!("worlds/homebase_{}", hex::encode([2; 32])))
+    );
 }
 
 #[test]
 fn overworld_and_homebase_dirs_are_isolated() {
     let base = std::path::Path::new("worlds");
     let ow = map_save_dir(base, &MapInstanceId::Overworld);
-    let hb = map_save_dir(base, &MapInstanceId::Homebase { owner: 1 });
+    let hb = map_save_dir(base, &MapInstanceId::Homebase { owner: owner(1) });
     assert_ne!(ow, hb);
 }
 

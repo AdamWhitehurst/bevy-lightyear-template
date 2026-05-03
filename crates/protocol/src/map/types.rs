@@ -4,6 +4,8 @@ use avian3d::prelude::ActiveCollisionHooks;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::auth::NostrPublicKey;
+
 /// Identifies which map instance an entity belongs to.
 /// Semantic enum — safe to replicate, no Entity references.
 #[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash, Reflect)]
@@ -11,7 +13,7 @@ use serde::{Deserialize, Serialize};
 #[require(ActiveCollisionHooks::FILTER_PAIRS)]
 pub enum MapInstanceId {
     Overworld,
-    Homebase { owner: u64 },
+    Homebase { owner: NostrPublicKey },
 }
 
 /// Maps semantic `MapInstanceId` to local `VoxelMapInstance` entities.
@@ -43,12 +45,14 @@ pub enum MapSwitchTarget {
 mod tests {
     use super::*;
 
+    const TEST_OWNER: NostrPublicKey = NostrPublicKey([42; 32]);
+
     #[test]
     fn map_instance_id_equality() {
         assert_eq!(MapInstanceId::Overworld, MapInstanceId::Overworld);
         assert_ne!(
             MapInstanceId::Overworld,
-            MapInstanceId::Homebase { owner: 0 }
+            MapInstanceId::Homebase { owner: TEST_OWNER }
         );
     }
 

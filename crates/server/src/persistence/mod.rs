@@ -33,7 +33,9 @@ impl Default for WorldSavePath {
 pub fn map_save_dir(base: &Path, map_id: &MapInstanceId) -> PathBuf {
     match map_id {
         MapInstanceId::Overworld => base.join("overworld"),
-        MapInstanceId::Homebase { owner } => base.join(format!("homebase-{owner}")),
+        MapInstanceId::Homebase { owner } => {
+            base.join(format!("homebase_{}", hex::encode(owner.0)))
+        }
     }
 }
 
@@ -51,6 +53,7 @@ mod tests {
     use super::*;
     use persistence::Store;
     use protocol::map::SavedEntityKind;
+    use protocol::NostrPublicKey;
     use std::sync::Arc;
 
     use fs_map_entities::FsMapEntitiesStore;
@@ -66,6 +69,10 @@ mod tests {
         FsMapEntitiesStore {
             map_dir: Arc::new(dir.to_path_buf()),
         }
+    }
+
+    fn owner(byte: u8) -> NostrPublicKey {
+        NostrPublicKey([byte; 32])
     }
 
     #[test]
@@ -105,8 +112,8 @@ mod tests {
     fn map_save_dir_homebase() {
         let base = Path::new("worlds");
         assert_eq!(
-            map_save_dir(base, &MapInstanceId::Homebase { owner: 42 }),
-            PathBuf::from("worlds/homebase-42")
+            map_save_dir(base, &MapInstanceId::Homebase { owner: owner(0x2a) }),
+            PathBuf::from(format!("worlds/homebase_{}", hex::encode([0x2a; 32])))
         );
     }
 
