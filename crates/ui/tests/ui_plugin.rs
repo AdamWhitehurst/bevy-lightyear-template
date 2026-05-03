@@ -4,7 +4,7 @@ use lightyear::prelude::client::*;
 use lightyear::prelude::{Controlled, PeerId, Predicted, RemoteId};
 use protocol::transition::ClientTransitionState;
 use protocol::*;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use ui::*;
 
 fn add_ui_test_plugin(app: &mut App) {
@@ -380,7 +380,7 @@ fn main_menu_refreshes_when_server_list_changes() {
             addr: "127.0.0.1:6001".parse().unwrap(),
             cert_digest: "digest-from-announcement".to_string(),
             display_name: "Late Server".to_string(),
-            received_at: Instant::now(),
+            received_at: Duration::ZERO,
         });
     app.update();
 
@@ -410,7 +410,7 @@ fn server_list_entry_sets_connection_config() {
             addr: "127.0.0.1:6001".parse().unwrap(),
             cert_digest: "digest-from-announcement".to_string(),
             display_name: "Listed Server".to_string(),
-            received_at: Instant::now(),
+            received_at: Duration::ZERO,
         });
     let full_pubkey = pubkey.to_string();
     enter_main_menu(&mut app);

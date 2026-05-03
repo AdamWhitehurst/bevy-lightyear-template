@@ -1,7 +1,4 @@
-use std::{
-    net::SocketAddr,
-    time::{Duration, Instant},
-};
+use std::{net::SocketAddr, time::Duration};
 
 use async_channel::Receiver;
 use bevy::{prelude::*, tasks::IoTaskPool};
@@ -36,7 +33,7 @@ pub struct ServerListEntry {
     pub addr: SocketAddr,
     pub cert_digest: String,
     pub display_name: String,
-    pub received_at: Instant,
+    pub received_at: Duration,
 }
 
 impl ServerListEntry {
@@ -132,11 +129,12 @@ pub fn parse_server_announcement_event(event: &Event) -> Result<ServerListEntry,
         addr: announcement.server_addr,
         cert_digest: announcement.cert_digest,
         display_name: announcement.display_name,
-        received_at: Instant::now(),
+        received_at: Duration::ZERO,
     })
 }
 
 pub fn poll_server_announcements(
+    time: Res<Time<Real>>,
     mut list: ResMut<ServerList>,
     rx: Option<Res<ServerAnnouncementRx>>,
 ) {
@@ -145,7 +143,8 @@ pub fn poll_server_announcements(
         return;
     };
 
-    while let Ok(entry) = rx.0.try_recv() {
+    while let Ok(mut entry) = rx.0.try_recv() {
+        entry.received_at = time.elapsed();
         if let Some(existing) = list
             .entries
             .iter_mut()
@@ -157,11 +156,11 @@ pub fn poll_server_announcements(
         }
     }
 
-    let now = Instant::now();
+    let now = time.elapsed();
+    let ttl = Duration::from_secs(SERVER_ANNOUNCEMENT_TTL_SECS);
     let before_len = list.entries.len();
-    list.entries.retain(|entry| {
-        now.duration_since(entry.received_at) <= Duration::from_secs(SERVER_ANNOUNCEMENT_TTL_SECS)
-    });
+    list.entries
+        .retain(|entry| now.saturating_sub(entry.received_at) <= ttl);
     let removed = before_len.saturating_sub(list.entries.len());
     if removed > 0 {
         trace!(removed, "pruned stale Nostr server announcements");
@@ -322,6 +321,15 @@ mod tests {
         );
     }
 
+    fn app_with_announcement_poller(rx: Receiver<ServerListEntry>) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ServerList>()
+            .insert_resource(ServerAnnouncementRx(rx))
+            .add_systems(Update, poll_server_announcements);
+        app
+    }
+
     #[test]
     fn parse_server_announcement_event_rejects_identifier_mismatch() {
         let keys = Keys::new(SecretKey::generate());
@@ -367,10 +375,7 @@ mod tests {
         tx.try_send(other).unwrap();
         tx.try_send(updated).unwrap();
 
-        let mut app = App::new();
-        app.init_resource::<ServerList>()
-            .insert_resource(ServerAnnouncementRx(rx))
-            .add_systems(Update, poll_server_announcements);
+        let mut app = app_with_announcement_poller(rx);
         app.update();
 
         let list = app.world().resource::<ServerList>();
@@ -388,14 +393,16 @@ mod tests {
         let keys = Keys::new(SecretKey::generate());
         let mut stale =
             parse_server_announcement_event(&signed_event(&keys, &announcement())).unwrap();
-        stale.received_at = Instant::now() - Duration::from_secs(SERVER_ANNOUNCEMENT_TTL_SECS + 1);
-        let (tx, rx) = async_channel::unbounded();
-        tx.try_send(stale).unwrap();
-
-        let mut app = App::new();
-        app.init_resource::<ServerList>()
-            .insert_resource(ServerAnnouncementRx(rx))
-            .add_systems(Update, poll_server_announcements);
+        stale.received_at = Duration::ZERO;
+        let (_tx, rx) = async_channel::unbounded();
+        let mut app = app_with_announcement_poller(rx);
+        app.world_mut()
+            .resource_mut::<ServerList>()
+            .entries
+            .push(stale);
+        app.world_mut()
+            .resource_mut::<Time<Real>>()
+            .advance_by(Duration::from_secs(SERVER_ANNOUNCEMENT_TTL_SECS + 1));
         app.update();
 
         let list = app.world().resource::<ServerList>();
