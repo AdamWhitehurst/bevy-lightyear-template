@@ -353,6 +353,47 @@ fn map_switch_button_label_shows_overworld_when_on_homebase() {
 }
 
 #[test]
+fn main_menu_refreshes_when_server_list_changes() {
+    let mut app = App::new();
+    add_ui_test_plugin(&mut app);
+    app.world_mut()
+        .spawn((Name::new("Test Client"), Client::default()));
+
+    enter_main_menu(&mut app);
+    app.update();
+
+    let mut query = app
+        .world_mut()
+        .query_filtered::<Entity, With<ServerListEntryButton>>();
+    assert_eq!(
+        query.iter(app.world()).count(),
+        0,
+        "MainMenu should start without server entry buttons"
+    );
+
+    let (identity, _) = nostr_client::generate_encrypted_identity("passphrase").unwrap();
+    app.world_mut()
+        .resource_mut::<nostr_client::announcement::ServerList>()
+        .entries
+        .push(nostr_client::announcement::ServerListEntry {
+            pubkey: identity.public,
+            addr: "127.0.0.1:6001".parse().unwrap(),
+            cert_digest: "digest-from-announcement".to_string(),
+            display_name: "Late Server".to_string(),
+            received_at: Instant::now(),
+        });
+    app.update();
+
+    let mut query = app
+        .world_mut()
+        .query_filtered::<Entity, With<ServerListEntryButton>>();
+    assert_eq!(
+        query.iter(app.world()).count(),
+        1,
+        "MainMenu should render a server entry after ServerList changes"
+    );
+}
+#[test]
 fn server_list_entry_sets_connection_config() {
     let mut app = App::new();
     add_ui_test_plugin(&mut app);

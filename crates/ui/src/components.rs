@@ -36,4 +36,7 @@ pub struct PassphraseInput;
 pub struct NsecInput;
 
 #[derive(Component)]
+pub struct ServerListContainer;
+
+#[derive(Component)]
 pub struct ServerListEntryButton(pub nostr_client::announcement::ServerListEntry);

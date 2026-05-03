@@ -11,6 +11,7 @@ use lightyear::netcode::Key;
 use lightyear::prelude::{client::*, Controlled, Replicated};
 use lightyear::prelude::{Authentication, MessageSender, PeerAddr, Predicted};
 use lightyear::webtransport::client::WebTransportClientIo;
+use nostr_client::announcement::ServerList;
 use nostr_client::{ClientIdentity, LoginError, StoredEncryptedIdentity};
 use protocol::map::{MapChannel, MapSwitchTarget, PlayerMapSwitchRequest};
 use protocol::{
@@ -53,7 +54,7 @@ impl Plugin for UiPlugin {
         app.add_plugins(TextInputPlugin);
         app.init_resource::<LoginError>();
         app.init_resource::<StoredEncryptedIdentity>();
-        app.init_resource::<nostr_client::announcement::ServerList>();
+        app.init_resource::<ServerList>();
         app.add_message::<nostr_client::SaveEncryptedIdentity>();
 
         // Initialize state management
@@ -93,6 +94,12 @@ impl Plugin for UiPlugin {
         app.add_systems(
             Update,
             main_menu_button_interaction.run_if(in_state(ClientState::MainMenu)),
+        );
+        app.add_systems(
+            Update,
+            refresh_main_menu_server_list
+                .run_if(in_state(ClientState::MainMenu))
+                .run_if(resource_changed::<ServerList>),
         );
 
         // Connecting screen
@@ -195,10 +202,7 @@ fn on_client_connected(
     next_state.set(ClientState::InGame);
 }
 
-fn setup_main_menu(
-    mut commands: Commands,
-    server_list: Res<nostr_client::announcement::ServerList>,
-) {
+fn setup_main_menu(mut commands: Commands, server_list: Res<ServerList>) {
     trace!("Setting up main menu UI");
 
     commands
@@ -226,13 +230,18 @@ fn setup_main_menu(
                 TextColor(Color::WHITE),
             ));
 
-            for entry in &server_list.entries {
-                widgets::spawn_server_entry_button(
-                    parent,
-                    &entry.menu_label(),
-                    ServerListEntryButton(entry.clone()),
-                );
-            }
+            parent
+                .spawn((
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(12.0),
+                        ..default()
+                    },
+                    ServerListContainer,
+                ))
+                .with_children(|parent| {
+                    spawn_server_list_buttons(parent, &server_list);
+                });
             // Connect Button
             parent
                 .spawn((
@@ -287,6 +296,39 @@ fn setup_main_menu(
                     ));
                 });
         });
+}
+
+fn spawn_server_list_buttons(
+    parent: &mut bevy::ecs::hierarchy::ChildSpawnerCommands,
+    server_list: &ServerList,
+) {
+    for entry in &server_list.entries {
+        widgets::spawn_server_entry_button(
+            parent,
+            &entry.menu_label(),
+            ServerListEntryButton(entry.clone()),
+        );
+    }
+}
+
+fn refresh_main_menu_server_list(
+    mut commands: Commands,
+    server_list: Res<ServerList>,
+    container_query: Query<Entity, With<ServerListContainer>>,
+    entry_query: Query<Entity, With<ServerListEntryButton>>,
+) {
+    let Ok(container) = container_query.single() else {
+        trace!("refresh_main_menu_server_list: server list container not found");
+        return;
+    };
+
+    for entity in &entry_query {
+        commands.entity(entity).despawn();
+    }
+
+    commands.entity(container).with_children(|parent| {
+        spawn_server_list_buttons(parent, &server_list);
+    });
 }
 
 fn main_menu_button_interaction(
