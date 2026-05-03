@@ -142,10 +142,9 @@ fn map_save_dir_routes_correctly() {
     );
     assert_eq!(
         map_save_dir(base, &MapInstanceId::Homebase { owner: owner(0x2a) }),
-        std::path::PathBuf::from(format!(
-            "/tmp/test_worlds/homebase_{}",
-            hex::encode([0x2a; 32])
-        ))
+        std::path::PathBuf::from(
+            "/tmp/test_worlds/homebase_npub19g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4qrd5mkx"
+        )
     );
 }
 
@@ -322,11 +321,15 @@ fn map_save_dir_different_homebases_are_isolated() {
     assert_ne!(dir1, dir2);
     assert_eq!(
         dir1,
-        std::path::PathBuf::from(format!("worlds/homebase_{}", hex::encode([1; 32])))
+        std::path::PathBuf::from(
+            "worlds/homebase_npub1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqs8j9gdm"
+        )
     );
     assert_eq!(
         dir2,
-        std::path::PathBuf::from(format!("worlds/homebase_{}", hex::encode([2; 32])))
+        std::path::PathBuf::from(
+            "worlds/homebase_npub1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq2yz0cn"
+        )
     );
 }
 

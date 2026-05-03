@@ -33,9 +33,10 @@ impl Default for WorldSavePath {
 pub fn map_save_dir(base: &Path, map_id: &MapInstanceId) -> PathBuf {
     match map_id {
         MapInstanceId::Overworld => base.join("overworld"),
-        MapInstanceId::Homebase { owner } => {
-            base.join(format!("homebase_{}", hex::encode(owner.0)))
-        }
+        MapInstanceId::Homebase { owner } => base.join(format!(
+            "homebase_{}",
+            nostr_client::npub_from_nostr_public_key(*owner)
+        )),
     }
 }
 
@@ -113,7 +114,9 @@ mod tests {
         let base = Path::new("worlds");
         assert_eq!(
             map_save_dir(base, &MapInstanceId::Homebase { owner: owner(0x2a) }),
-            PathBuf::from(format!("worlds/homebase_{}", hex::encode([0x2a; 32])))
+            PathBuf::from(
+                "worlds/homebase_npub19g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4qrd5mkx"
+            )
         );
     }
 

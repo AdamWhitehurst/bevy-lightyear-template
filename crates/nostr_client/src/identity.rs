@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use nostr_sdk::nips::nip49::EncryptedSecretKey;
 use nostr_sdk::{FromBech32, Keys, PublicKey, SecretKey, ToBech32};
+use protocol::NostrPublicKey;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -39,6 +40,12 @@ pub fn client_id_from_public_key(public: &PublicKey) -> u64 {
             .try_into()
             .expect("public key has 32 bytes"),
     )
+}
+
+pub fn npub_from_nostr_public_key(public: NostrPublicKey) -> String {
+    PublicKey::from_byte_array(public.0)
+        .to_bech32()
+        .expect("PublicKey bech32 encoding is infallible")
 }
 
 #[derive(Resource, Default, Clone, Debug)]
@@ -320,6 +327,19 @@ mod tests {
         let (_identity, encrypted) = generate_encrypted_identity("correct horse").unwrap();
 
         assert!(unlock_identity(&encrypted, "wrong horse").is_err());
+    }
+
+    #[test]
+    fn npub_from_nostr_public_key_encodes_nip19_public_key() {
+        let public = NostrPublicKey([0x2a; 32]);
+
+        let npub = npub_from_nostr_public_key(public);
+
+        assert_eq!(
+            npub,
+            "npub19g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4qrd5mkx"
+        );
+        assert_eq!(PublicKey::from_bech32(&npub).unwrap().as_bytes(), &public.0);
     }
 
     #[test]

@@ -1888,18 +1888,18 @@ fn seed_from_nostr_public_key(owner: NostrPublicKey) -> u64 {
 **File**: `crates/server/src/persistence/mod.rs`  
 **Action**: modify
 
-Use stable lower-case hex for filesystem portability. This differs from structure's bech32 option but remains within "bech32 or hex".
+Use stable NIP-19 `npub...` public keys for player-owned homebase directory names. This keeps directories recognizable to users while still using the authenticated `NostrPublicKey` as the owner source of truth.
 
 ```rust
 pub fn map_save_dir(base: &Path, map_id: &MapInstanceId) -> PathBuf {
     match map_id {
         MapInstanceId::Overworld => base.join("overworld"),
-        MapInstanceId::Homebase { owner } => base.join(format!("homebase_{}", hex::encode(owner.0))),
+        MapInstanceId::Homebase { owner } => base.join(format!("homebase_{}", nostr_client::npub_from_nostr_public_key(*owner))),
     }
 }
 ```
 
-Add `hex = "0.4"` to `crates/server/Cargo.toml` if not already available transitively; do not rely on transitive deps.
+`crates/server/src/persistence/mod.rs` delegates NIP-19 encoding to `nostr_client`; do not add `nostr-sdk` directly to `server` or `protocol`.
 
 Update test assertion:
 
@@ -1907,7 +1907,7 @@ Update test assertion:
 let owner = NostrPublicKey([0x2a; 32]);
 assert_eq!(
     map_save_dir(base, &MapInstanceId::Homebase { owner }),
-    PathBuf::from(format!("worlds/homebase_{}", hex::encode(owner.0)))
+    PathBuf::from("worlds/homebase_npub19g4z52329g4z52329g4z52329g4z52329g4z52329g4z52329g4qrd5mkx")
 );
 ```
 
@@ -1940,16 +1940,18 @@ Update all `MapInstanceId::Homebase { owner: 42 }` test fixtures to `NostrPublic
 - [x] `cargo check-all` passes.
 - [x] `cargo test-native` passes.
 - [x] `cargo test -p protocol map_instance_id_equality` passes with `NostrPublicKey` owner.
-- [x] `cargo test -p server map_save_dir_homebase` passes with `homebase_<hex>` naming.
+- [x] `cargo test -p nostr_client identity` passes with NIP-19 `npub...` public key encoding.
+- [x] `cargo test -p server map_save_dir_homebase` passes with `homebase_npub...` naming.
+- [x] `cargo test -p server world_persistence` passes with `homebase_npub...` paths.
 - [x] `cargo test -p server map_transition` passes after map-switch authorization reads `PlayerIdentity`.
 - [x] Search verification: no remaining source references to `RemoteId.to_bits()` for map ownership and no `homebase-` save-dir format in server source/tests.
 
 #### Manual
-- [ ] Start server with `SERVER_NSEC`, start two clients with distinct identities, connect both, switch each to Homebase; directories under `worlds/homebase_<hex>/` are distinct.
-- [ ] Restart server, restart client A with the same passphrase, switch to Homebase; previous save loads from the same `homebase_<hex>` directory.
+- [ ] Start server with `SERVER_NSEC`, start two clients with distinct identities, connect both, switch each to Homebase; directories under `worlds/homebase_npub.../` are distinct.
+- [ ] Restart server, restart client A with the same passphrase, switch to Homebase; previous save loads from the same `homebase_npub...` directory.
 - [ ] Restart client A with a different generated identity, switch to Homebase; a fresh distinct directory is created.
 - [ ] Inspect or temporarily log the Overworld map entity's `Owner`; it matches `ServerIdentity::keys.public_key()` converted to `NostrPublicKey`.
-- [ ] Pre-existing `worlds/homebase-<u64>` or `worlds/homebase_<u64>` directories remain untouched and are not migrated.
+- [ ] Pre-existing `worlds/homebase-<u64>`, `worlds/homebase_<u64>`, or `worlds/homebase_<hex>` directories remain untouched and are not migrated.
 
 ---
 
