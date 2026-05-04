@@ -15,8 +15,4 @@ pub struct DevInspectorState {
 pub struct PanelFlags {
     pub world_inspector: bool,
     pub spawn_panel: bool,
-    pub netviz: bool,
-    pub chunk_debugger: bool,
-    pub ability_editor: bool,
-    pub world_object_editor: bool,
 }

@@ -24,8 +24,10 @@ impl Plugin for DevPlugin {
         #[cfg(feature = "inspector")]
         {
             use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
-            app.add_plugins(EguiPlugin::default())
-                .add_systems(EguiPrimaryContextPass, draw_root_menu.run_if(inspector_enabled));
+            app.add_plugins(EguiPlugin::default()).add_systems(
+                EguiPrimaryContextPass,
+                draw_root_menu.run_if(inspector_enabled),
+            );
 
             #[cfg(feature = "world-inspector")]
             app.add_plugins(panels::world_inspector::WorldInspectorPanelPlugin);
@@ -60,10 +62,7 @@ fn inspector_enabled(state: Res<DevInspectorState>) -> bool {
 }
 
 #[cfg(feature = "inspector")]
-fn draw_root_menu(
-    mut state: ResMut<DevInspectorState>,
-    mut contexts: bevy_egui::EguiContexts,
-) {
+fn draw_root_menu(mut state: ResMut<DevInspectorState>, mut contexts: bevy_egui::EguiContexts) {
     let Ok(ctx) = contexts.ctx_mut() else {
         // EguiContexts not yet attached to the primary window.
         trace!("draw_root_menu: EguiContexts not ready, skipping frame");
@@ -77,14 +76,6 @@ fn draw_root_menu(
             ui.checkbox(&mut state.panels.world_inspector, "World");
             #[cfg(feature = "spawn-panel")]
             ui.checkbox(&mut state.panels.spawn_panel, "Spawn");
-            #[cfg(feature = "netviz")]
-            ui.checkbox(&mut state.panels.netviz, "Netviz");
-            #[cfg(feature = "chunk-debug")]
-            ui.checkbox(&mut state.panels.chunk_debugger, "Chunks");
-            #[cfg(feature = "ability-editor")]
-            ui.checkbox(&mut state.panels.ability_editor, "Abilities");
-            #[cfg(feature = "world-object-editor")]
-            ui.checkbox(&mut state.panels.world_object_editor, "Objects");
             let _ = &mut state; // silence unused-mut when no panel features are enabled
         });
     });
