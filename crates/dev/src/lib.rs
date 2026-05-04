@@ -31,6 +31,9 @@ impl Plugin for DevPlugin {
 
             #[cfg(feature = "world-inspector")]
             app.add_plugins(panels::world_inspector::WorldInspectorPanelPlugin);
+
+            #[cfg(feature = "spawn-panel")]
+            app.add_plugins(panels::spawn::SpawnPanelPlugin);
         }
     }
 }

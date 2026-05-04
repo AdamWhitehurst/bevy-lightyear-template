@@ -53,7 +53,7 @@ pub fn extract_on_tick_effects(asset: &AbilityAsset) -> Option<&OnTickEffects> {
 /// `extra_tick_effects` is appended to the asset's `OnTickEffects` (or a new
 /// one if absent) and inserted as a typed overwrite after the reflected
 /// inserts. Empty for non-conditional callers.
-pub(crate) fn apply_ability_archetype(
+pub fn apply_ability_archetype(
     commands: &mut Commands,
     entity: Entity,
     asset: &AbilityAsset,

@@ -589,9 +589,9 @@ spawn-panel = ["dev/spawn-panel"]
 ### Verification
 
 #### Automated
-- [ ] `cargo check -p dev --features spawn-panel` passes.
-- [ ] `cargo check -p dev --features spawn-panel --target wasm32-unknown-unknown` passes.
-- [ ] `cargo check-all` passes.
+- [x] `cargo check -p dev --features spawn-panel` passes.
+- [x] `cargo check -p dev --features spawn-panel --target wasm32-unknown-unknown` passes.
+- [x] `cargo check-all` passes.
 
 #### Manual
 - [ ] `cargo client --features dev/spawn-panel` — F4, F6, Tab "Def-driven": pick `tree_circle`, click Spawn → tree appears at origin in world inspector; entity has `DevSpawned` + `WorldObjectId`.

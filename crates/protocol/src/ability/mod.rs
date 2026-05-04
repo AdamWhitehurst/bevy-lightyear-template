@@ -1,10 +1,10 @@
 mod activation;
 mod effects;
 mod lifecycle;
-mod loader;
 mod spawn;
 mod types;
 
+pub mod loader;
 pub mod loading;
 pub mod plugin;
 
