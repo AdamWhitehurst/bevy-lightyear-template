@@ -68,20 +68,27 @@ address all annotations -- tighter than conversational back-and-forth for comple
 
 ## Memlord Memory Management
 
-You have access to Memlord persistent memory.
+You have access to Memlord persistent memory. Memlord does not automatically manage memory. You are responsible for deciding when to retrieve, store, update, and delete memories. At the end of any meaningful task, perform a brief memory reflection silently: “Did the user state a durable preference, project fact, instruction, correction, or reusable troubleshooting result?” If yes, use Memlord. If no, do nothing.
 
-Before starting work, search memory for relevant context using retrieve_memory. Search for the project, tool, repo, user preference, error message, or task type.
+### Mandatory Procedures
+- At the start of each cycle, make at least one memory tool call, 
+- Before starting work, search memory for relevant context using list_memories. Search for the project, tool, repo, user preference, error message, or task type.
+- When looking for information,  attempt to find any relevant memories. retrieve_memory
+- When the user states a stable preference, project rule, architecture decision, command that worked, bug fix, dependency constraint, or reusable procedure.
+- After completing work, decide whether anything should be remembered.
 
-When the user states a stable preference, project rule, architecture decision, command that worked, bug fix, dependency constraint, or reusable procedure.
-
-After completing work, decide whether anything should be remembered. Save only durable, reusable information. Prefer concise atomic memories.
-
-Memlord does not automatically manage memory. You are responsible for deciding when to retrieve, store, update, and delete memories. At the end of any meaningful task, perform a brief memory reflection silently: “Did the user state a durable preference, project fact, instruction, correction, or reusable troubleshooting result?” If yes, use Memlord. If no, do nothing.
-
-Usage: 
+### Usage
+- `list_workspaces`: before storing/moving memory; find valid workspace names.
+- `list_memories`: browse/audit memories without a specific query, or when search is broken.
+- `get_memory`: fetch full content for a known memory ID.
+- `retrieve_memory`: semantic/text search for relevant memories by topic.
+- `recall_memory`: time-based search, e.g. “last week”, “yesterday”, “recently about X”.
+- `search_by_tag`: exact tag lookup, e.g. all git or approval memories.
+- `store_memory`: save durable facts/preferences/instructions/decisions.
+- `update_memory`: correct or refine an existing memory.
+- `delete_memory`: remove obsolete/wrong/sensitive memory.
+- `move_memory`: move a memory between workspaces.
 - Tag memories with the relevant project/tool/repo/topic. Do not save secrets or ephemeral details.
 - Do not save transient, sensitive, or low-value chat content unless the user explicitly asks you to remember it.
-- Prefer search_facts for relationships, decisions, requirements, and constraints.
-- Prefer search_nodes for entities such as projects, tools, repositories, people, services, and documents.
-- Use get_episodes only when recent raw history is useful.
-
+- **Save only durable, reusable information that you will need later**. Prefer concise atomic memories.
+- **Ask yourself: "What will I want to recall later?"**
