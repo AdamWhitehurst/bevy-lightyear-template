@@ -18,10 +18,7 @@ fn world_inspector_enabled(state: Res<DevInspectorState>) -> bool {
     state.enabled && state.panels.world_inspector
 }
 
-fn toggle_world_inspector(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut state: ResMut<DevInspectorState>,
-) {
+fn toggle_world_inspector(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<DevInspectorState>) {
     if keys.just_pressed(KeyCode::F5) {
         state.panels.world_inspector = !state.panels.world_inspector;
     }
