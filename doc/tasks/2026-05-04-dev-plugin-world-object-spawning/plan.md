@@ -1249,12 +1249,12 @@ fn replicated_object_reconciles_matching_preview_only() {
 
 #### Manual
 
-- [ ] Run `cargo server` and `cargo client`.
-- [ ] Select a world object, arm placement, and confirm the preview follows terrain under the mouse.
-- [ ] Click terrain and confirm there is at most one temporary accepted preview.
-- [ ] Force or trigger a reject and confirm the matching preview is removed and the reject reason is shown.
-- [ ] Confirm replicated hydration replaces the accepted preview without duplicate committed visuals.
-- [ ] Confirm the preview has no gameplay collider/effects and cannot be interacted with as a real world object before replication.
+- [x] Run `cargo server` and `cargo client`.
+- [x] Select a world object, arm placement, and confirm the preview follows terrain under the mouse.
+- [x] Click terrain and confirm there is at most one temporary accepted preview.
+- [x] Force or trigger a reject and confirm the matching preview is removed and the reject reason is shown.
+- [x] Confirm replicated hydration replaces the accepted preview without duplicate committed visuals.
+- [x] Confirm the preview has no gameplay collider/effects and cannot be interacted with as a real world object before replication.
 
 ---
 
