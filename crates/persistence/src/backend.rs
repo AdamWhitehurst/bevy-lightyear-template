@@ -4,7 +4,7 @@ use bevy::ecs::component::Component;
 
 use crate::store::Store;
 
-/// Holds a persistence backend on a map entity.
+/// Holds a persistence backend
 #[derive(Component)]
 pub struct StoreBackend<K, V, B>(pub B, PhantomData<fn(K, V)>)
 where

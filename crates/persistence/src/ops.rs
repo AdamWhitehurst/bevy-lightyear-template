@@ -18,7 +18,7 @@ enum StoreOp<K, V> {
 
 /// Manages async persistence tasks for a `Store<K, V>`.
 ///
-/// Attach as a Component on map entities alongside their `StoreBackend`.
+/// Attach as a Component on entities alongside their `StoreBackend`.
 /// Consumer systems call `poll()` each frame and drain `completed_loads`.
 #[derive(Component)]
 pub struct PendingStoreOps<K: Send + Sync + 'static, V: Send + Sync + 'static> {
