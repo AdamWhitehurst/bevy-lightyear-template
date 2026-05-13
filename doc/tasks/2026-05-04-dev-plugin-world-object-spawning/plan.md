@@ -998,13 +998,13 @@ fn world_object_placement_ui_sequences_and_pending_ack() {
 
 #### Manual
 
-- [ ] Run `cargo server` and `cargo client`.
-- [ ] Open the spawn panel, select a world object, arm placement, click terrain, and observe a placement request path rather than local entity
+- [x] Run `cargo server` and `cargo client`.
+- [x] Open the spawn panel, select a world object, arm placement, click terrain, and observe a placement request path rather than local entity
       creation.
-- [ ] Confirm the final world object appears through replicated hydration, not from the dev panel's old local `commands.spawn` path.
-- [ ] Confirm voxel placement/removal does not also fire on the same click while object placement is armed.
-- [ ] Confirm free-form spawning still creates client-local `DevSpawned` entities only.
-- [ ] Confirm a reject response removes the matching pending request and displays the reject reason in the panel.
+- [x] Confirm the final world object appears through replicated hydration, not from the dev panel's old local `commands.spawn` path.
+- [x] Confirm voxel placement/removal does not also fire on the same click while object placement is armed.
+- [x] Confirm free-form spawning still creates client-local `DevSpawned` entities only.
+- [x] Confirm a reject response removes the matching pending request and displays the reject reason in the panel.
 
 ---
 
