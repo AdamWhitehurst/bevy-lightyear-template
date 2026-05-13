@@ -1244,8 +1244,8 @@ fn replicated_object_reconciles_matching_preview_only() {
 
 #### Automated
 
-- [ ] `cargo test -p client --test plugin` passes
-- [ ] `cargo check -p client --features spawn-panel` passes
+- [x] `cargo test -p client --test plugin` passes
+- [x] `cargo check -p client --features spawn-panel` passes
 
 #### Manual
 

@@ -10,11 +10,11 @@ use crate::state::DevInspectorState;
 use bevy::ecs::reflect::ReflectComponent;
 use bevy::prelude::ReflectDefault;
 use bevy::prelude::*;
-use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
+use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use protocol::map::MapInstanceId;
 use protocol::world_object::{
-    WorldObjectDefRegistry, WorldObjectId, WorldObjectPlacementRejectReason,
-    apply_object_components,
+    apply_object_components, WorldObjectDefRegistry, WorldObjectId,
+    WorldObjectPlacementRejectReason,
 };
 
 /// Marker for any entity spawned via the dev spawn panel. Client-local; not replicated.
@@ -163,6 +163,15 @@ fn draw_def_tab(
         ui.label(format!(
             "Pending placement requests: {}",
             ui_state.placement.pending.len()
+        ));
+        let accepted = ui_state
+            .placement
+            .pending
+            .iter()
+            .filter(|pending| pending.accepted_final_position.is_some())
+            .count();
+        ui.label(format!(
+            "Accepted placements awaiting replication: {accepted}"
         ));
         if let Some(reason) = &ui_state.placement.last_reject {
             ui.label(format!("Last placement rejected: {reason:?}"));

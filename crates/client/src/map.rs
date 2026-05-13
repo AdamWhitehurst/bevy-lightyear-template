@@ -1,10 +1,19 @@
+#[cfg(feature = "spawn-panel")]
+use crate::world_object::{DefaultVoxModelMaterial, preview_visual_from_def};
+#[cfg(feature = "spawn-panel")]
+use avian3d::prelude::Position;
 use bevy::{prelude::*, window::PrimaryWindow};
 #[cfg(feature = "spawn-panel")]
 use dev::panels::spawn::{PendingWorldObjectPlacement, SpawnPanelUi};
 use leafwing_input_manager::prelude::*;
+#[cfg(feature = "spawn-panel")]
+use lightyear::prelude::Replicated;
 use lightyear::prelude::{Controlled, MessageReceiver, MessageSender, Predicted};
 #[cfg(feature = "spawn-panel")]
+use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
+#[cfg(feature = "spawn-panel")]
 use protocol::world_object::{
+    PlacementOffset, WorldObjectDef, WorldObjectDefRegistry, WorldObjectId,
     WorldObjectPlacementAck, WorldObjectPlacementChannel, WorldObjectPlacementReject,
     WorldObjectPlacementRequest,
 };
@@ -19,6 +28,16 @@ use voxel_map_engine::prelude::{
 };
 
 const RAYCAST_MAX_DISTANCE: f32 = 100.0;
+
+#[cfg(feature = "spawn-panel")]
+/// Marker for local-only world-object placement preview entities.
+#[derive(Component)]
+pub struct WorldObjectPlacementPreview {
+    /// Placement request sequence for accepted/pending previews; `None` marks the hover preview.
+    pub sequence: Option<u32>,
+    /// Object definition id rendered by this local preview.
+    pub object_id: WorldObjectId,
+}
 
 /// Current world-object placement target derived from the active camera ray.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -118,6 +137,10 @@ impl Plugin for ClientMapPlugin {
                     handle_voxel_input,
                     #[cfg(feature = "spawn-panel")]
                     handle_world_object_placement_input,
+                    #[cfg(feature = "spawn-panel")]
+                    update_world_object_placement_preview,
+                    #[cfg(feature = "spawn-panel")]
+                    reconcile_placement_preview_on_replication,
                 )
                     .chain()
                     .run_if(in_state(ui::ClientState::InGame))
@@ -360,6 +383,52 @@ fn handle_voxel_input(
 }
 
 #[cfg(feature = "spawn-panel")]
+/// Computes the display transform for a local placement preview.
+pub fn preview_transform(def: &WorldObjectDef, base_position: Vec3) -> Transform {
+    let offset = def
+        .components
+        .iter()
+        .find_map(|c| c.try_downcast_ref::<PlacementOffset>())
+        .map(|offset| offset.0)
+        .unwrap_or(Vec3::ZERO);
+    Transform::from_translation(base_position + offset)
+}
+
+#[cfg(feature = "spawn-panel")]
+/// Spawns a local-only placement preview parent and optional visual child.
+pub fn spawn_world_object_placement_preview(
+    commands: &mut Commands,
+    sequence: Option<u32>,
+    object_id: WorldObjectId,
+    transform: Transform,
+    def: &WorldObjectDef,
+    vox_registry: &VoxModelRegistry,
+    vox_assets: &Assets<VoxModelAsset>,
+    default_material: &DefaultVoxModelMaterial,
+) -> Entity {
+    let entity = commands
+        .spawn((
+            WorldObjectPlacementPreview {
+                sequence,
+                object_id,
+            },
+            transform,
+            Visibility::default(),
+            Name::new("world-object-placement-preview"),
+        ))
+        .id();
+    preview_visual_from_def(
+        commands,
+        entity,
+        def,
+        vox_registry,
+        vox_assets,
+        default_material,
+    );
+    entity
+}
+
+#[cfg(feature = "spawn-panel")]
 fn handle_world_object_placement_input(
     mut ui_state: ResMut<SpawnPanelUi>,
     action_query: Query<&ActionState<PlayerActions>, With<Controlled>>,
@@ -421,6 +490,184 @@ fn handle_world_object_placement_input(
             base_position: target.base_position,
             accepted_final_position: None,
         });
+}
+
+#[cfg(feature = "spawn-panel")]
+/// Maintains hover and pending local placement previews from spawn-panel state.
+fn update_world_object_placement_preview(
+    mut commands: Commands,
+    ui_state: Res<SpawnPanelUi>,
+    // Optional because definitions are loaded asynchronously by the world-object plugin.
+    registry: Option<Res<WorldObjectDefRegistry>>,
+    vox_registry: Res<VoxModelRegistry>,
+    vox_assets: Res<Assets<VoxModelAsset>>,
+    default_material: Res<DefaultVoxModelMaterial>,
+    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    mut voxel_world: VoxelWorld,
+    camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    mut preview_query: Query<(Entity, &mut Transform, &WorldObjectPlacementPreview)>,
+) {
+    for (entity, _, preview) in &mut preview_query {
+        if let Some(sequence) = preview.sequence {
+            let still_pending = ui_state
+                .placement
+                .pending
+                .iter()
+                .any(|pending| pending.sequence == sequence);
+            if !still_pending {
+                trace!(
+                    "update_world_object_placement_preview: despawning stale sequence preview {}",
+                    sequence
+                );
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+
+    let Some(registry) = registry else {
+        trace!("update_world_object_placement_preview: WorldObjectDefRegistry not loaded");
+        return;
+    };
+
+    if !ui_state.placement.armed {
+        for (entity, _, preview) in &mut preview_query {
+            if preview.sequence.is_none() {
+                trace!("update_world_object_placement_preview: despawning disarmed hover preview");
+                commands.entity(entity).despawn();
+            }
+        }
+        trace!("update_world_object_placement_preview: placement is not armed");
+        return;
+    }
+
+    let Some(selected_object) = ui_state.selected_object.clone() else {
+        trace!("update_world_object_placement_preview: placement armed without selected object");
+        for (entity, _, preview) in &mut preview_query {
+            if preview.sequence.is_none() {
+                commands.entity(entity).despawn();
+            }
+        }
+        return;
+    };
+
+    let Some(selected_def) = registry.get(&selected_object) else {
+        trace!(
+            "update_world_object_placement_preview: unknown selected object {:?}",
+            selected_object.0
+        );
+        return;
+    };
+
+    if let Some(target) = current_placement_target(
+        &player_query,
+        &mut voxel_world,
+        &camera_query,
+        &window_query,
+    ) {
+        let transform = preview_transform(selected_def, target.base_position);
+        let mut hover_entity = None;
+        for (entity, mut preview_transform, preview) in &mut preview_query {
+            if preview.sequence.is_some() {
+                trace!(
+                    "update_world_object_placement_preview: skipping sequence preview while updating hover preview"
+                );
+                continue;
+            }
+            if hover_entity.is_some() || preview.object_id != selected_object {
+                trace!("update_world_object_placement_preview: despawning duplicate hover preview");
+                commands.entity(entity).despawn();
+                continue;
+            }
+            *preview_transform = transform;
+            hover_entity = Some(entity);
+        }
+        if hover_entity.is_none() {
+            spawn_world_object_placement_preview(
+                &mut commands,
+                None,
+                selected_object.clone(),
+                transform,
+                selected_def,
+                &vox_registry,
+                &vox_assets,
+                &default_material,
+            );
+        }
+    } else {
+        trace!("update_world_object_placement_preview: no current placement target");
+    }
+
+    for pending in &ui_state.placement.pending {
+        let Some(def) = registry.get(&pending.object_id) else {
+            trace!(
+                "update_world_object_placement_preview: pending object id {:?} is unknown",
+                pending.object_id.0
+            );
+            continue;
+        };
+        let transform = pending
+            .accepted_final_position
+            .map(Transform::from_translation)
+            .unwrap_or_else(|| preview_transform(def, pending.base_position));
+        let mut sequence_entity = None;
+        for (entity, mut preview_transform, preview) in &mut preview_query {
+            if preview.sequence == Some(pending.sequence) {
+                *preview_transform = transform;
+                sequence_entity = Some(entity);
+            }
+        }
+        if sequence_entity.is_none() {
+            spawn_world_object_placement_preview(
+                &mut commands,
+                Some(pending.sequence),
+                pending.object_id.clone(),
+                transform,
+                def,
+                &vox_registry,
+                &vox_assets,
+                &default_material,
+            );
+        }
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+/// Removes accepted local previews once the matching replicated object appears.
+pub fn reconcile_placement_preview_on_replication(
+    mut commands: Commands,
+    mut ui_state: ResMut<SpawnPanelUi>,
+    replicated_query: Query<(&WorldObjectId, &Position), Added<Replicated>>,
+    preview_query: Query<(Entity, &WorldObjectPlacementPreview, &Transform)>,
+) {
+    for (replicated_id, replicated_position) in &replicated_query {
+        let replicated_position = Vec3::from(replicated_position.0);
+        for (preview_entity, preview, preview_transform) in &preview_query {
+            let Some(sequence) = preview.sequence else {
+                trace!("reconcile_placement_preview_on_replication: skipping hover preview");
+                continue;
+            };
+            if &preview.object_id != replicated_id {
+                trace!(
+                    "reconcile_placement_preview_on_replication: preview object id does not match replicated object"
+                );
+                continue;
+            }
+            if positions_match(preview_transform.translation, replicated_position) {
+                commands.entity(preview_entity).despawn();
+                ui_state
+                    .placement
+                    .pending
+                    .retain(|pending| pending.sequence != sequence);
+            }
+        }
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+/// Returns true when two world positions are close enough for preview reconciliation.
+pub fn positions_match(a: Vec3, b: Vec3) -> bool {
+    a.distance_squared(b) <= 0.01 * 0.01
 }
 
 fn camera_ray(

@@ -15,6 +15,77 @@ use protocol::{MapInstanceId, MapRegistry};
 #[derive(Resource)]
 pub struct DefaultVoxModelMaterial(pub Handle<StandardMaterial>);
 
+/// Marker for visual children attached to local-only placement previews.
+#[derive(Component)]
+pub struct PlacementPreviewVisual;
+
+/// Attaches a visual-only world-object preview child without gameplay components.
+pub fn preview_visual_from_def(
+    commands: &mut Commands,
+    parent: Entity,
+    def: &WorldObjectDef,
+    vox_registry: &VoxModelRegistry,
+    vox_assets: &Assets<VoxModelAsset>,
+    default_material: &DefaultVoxModelMaterial,
+) -> Option<Entity> {
+    let visual_kind = def
+        .components
+        .iter()
+        .find_map(|c| c.try_downcast_ref::<VisualKind>());
+    match visual_kind {
+        Some(VisualKind::Vox(path)) => preview_vox_mesh(
+            commands,
+            parent,
+            path,
+            vox_registry,
+            vox_assets,
+            default_material,
+        ),
+        _ => {
+            trace!(
+                "preview_visual_from_def: world object has no Vox visual, skipping preview visual"
+            );
+            None
+        }
+    }
+}
+
+/// Attaches a vox mesh child for a local-only preview entity.
+fn preview_vox_mesh(
+    commands: &mut Commands,
+    parent: Entity,
+    vox_path: &str,
+    vox_registry: &VoxModelRegistry,
+    vox_assets: &Assets<VoxModelAsset>,
+    default_material: &DefaultVoxModelMaterial,
+) -> Option<Entity> {
+    let Some(asset_handle) = vox_registry.get(vox_path) else {
+        trace!("preview_vox_mesh: Vox model not found in registry: {vox_path}");
+        return None;
+    };
+    let Some(asset) = vox_assets.get(asset_handle) else {
+        trace!("preview_vox_mesh: VoxModelAsset not yet loaded: {vox_path}");
+        return None;
+    };
+    let Some(mesh_handle) = asset.lod_meshes.first() else {
+        trace!("preview_vox_mesh: VoxModelAsset has no LOD meshes: {vox_path}");
+        return None;
+    };
+
+    let child = commands
+        .spawn((
+            Mesh3d(mesh_handle.clone()),
+            MeshMaterial3d(default_material.0.clone()),
+            PlacementPreviewVisual,
+        ))
+        .id();
+    commands
+        .entity(parent)
+        .insert(Visibility::default())
+        .add_child(child);
+    Some(child)
+}
+
 /// Creates the shared vox model material at startup.
 pub fn init_default_vox_model_material(
     mut commands: Commands,
