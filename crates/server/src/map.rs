@@ -30,8 +30,12 @@ use crate::persistence::{map_save_dir, MapMeta, WorldSavePath};
 use persistence::{PendingStoreOps, StoreBackend};
 use protocol::map::{MapSaveTarget, SavedEntity, SavedEntityKind};
 use protocol::terrain::TerrainDef;
-use protocol::vox_model::VoxModelRegistry;
-use protocol::world_object::{apply_object_components, WorldObjectDefRegistry};
+use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
+use protocol::world_object::{
+    apply_object_components, WorldObjectDef, WorldObjectDefRegistry, WorldObjectPlacementAck,
+    WorldObjectPlacementChannel, WorldObjectPlacementReject, WorldObjectPlacementRejectReason,
+    WorldObjectPlacementRequest,
+};
 use protocol::{AppState, RespawnPoint, TerrainDefRegistry};
 use voxel_map_engine::config::WorldObjectSpawn;
 use voxel_map_engine::persistence::fs_chunk::FsChunkStore;
@@ -638,6 +642,10 @@ impl Plugin for ServerMapPlugin {
                     poll_map_meta.run_if(in_state(AppState::Ready)),
                     poll_map_entities.run_if(in_state(AppState::Ready)),
                     (handle_voxel_edit_requests, flush_voxel_broadcasts).chain(),
+                    handle_world_object_placement_requests.run_if(
+                        resource_exists::<WorldObjectDefRegistry>
+                            .and(resource_exists::<VoxModelRegistry>),
+                    ),
                     push_chunks_to_clients,
                     save_dirty_chunks_debounced,
                     handle_map_switch_requests.run_if(resource_exists::<TerrainDefRegistry>),
@@ -667,7 +675,7 @@ impl Plugin for ServerMapPlugin {
 }
 
 /// Resolves which map entity a client's character is on.
-fn resolve_player_map(
+pub(crate) fn resolve_player_map(
     client_entity: Entity,
     controlled_query: &Query<(&ControlledBy, &MapInstanceId), With<CharacterMarker>>,
     map_registry: &MapRegistry,
@@ -744,6 +752,163 @@ fn queue_edit_broadcast(
     pending.per_chunk.entry(chunk_pos).or_default().push(edit);
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn handle_world_object_placement_requests(
+    mut receivers: Query<(Entity, &mut MessageReceiver<WorldObjectPlacementRequest>)>,
+    mut ack_senders: Query<&mut MessageSender<WorldObjectPlacementAck>>,
+    mut reject_senders: Query<&mut MessageSender<WorldObjectPlacementReject>>,
+    controlled_query: Query<(&ControlledBy, &MapInstanceId), With<CharacterMarker>>,
+    map_registry: Res<MapRegistry>,
+    map_query: Query<(&VoxelMapInstance, &MapDimensions)>,
+    defs: Res<WorldObjectDefRegistry>,
+    type_registry: Res<AppTypeRegistry>,
+    vox_registry: Res<VoxModelRegistry>,
+    vox_assets: Res<Assets<VoxModelAsset>>,
+    meshes: Res<Assets<Mesh>>,
+    mut commands: Commands,
+) {
+    for (client_entity, mut receiver) in &mut receivers {
+        for request in receiver.receive() {
+            let Some((map_entity, map_id)) =
+                resolve_player_map(client_entity, &controlled_query, &map_registry)
+            else {
+                trace!(
+                    "handle_world_object_placement_requests: no character for client {client_entity:?}"
+                );
+                send_placement_reject(
+                    client_entity,
+                    request.sequence,
+                    WorldObjectPlacementRejectReason::NoControlledCharacter,
+                    &mut reject_senders,
+                );
+                continue;
+            };
+
+            let (instance, dimensions) = map_query
+                .get(map_entity)
+                .expect("resolved map entity must have VoxelMapInstance and MapDimensions");
+
+            match validate_world_object_placement(&request, instance, dimensions, &defs) {
+                Ok((def, final_position, _)) => {
+                    crate::world_object::spawn_placed_world_object(
+                        &mut commands,
+                        request.object_id.clone(),
+                        def,
+                        request.base_position,
+                        map_entity,
+                        map_id,
+                        dimensions.chunk_size,
+                        &type_registry,
+                        &vox_registry,
+                        &vox_assets,
+                        &meshes,
+                    );
+                    send_placement_ack(
+                        client_entity,
+                        WorldObjectPlacementAck {
+                            sequence: request.sequence,
+                            object_id: request.object_id,
+                            final_position,
+                        },
+                        &mut ack_senders,
+                    );
+                }
+                Err(reason) => {
+                    trace!(
+                        "handle_world_object_placement_requests: rejecting sequence {}: {:?}",
+                        request.sequence,
+                        reason
+                    );
+                    send_placement_reject(
+                        client_entity,
+                        request.sequence,
+                        reason,
+                        &mut reject_senders,
+                    );
+                    continue;
+                }
+            }
+        }
+    }
+}
+
+/// Validates a world-object placement against object definitions and loaded chunk state.
+pub fn validate_world_object_placement<'a>(
+    request: &WorldObjectPlacementRequest,
+    instance: &VoxelMapInstance,
+    dimensions: &MapDimensions,
+    defs: &'a WorldObjectDefRegistry,
+) -> Result<(&'a WorldObjectDef, Vec3, IVec3), WorldObjectPlacementRejectReason> {
+    if !request.base_position.is_finite() {
+        return Err(WorldObjectPlacementRejectReason::NonFinitePosition);
+    }
+
+    let Some(def) = defs.get(&request.object_id) else {
+        return Err(WorldObjectPlacementRejectReason::UnknownObject);
+    };
+
+    let final_position =
+        crate::world_object::final_placed_world_object_position(def, request.base_position);
+    if !final_position.is_finite() {
+        return Err(WorldObjectPlacementRejectReason::NonFinitePosition);
+    }
+
+    let chunk_pos =
+        crate::chunk_entities::chunk_pos_for_world_position(final_position, dimensions.chunk_size);
+
+    if !placement_chunk_in_bounds(chunk_pos, dimensions) {
+        return Err(WorldObjectPlacementRejectReason::OutOfBounds);
+    }
+
+    let column = voxel_map_engine::prelude::chunk_to_column(chunk_pos);
+    if !instance.chunk_levels.contains_key(&column) || instance.get_chunk_data(chunk_pos).is_none()
+    {
+        return Err(WorldObjectPlacementRejectReason::ChunkUnavailable);
+    }
+
+    Ok((def, final_position, chunk_pos))
+}
+
+/// Returns whether a candidate chunk is within a map's configured placement bounds.
+fn placement_chunk_in_bounds(chunk_pos: IVec3, dimensions: &MapDimensions) -> bool {
+    (dimensions.column_y_range.0..dimensions.column_y_range.1).contains(&chunk_pos.y)
+        && match dimensions.bounds {
+            Some(bounds) => {
+                chunk_pos.x.abs() < bounds.x
+                    && chunk_pos.y.abs() < bounds.y
+                    && chunk_pos.z.abs() < bounds.z
+            }
+            None => true,
+        }
+}
+
+/// Sends a placement rejection to a client if its reject sender exists.
+fn send_placement_reject(
+    client_entity: Entity,
+    sequence: u32,
+    reason: WorldObjectPlacementRejectReason,
+    reject_senders: &mut Query<&mut MessageSender<WorldObjectPlacementReject>>,
+) {
+    let Ok(mut sender) = reject_senders.get_mut(client_entity) else {
+        trace!("send_placement_reject: no reject sender for {client_entity:?}");
+        return;
+    };
+    sender.send::<WorldObjectPlacementChannel>(WorldObjectPlacementReject { sequence, reason });
+}
+
+/// Sends a placement acknowledgment to a client if its acknowledgment sender exists.
+fn send_placement_ack(
+    client_entity: Entity,
+    ack: WorldObjectPlacementAck,
+    ack_senders: &mut Query<&mut MessageSender<WorldObjectPlacementAck>>,
+) {
+    let Ok(mut sender) = ack_senders.get_mut(client_entity) else {
+        trace!("send_placement_ack: no ack sender for {client_entity:?}");
+        return;
+    };
+    sender.send::<WorldObjectPlacementChannel>(ack);
+}
+
 pub fn handle_voxel_edit_requests(
     mut receivers: Query<(Entity, &mut MessageReceiver<VoxelEditRequest>)>,
     mut ack_senders: Query<&mut MessageSender<VoxelEditAck>>,
@@ -758,7 +923,7 @@ pub fn handle_voxel_edit_requests(
     for (client_entity, mut receiver) in &mut receivers {
         for request in receiver.receive() {
             let Some((map_entity, player_map_id)) =
-                resolve_player_map(client_entity, &controlled_query, &*map_registry)
+                resolve_player_map(client_entity, &controlled_query, &map_registry)
             else {
                 trace!("handle_voxel_edit_requests: no character for client {client_entity:?}");
                 continue;
@@ -778,8 +943,8 @@ pub fn handle_voxel_edit_requests(
                 &request,
                 map_entity,
                 &mut voxel_world,
-                &mut *dirty_state,
-                &*time,
+                &mut dirty_state,
+                &time,
             );
             send_edit_ack(client_entity, request.sequence, &mut ack_senders);
             let chunk_size = voxel_world
@@ -793,7 +958,7 @@ pub fn handle_voxel_edit_requests(
                     map_id: player_map_id,
                 },
                 chunk_size,
-                &mut *pending_broadcasts,
+                &mut pending_broadcasts,
             );
         }
     }
@@ -1013,7 +1178,9 @@ fn send_unsent_chunks(
             visibility.sent_chunks.insert(chunk_pos);
             sent += 1;
         } else {
-            trace!("send_unsent_chunks: no MessageSender<ChunkDataSync> on client {client_entity:?}, skipping");
+            trace!(
+                "send_unsent_chunks: no MessageSender<ChunkDataSync> on client {client_entity:?}, skipping"
+            );
             break;
         }
     }
@@ -1112,13 +1279,13 @@ pub fn handle_map_switch_requests(
                 client_entity,
                 current_map_id,
                 &target_map_id,
-                &mut *registry,
-                &mut *room_registry,
+                &mut registry,
+                &mut room_registry,
                 &map_params_query,
                 &mut senders,
-                &*save_path,
-                &*terrain_registry,
-                &*type_registry,
+                &save_path,
+                &terrain_registry,
+                &type_registry,
                 &respawn_query,
             );
         }

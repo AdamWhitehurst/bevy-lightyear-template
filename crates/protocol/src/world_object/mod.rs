@@ -13,5 +13,6 @@ pub use spawn::apply_object_components;
 pub use types::{
     ActiveTransformation, DeathEffect, ObjectCategory, OnDeathEffects, PlacementOffset,
     ReflectPersist, ReflectSpawnOnly, VisualKind, WorldObjectDef, WorldObjectId,
-    WorldObjectLoadError,
+    WorldObjectLoadError, WorldObjectPlacementAck, WorldObjectPlacementChannel,
+    WorldObjectPlacementReject, WorldObjectPlacementRejectReason, WorldObjectPlacementRequest,
 };

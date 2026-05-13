@@ -202,12 +202,12 @@ mod tests {
 
 #### Manual
 
-- [ ] Delete old local save data before runtime verification because entity save v2 is intentionally not migrated.
-- [ ] Fresh/generated `WorldObjectSpawn { position_kind: PlacementBase, ... }` inserts `Position(spawn.position + PlacementOffset)`.
-- [ ] Saved/reloaded `WorldObjectSpawn { position_kind: Final, persisted_components: Vec::new(), ... }` inserts the exact saved final `Position` with
+- [x] Delete old local save data before runtime verification because entity save v2 is intentionally not migrated.
+- [x] Fresh/generated `WorldObjectSpawn { position_kind: PlacementBase, ... }` inserts `Position(spawn.position + PlacementOffset)`.
+- [x] Saved/reloaded `WorldObjectSpawn { position_kind: Final, persisted_components: Vec::new(), ... }` inserts the exact saved final `Position` with
       no offset.
-- [ ] Eviction and all-entity collection write `position_kind: Final` for saved chunk entities.
-- [ ] `persisted_components` controls only component restoration, not position offset semantics.
+- [x] Eviction and all-entity collection write `position_kind: Final` for saved chunk entities.
+- [x] `persisted_components` controls only component restoration, not position offset semantics.
 
 ---
 
@@ -615,8 +615,8 @@ Use loaded test chunks by creating `VoxelMapInstance::new(...)`, inserting chunk
 
 #### Automated
 
-- [ ] `cargo test -p server --test world_object_placement` passes
-- [ ] `cargo test -p server --test voxel_persistence` passes after Phase 1 remains green
+- [x] `cargo test -p server --test world_object_placement` passes
+- [x] `cargo test -p server --test voxel_persistence` passes after Phase 1 remains green
 
 #### Manual
 

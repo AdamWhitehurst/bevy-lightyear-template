@@ -3,6 +3,9 @@ use bevy::reflect::PartialReflect;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+/// Ordered reliable channel for authoritative world-object placement requests and responses.
+pub struct WorldObjectPlacementChannel;
+
 /// Unique identifier for a world object definition. Derived from the `.object.ron` filename.
 ///
 /// Also used as a replicated ECS component — the single component Lightyear sends to clients
@@ -17,6 +20,44 @@ pub struct WorldObjectId(pub String);
 #[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]
 #[reflect(Component, Serialize, Deserialize, SpawnOnly)]
 pub struct PlacementOffset(pub Vec3);
+
+/// Client requests placement of a known world-object definition.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+#[type_path = "protocol::world_object"]
+pub struct WorldObjectPlacementRequest {
+    pub sequence: u32,
+    pub object_id: WorldObjectId,
+    /// Un-offset placement base point. Server applies `PlacementOffset` exactly once.
+    pub base_position: Vec3,
+}
+
+/// Server acknowledges that placement was accepted. The committed object still arrives by replication.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+#[type_path = "protocol::world_object"]
+pub struct WorldObjectPlacementAck {
+    pub sequence: u32,
+    pub object_id: WorldObjectId,
+    pub final_position: Vec3,
+}
+
+/// Server rejects a placement request without spawning an entity.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+#[type_path = "protocol::world_object"]
+pub struct WorldObjectPlacementReject {
+    pub sequence: u32,
+    pub reason: WorldObjectPlacementRejectReason,
+}
+
+/// Explicit reasons that a world-object placement request can be rejected.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+#[type_path = "protocol::world_object"]
+pub enum WorldObjectPlacementRejectReason {
+    NoControlledCharacter,
+    UnknownObject,
+    NonFinitePosition,
+    OutOfBounds,
+    ChunkUnavailable,
+}
 
 /// Broad classification of world objects.
 #[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize, Reflect)]

@@ -54,7 +54,11 @@ pub use map::{
 pub use terrain::{TerrainDefRegistry, TerrainPlugin};
 pub use transition::{MapTransitionEntity, TransitionPlugin};
 pub use vox_model::{VoxModelAsset, VoxModelPlugin, VoxModelRegistry};
-pub use world_object::{WorldObjectDefRegistry, WorldObjectId, WorldObjectPlugin};
+pub use world_object::{
+    WorldObjectDefRegistry, WorldObjectId, WorldObjectPlacementAck, WorldObjectPlacementChannel,
+    WorldObjectPlacementReject, WorldObjectPlacementRejectReason, WorldObjectPlacementRequest,
+    WorldObjectPlugin,
+};
 
 pub const PROTOCOL_ID: u64 = 0;
 pub const PRIVATE_KEY: [u8; 32] = [0; 32];
@@ -121,6 +125,21 @@ impl Plugin for ProtocolPlugin {
         app.register_message::<VoxelEditReject>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<SectionBlocksUpdate>()
+            .add_direction(NetworkDirection::ServerToClient);
+
+        // World object placement channel
+        app.add_channel::<WorldObjectPlacementChannel>(ChannelSettings {
+            mode: ChannelMode::OrderedReliable(ReliableSettings::default()),
+            ..default()
+        })
+        .add_direction(NetworkDirection::Bidirectional);
+
+        // World object placement messages
+        app.register_message::<WorldObjectPlacementRequest>()
+            .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<WorldObjectPlacementAck>()
+            .add_direction(NetworkDirection::ServerToClient);
+        app.register_message::<WorldObjectPlacementReject>()
             .add_direction(NetworkDirection::ServerToClient);
 
         // Chunk streaming channel

@@ -11,10 +11,15 @@ use protocol::world_object::{
 use voxel_map_engine::config::{WorldObjectPositionKind, WorldObjectSpawn};
 use voxel_map_engine::persistence::fs_chunk_entities::FsChunkEntitiesStore;
 use voxel_map_engine::prelude::{
-    PendingEntitySpawns, PersistedComponent, VoxelMapInstance, chunk_to_column,
+    chunk_to_column, PendingEntitySpawns, PersistedComponent, VoxelMapInstance,
 };
 
 use crate::world_object::spawn_world_object;
+
+/// Computes the chunk position containing a world-space position.
+pub(crate) fn chunk_pos_for_world_position(position: Vec3, chunk_size: u32) -> IVec3 {
+    voxel_map_engine::lifecycle::world_to_chunk_pos(position, chunk_size)
+}
 
 /// Spawns world objects from completed Features stages.
 ///
@@ -66,9 +71,9 @@ pub fn spawn_chunk_entities(
                     &vox_assets,
                     &meshes,
                 );
-                let position = Vec3::from(spawn.position) + offset;
+                let position = spawn.position + offset;
                 commands.entity(entity).insert((
-                    Position(position.into()),
+                    Position(position),
                     ChunkEntityRef {
                         chunk_pos,
                         map_entity,
@@ -133,7 +138,7 @@ pub fn evict_chunk_entities(
                 entity,
                 WorldObjectSpawn {
                     object_id: obj_id.0.clone(),
-                    position: Vec3::from(pos.0),
+                    position: pos.0,
                     position_kind: WorldObjectPositionKind::Final,
                     persisted_components: persisted,
                 },
@@ -170,7 +175,7 @@ fn collect_chunk_entities(
             .or_default()
             .push(WorldObjectSpawn {
                 object_id: obj_id.0.clone(),
-                position: Vec3::from(pos.0),
+                position: pos.0,
                 position_kind: WorldObjectPositionKind::Final,
                 persisted_components: serialize_persisted(active_transform, health),
             });

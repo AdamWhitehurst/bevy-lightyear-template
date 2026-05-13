@@ -6,7 +6,9 @@ use bevy::prelude::*;
 use lightyear::prelude::*;
 use protocol::map::MapInstanceId;
 use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
-use protocol::world_object::{apply_object_components, VisualKind, WorldObjectDef, WorldObjectId};
+use protocol::world_object::{
+    apply_object_components, PlacementOffset, VisualKind, WorldObjectDef, WorldObjectId,
+};
 
 /// Spawns a world object entity on the server.
 ///
@@ -51,6 +53,62 @@ pub fn spawn_world_object(
         commands.entity(entity).insert(collider);
     }
 
+    entity
+}
+
+/// Computes the final world position for an authoritative placement request.
+pub fn final_placed_world_object_position(def: &WorldObjectDef, base_position: Vec3) -> Vec3 {
+    base_position + placement_offset(def)
+}
+
+/// Extracts the placement offset declared by a world-object definition.
+fn placement_offset(def: &WorldObjectDef) -> Vec3 {
+    def.components
+        .iter()
+        .find_map(|c| c.try_downcast_ref::<PlacementOffset>())
+        .map(|offset| offset.0)
+        .unwrap_or(Vec3::ZERO)
+}
+
+/// Spawns an authoritatively placed object and tags it for chunk-entity persistence.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_placed_world_object(
+    commands: &mut Commands,
+    object_id: WorldObjectId,
+    def: &WorldObjectDef,
+    base_position: Vec3,
+    map_entity: Entity,
+    map_id: MapInstanceId,
+    chunk_size: u32,
+    type_registry: &AppTypeRegistry,
+    vox_registry: &VoxModelRegistry,
+    vox_assets: &Assets<VoxModelAsset>,
+    meshes: &Assets<Mesh>,
+) -> Entity {
+    let final_position = final_placed_world_object_position(def, base_position);
+    debug_assert!(
+        final_position.is_finite(),
+        "world object final placement position must be finite after PlacementOffset"
+    );
+
+    let entity = spawn_world_object(
+        commands,
+        object_id,
+        def,
+        map_id,
+        type_registry,
+        vox_registry,
+        vox_assets,
+        meshes,
+    );
+    let chunk_pos = crate::chunk_entities::chunk_pos_for_world_position(final_position, chunk_size);
+    commands.entity(entity).insert((
+        Position(final_position),
+        protocol::map::ChunkEntityRef {
+            chunk_pos,
+            map_entity,
+        },
+    ));
     entity
 }
 
