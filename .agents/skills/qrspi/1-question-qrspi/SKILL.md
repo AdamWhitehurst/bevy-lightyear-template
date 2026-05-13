@@ -1,7 +1,9 @@
 ---
 description: Decompose a task into neutral research questions
-model: opus
 argument-hint: "<ticket file, issue URL, or task description>"
+model: openai/o4-mini-deep-research
+fallbackModels: anthropic/claude-sonnet-4.6, openai/o3-deep-research, moonshotai/kimi-k2.6, xai/grok-4.1-fast-non-reasoning
+thinking: medium
 ---
 
 # Question -- Decompose the Task

@@ -1,3 +1,7 @@
+---
+description: Invoked by user to plan implementation from rpi research
+---
+
 # Implement Plan
 
 You are tasked with **orchestrating** the implementation of an approved technical plan from `doc/plans/`. These plans contain phases with specific changes and success criteria.

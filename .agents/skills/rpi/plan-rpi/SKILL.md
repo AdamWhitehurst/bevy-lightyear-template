@@ -1,3 +1,7 @@
+---
+description: Invoked by user to implement rpi plan
+---
+
 # Implementation Plan
 
 You are tasked with creating detailed implementation plans through an interactive, iterative process. You should be skeptical, thorough, and work collaboratively with the user to produce high-quality technical specifications.
@@ -44,6 +48,7 @@ Then wait for the user's input.
 2. **Spawn initial research tasks to gather context**:
    Before asking the user any questions, use specialized agents to research in parallel:
 
+   **PRIMARY PLANNING RESEARCH AGENTS:**
    - Use the **codebase-locator** agent to find all files related to the task
    - Use the **codebase-analyzer** agent to understand how the current implementation works
    - If relevant, use the **doc-locator** agent to find any existing doc documents about this feature
@@ -53,6 +58,31 @@ Then wait for the user's input.
    - Identify the specific directories to focus on (e.g., if systems are mentioned, they'll focus on src/systems/)
    - Trace data flow and key functions
    - Return detailed explanations with file:line references
+
+   **WHEN TO ADD SPECIALIZED DOMAIN AGENTS FOR PLANNING:**
+
+   During planning, you may need domain specialists to understand implementation patterns and make informed decisions. Add these agents when the task explicitly involves their domain.
+
+   **CRITICAL PLANNING GUIDELINES:**
+
+   1. **Always start with primary research agents**: codebase-locator, codebase-analyzer, codebase-pattern-finder
+
+   2. **Add domain specialists when planning requires**:
+      - Understanding domain-specific patterns 
+      - Language-specific implementation decisions 
+      - Domain expertise for design choices 
+
+   3. **Domain specialists in planning mode should**:
+      - Identify patterns to follow in the existing codebase
+      - Suggest implementation approaches based on domain best practices
+      - Highlight domain-specific constraints and considerations
+      - Provide examples of similar implementations
+
+   4. **Run agents in parallel** for different aspects:
+      - Example: codebase-locator (find files) + game-developer (understand ECS patterns)
+      - Example: codebase-analyzer (current code) + rust-engineer (Rust best practices)
+
+   5. **Planning is decision-making**: Unlike research (which is pure documentation), planning uses domain expertise to make informed implementation choices
 
 3. **Read all files identified by research tasks**:
    - After research tasks complete, read ALL files they identified as relevant
@@ -107,12 +137,16 @@ After getting initial clarifications:
    - **doc-locator** - To find any research, plans, or decisions about this area
    - **doc-analyzer** - To extract key insights from the most relevant documents
 
-   Each agent knows how to:
+   **For domain-specific planning (when needed):**
+   - Add domain specialists based on the task requirements
+
+   **Agent capabilities:**
    - Find the right files and code patterns
    - Identify conventions and patterns to follow
    - Look for integration points and dependencies
    - Return specific file:line references
    - Find tests and examples
+   - **Domain specialists also**: Suggest implementation approaches, identify best practices, highlight constraints
 
 3. **Wait for ALL sub-tasks to complete** before proceeding
 

@@ -1,3 +1,7 @@
+---
+description: Invoked by user to validate plan implementation correctness
+---
+
 # Validate Plan
 
 You are tasked with validating that an implementation plan was correctly executed, verifying all success criteria and identifying any deviations or issues.
