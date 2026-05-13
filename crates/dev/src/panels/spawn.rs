@@ -1,35 +1,66 @@
 //! Spawn panel. Two tabs:
-//!   * **Def-driven**: pick a registered `WorldObjectId` and spawn via the
-//!     existing `apply_object_components` pipeline.
+//!   * **Def-driven**: pick a registered `WorldObjectId` and arm authoritative
+//!     server placement from client terrain input.
 //!   * **Free-form**: pick any reflected `Component` from the `AppTypeRegistry` and
-//!     instantiate via `ReflectDefault`.
-//! All spawns are client-local (no `Replicate`) at the world origin and carry a
-//! `DevSpawned` marker.
+//!     instantiate client-locally via `ReflectDefault`.
+//! Free-form spawns are client-local (no `Replicate`) at the world origin and
+//! carry a `DevSpawned` marker.
 
 use crate::state::DevInspectorState;
 use bevy::ecs::reflect::ReflectComponent;
 use bevy::prelude::ReflectDefault;
 use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
+use bevy_egui::{EguiContexts, EguiPrimaryContextPass, egui};
 use protocol::map::MapInstanceId;
-use protocol::world_object::{apply_object_components, WorldObjectDefRegistry, WorldObjectId};
+use protocol::world_object::{
+    WorldObjectDefRegistry, WorldObjectId, WorldObjectPlacementRejectReason,
+    apply_object_components,
+};
 
 /// Marker for any entity spawned via the dev spawn panel. Client-local; not replicated.
 #[derive(Component)]
 pub struct DevSpawned;
 
 #[derive(Default, PartialEq, Eq)]
-enum SpawnTab {
+pub enum SpawnTab {
     #[default]
     DefDriven,
     FreeForm,
 }
 
 #[derive(Resource, Default)]
-struct SpawnPanelUi {
+pub struct SpawnPanelUi {
     tab: SpawnTab,
-    selected_object: Option<WorldObjectId>,
+    pub selected_object: Option<WorldObjectId>,
+    pub placement: WorldObjectPlacementUi,
     selected_freeform: Vec<String>,
+}
+
+/// Client-owned world-object placement request state shown by the spawn panel.
+#[derive(Default)]
+pub struct WorldObjectPlacementUi {
+    pub armed: bool,
+    pub next_sequence: u32,
+    pub pending: Vec<PendingWorldObjectPlacement>,
+    pub last_reject: Option<WorldObjectPlacementRejectReason>,
+}
+
+/// A pending authoritative world-object placement request.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingWorldObjectPlacement {
+    pub sequence: u32,
+    pub object_id: WorldObjectId,
+    pub base_position: Vec3,
+    pub accepted_final_position: Option<Vec3>,
+}
+
+impl WorldObjectPlacementUi {
+    /// Returns the next placement sequence number and increments it.
+    pub fn next_sequence(&mut self) -> u32 {
+        let sequence = self.next_sequence;
+        self.next_sequence += 1;
+        sequence
+    }
 }
 
 pub struct SpawnPanelPlugin;
@@ -67,22 +98,18 @@ fn draw_spawn_panel(
         trace!("draw_spawn_panel: EguiContexts not ready, skipping frame");
         return;
     };
-    egui::Window::new("Spawn (client-local)").show(ctx, |ui| {
+    egui::Window::new("Spawn").show(ctx, |ui| {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut ui_state.tab, SpawnTab::DefDriven, "Def-driven");
             ui.selectable_value(&mut ui_state.tab, SpawnTab::FreeForm, "Free-form");
         });
         ui.separator();
-        ui.label("Spawned at world origin; client-local (no Replicate).");
+        ui.label(
+            "Def-driven placement is server-authoritative; free-form spawning is client-local.",
+        );
         ui.separator();
         match ui_state.tab {
-            SpawnTab::DefDriven => draw_def_tab(
-                ui,
-                &mut ui_state,
-                world_objects.as_deref(),
-                &type_registry,
-                &mut commands,
-            ),
+            SpawnTab::DefDriven => draw_def_tab(ui, &mut ui_state, world_objects.as_deref()),
             SpawnTab::FreeForm => {
                 draw_freeform_tab(ui, &mut ui_state, &type_registry, &mut commands)
             }
@@ -94,8 +121,6 @@ fn draw_def_tab(
     ui: &mut egui::Ui,
     ui_state: &mut SpawnPanelUi,
     world_objects: Option<&WorldObjectDefRegistry>,
-    type_registry: &AppTypeRegistry,
-    commands: &mut Commands,
 ) {
     ui.label("World Object");
     if let Some(reg) = world_objects {
@@ -114,30 +139,33 @@ fn draw_def_tab(
                     ui.selectable_value(&mut ui_state.selected_object, Some(id.clone()), &id.0);
                 }
             });
-        if ui.button("Spawn world object").clicked() {
-            if let Some(id) = ui_state.selected_object.clone() {
-                if let Some(def) = reg.objects.get(&id) {
-                    let entity = commands
-                        .spawn((
-                            id.clone(),
-                            Transform::default(),
-                            DevSpawned,
-                            MapInstanceId::Overworld,
-                            Name::new(format!("dev:{}", id.0)),
-                        ))
-                        .id();
-                    let components = def
-                        .components
-                        .iter()
-                        .map(|c| {
-                            c.reflect_clone()
-                                .expect("world object component must be cloneable")
-                                .into_partial_reflect()
-                        })
-                        .collect();
-                    apply_object_components(commands, entity, components, type_registry.0.clone());
-                }
-            }
+        let has_selection = ui_state.selected_object.is_some();
+        if ui
+            .add_enabled(
+                has_selection && !ui_state.placement.armed,
+                egui::Button::new("Arm placement"),
+            )
+            .clicked()
+        {
+            ui_state.placement.armed = true;
+            ui_state.placement.last_reject = None;
+        }
+
+        if ui_state.placement.armed && ui.button("Cancel placement").clicked() {
+            ui_state.placement.armed = false;
+        }
+
+        ui.label(if ui_state.placement.armed {
+            "Placement armed: click terrain to request server placement."
+        } else {
+            "Select an object and arm placement."
+        });
+        ui.label(format!(
+            "Pending placement requests: {}",
+            ui_state.placement.pending.len()
+        ));
+        if let Some(reason) = &ui_state.placement.last_reject {
+            ui.label(format!("Last placement rejected: {reason:?}"));
         }
     } else {
         ui.label("(WorldObjectDefRegistry not yet loaded)");
@@ -157,7 +185,7 @@ fn draw_freeform_tab(
         .map(|reg| reg.type_info().type_path().to_string())
         .collect();
     component_paths.sort();
-    ui.label("Pick reflected Components (multi-select):");
+    ui.label("Pick reflected Components (multi-select, client-local):");
     egui::ScrollArea::vertical()
         .max_height(200.0)
         .show(ui, |ui| {

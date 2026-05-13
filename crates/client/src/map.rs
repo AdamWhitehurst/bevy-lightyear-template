@@ -1,17 +1,63 @@
 use bevy::{prelude::*, window::PrimaryWindow};
+#[cfg(feature = "spawn-panel")]
+use dev::panels::spawn::{PendingWorldObjectPlacement, SpawnPanelUi};
 use leafwing_input_manager::prelude::*;
 use lightyear::prelude::{Controlled, MessageReceiver, MessageSender, Predicted};
+#[cfg(feature = "spawn-panel")]
+use protocol::world_object::{
+    WorldObjectPlacementAck, WorldObjectPlacementChannel, WorldObjectPlacementReject,
+    WorldObjectPlacementRequest,
+};
 use protocol::{
     CharacterMarker, ChunkDataSync, MapInstanceId, MapRegistry, PlayerActions, SectionBlocksUpdate,
     UnloadColumn, VoxelChannel, VoxelEditAck, VoxelEditBroadcast, VoxelEditReject,
     VoxelEditRequest, VoxelType,
 };
 use voxel_map_engine::prelude::{
-    chunk_to_column, column_to_chunks, ChunkData, ChunkStatus, ChunkTicket, MapDimensions,
-    VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
+    ChunkData, ChunkStatus, ChunkTicket, MapDimensions, VoxelMapInstance, VoxelPlugin, VoxelWorld,
+    WorldVoxel, chunk_to_column, column_to_chunks,
 };
 
 const RAYCAST_MAX_DISTANCE: f32 = 100.0;
+
+/// Current world-object placement target derived from the active camera ray.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlacementTarget {
+    pub base_position: Vec3,
+    pub hit_normal: IVec3,
+}
+
+/// Computes the current terrain-adjacent world-object placement target.
+pub fn current_placement_target(
+    player_query: &Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    voxel_world: &mut VoxelWorld,
+    camera_query: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    window_query: &Query<&Window, With<PrimaryWindow>>,
+) -> Option<PlacementTarget> {
+    let Ok(chunk_ticket) = player_query.single() else {
+        trace!("current_placement_target: no predicted player with ChunkTicket");
+        return None;
+    };
+    let Some(ray) = camera_ray(camera_query, window_query) else {
+        trace!("current_placement_target: no camera ray");
+        return None;
+    };
+    let Some(hit) = voxel_world.raycast(chunk_ticket.map_entity, ray, RAYCAST_MAX_DISTANCE, |v| {
+        matches!(v, WorldVoxel::Solid(_))
+    }) else {
+        trace!("current_placement_target: raycast hit nothing");
+        return None;
+    };
+    let Some(normal) = hit.normal else {
+        trace!("current_placement_target: hit has no normal");
+        return None;
+    };
+    let hit_normal = normal.as_ivec3();
+    Some(PlacementTarget {
+        base_position: (hit.position + hit_normal).as_vec3(),
+        hit_normal,
+    })
+}
 
 /// Buffers ChunkDataSync messages that arrive before the client player is ready.
 /// Lightyear clears MessageReceiver each frame in Last, so we must drain and
@@ -59,12 +105,21 @@ impl Plugin for ClientMapPlugin {
                     handle_section_blocks_update,
                     handle_voxel_edit_ack,
                     handle_voxel_edit_reject,
+                    #[cfg(feature = "spawn-panel")]
+                    handle_world_object_placement_ack,
+                    #[cfg(feature = "spawn-panel")]
+                    handle_world_object_placement_reject,
                 )
                     .run_if(in_state(ui::ClientState::InGame)),
             )
             .add_systems(
                 PostUpdate,
-                handle_voxel_input
+                (
+                    handle_voxel_input,
+                    #[cfg(feature = "spawn-panel")]
+                    handle_world_object_placement_input,
+                )
+                    .chain()
                     .run_if(in_state(ui::ClientState::InGame))
                     .after(TransformSystems::Propagate),
             );
@@ -81,7 +136,9 @@ pub fn attach_chunk_ticket_to_player(
 ) {
     for (entity, map_id) in &players {
         let Some(&map_entity) = registry.0.get(map_id) else {
-            trace!("attach_chunk_ticket_to_player: map {map_id:?} not yet registered, expected during transition");
+            trace!(
+                "attach_chunk_ticket_to_player: map {map_id:?} not yet registered, expected during transition"
+            );
             continue;
         };
         trace!("Attaching ChunkTicket to player {entity:?} on map {map_id:?}");
@@ -185,8 +242,7 @@ fn handle_voxel_broadcasts(
 
             trace!(
                 "handle_voxel_broadcasts: applying broadcast at {:?} voxel={:?}",
-                broadcast.position,
-                broadcast.voxel
+                broadcast.position, broadcast.voxel
             );
             voxel_world.set_voxel(
                 chunk_ticket.map_entity,
@@ -234,7 +290,14 @@ fn handle_voxel_input(
     action_query: Query<&ActionState<PlayerActions>, With<Controlled>>,
     mut message_sender: Query<&mut MessageSender<VoxelEditRequest>>,
     mut prediction_state: ResMut<VoxelPredictionState>,
+    #[cfg(feature = "spawn-panel")] placement_ui: Option<Res<SpawnPanelUi>>,
 ) {
+    #[cfg(feature = "spawn-panel")]
+    if placement_ui.as_ref().is_some_and(|ui| ui.placement.armed) {
+        trace!("handle_voxel_input: world object placement armed; skipping voxel input");
+        return;
+    }
+
     let Ok(chunk_ticket) = player_query.single() else {
         trace!("handle_voxel_input: no predicted player with ChunkTicket");
         return;
@@ -247,6 +310,7 @@ fn handle_voxel_input(
     let removing = action_state.just_pressed(&PlayerActions::RemoveVoxel);
     let placing = action_state.just_pressed(&PlayerActions::PlaceVoxel);
     if !removing && !placing {
+        trace!("handle_voxel_input: no voxel edit action pressed");
         return;
     }
 
@@ -295,6 +359,70 @@ fn handle_voxel_input(
     }
 }
 
+#[cfg(feature = "spawn-panel")]
+fn handle_world_object_placement_input(
+    mut ui_state: ResMut<SpawnPanelUi>,
+    action_query: Query<&ActionState<PlayerActions>, With<Controlled>>,
+    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    mut voxel_world: VoxelWorld,
+    camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    mut message_sender: Query<&mut MessageSender<WorldObjectPlacementRequest>>,
+) {
+    if !ui_state.placement.armed {
+        trace!("handle_world_object_placement_input: placement is not armed");
+        return;
+    }
+    let Ok(action_state) = action_query.single() else {
+        trace!("handle_world_object_placement_input: no entity with ActionState + Controlled");
+        return;
+    };
+    if !action_state.just_pressed(&PlayerActions::PlaceVoxel) {
+        trace!("handle_world_object_placement_input: place action not pressed");
+        return;
+    }
+    let Some(object_id) = ui_state.selected_object.clone() else {
+        trace!("handle_world_object_placement_input: placement armed without selected object");
+        return;
+    };
+    let Some(target) = current_placement_target(
+        &player_query,
+        &mut voxel_world,
+        &camera_query,
+        &window_query,
+    ) else {
+        trace!("handle_world_object_placement_input: no placement target");
+        return;
+    };
+
+    let sequence = ui_state.placement.next_sequence();
+    let request = WorldObjectPlacementRequest {
+        sequence,
+        object_id: object_id.clone(),
+        base_position: target.base_position,
+    };
+
+    let mut sent = false;
+    for mut sender in message_sender.iter_mut() {
+        sender.send::<WorldObjectPlacementChannel>(request.clone());
+        sent = true;
+    }
+    if !sent {
+        trace!("handle_world_object_placement_input: no WorldObjectPlacementRequest sender");
+        return;
+    }
+
+    ui_state
+        .placement
+        .pending
+        .push(PendingWorldObjectPlacement {
+            sequence,
+            object_id,
+            base_position: target.base_position,
+            accepted_final_position: None,
+        });
+}
+
 fn camera_ray(
     camera_query: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: &Query<&Window, With<PrimaryWindow>>,
@@ -311,6 +439,51 @@ fn camera_ray(
     camera
         .viewport_to_world(camera_transform, viewport_pos)
         .ok()
+}
+
+#[cfg(feature = "spawn-panel")]
+fn handle_world_object_placement_ack(
+    mut receivers: Query<&mut MessageReceiver<WorldObjectPlacementAck>>,
+    mut ui_state: ResMut<SpawnPanelUi>,
+) {
+    for mut receiver in &mut receivers {
+        for ack in receiver.receive() {
+            let Some(pending) = ui_state
+                .placement
+                .pending
+                .iter_mut()
+                .find(|pending| pending.sequence == ack.sequence)
+            else {
+                trace!(
+                    "handle_world_object_placement_ack: ack seq={} had no pending placement",
+                    ack.sequence
+                );
+                continue;
+            };
+            pending.accepted_final_position = Some(ack.final_position);
+            ui_state.placement.last_reject = None;
+        }
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+fn handle_world_object_placement_reject(
+    mut receivers: Query<&mut MessageReceiver<WorldObjectPlacementReject>>,
+    mut ui_state: ResMut<SpawnPanelUi>,
+) {
+    for mut receiver in &mut receivers {
+        for reject in receiver.receive() {
+            trace!(
+                "handle_world_object_placement_reject: reject seq={} reason={:?}",
+                reject.sequence, reject.reason,
+            );
+            ui_state
+                .placement
+                .pending
+                .retain(|pending| pending.sequence != reject.sequence);
+            ui_state.placement.last_reject = Some(reject.reason);
+        }
+    }
 }
 
 /// Processes server acknowledgments, clearing confirmed predictions.

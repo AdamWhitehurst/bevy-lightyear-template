@@ -126,6 +126,10 @@ bevy-lightyear-template/
 - `cargo build-all` - Build all native targets
 - `cargo web-build` - Build WASM client
 
+### Dev Inspector
+
+Press `F4` to toggle the dev inspector root menu. With the spawn panel enabled, press `F6` or use the root menu to open it. Def-driven world-object placement is server-authoritative: select an object, arm placement, then click terrain in-game. Free-form spawning remains client-local.
+
 ### Certificate Regeneration
 
 Certificates expire after 14 days. Regenerate with:

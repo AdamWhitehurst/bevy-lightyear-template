@@ -993,8 +993,8 @@ fn world_object_placement_ui_sequences_and_pending_ack() {
 
 #### Automated
 
-- [ ] `cargo test -p client --test plugin` passes
-- [ ] `cargo check -p client --features spawn-panel` passes
+- [x] `cargo test -p client --test plugin` passes
+- [x] `cargo check -p client --features spawn-panel` passes
 
 #### Manual
 

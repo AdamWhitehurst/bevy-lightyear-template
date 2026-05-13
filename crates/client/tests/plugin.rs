@@ -5,6 +5,30 @@ use lightyear::prelude::*;
 use lightyear_client::*;
 use protocol::*;
 
+#[cfg(feature = "spawn-panel")]
+#[test]
+fn world_object_placement_ui_sequences_and_pending_ack() {
+    use bevy::prelude::Vec3;
+    use dev::panels::spawn::{PendingWorldObjectPlacement, WorldObjectPlacementUi};
+    use protocol::world_object::WorldObjectId;
+
+    let mut ui = WorldObjectPlacementUi::default();
+    assert_eq!(ui.next_sequence(), 0);
+    assert_eq!(ui.next_sequence(), 1);
+
+    ui.pending.push(PendingWorldObjectPlacement {
+        sequence: 1,
+        object_id: WorldObjectId("test:crate".to_string()),
+        base_position: Vec3::new(1.0, 2.0, 3.0),
+        accepted_final_position: None,
+    });
+    ui.pending[0].accepted_final_position = Some(Vec3::new(1.0, 3.5, 3.0));
+    assert_eq!(
+        ui.pending[0].accepted_final_position,
+        Some(Vec3::new(1.0, 3.5, 3.0))
+    );
+}
+
 #[test]
 fn test_client_network_plugin_registers_observers() {
     let mut app = App::new();

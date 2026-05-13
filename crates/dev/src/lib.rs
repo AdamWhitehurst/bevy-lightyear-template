@@ -9,7 +9,7 @@ mod state;
 pub use state::{DevInspectorState, PanelFlags};
 
 #[cfg(feature = "inspector")]
-mod panels;
+pub mod panels;
 
 /// Adds physics debug rendering, runtime debug toggles, and optional inspector panels.
 pub struct DevPlugin;
