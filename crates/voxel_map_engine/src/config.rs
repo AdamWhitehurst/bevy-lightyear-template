@@ -25,6 +25,18 @@ pub trait VoxelGeneratorImpl: Send + Sync {
     }
 }
 
+/// Semantics for [`WorldObjectSpawn::position`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WorldObjectPositionKind {
+    /// `WorldObjectSpawn::position` is the terrain/base placement point;
+    /// `PlacementOffset` still needs to be applied.
+    #[default]
+    PlacementBase,
+    /// `WorldObjectSpawn::position` is the final world-space position;
+    /// `PlacementOffset` has already been applied.
+    Final,
+}
+
 /// Spawn data for a world object placed during the Features stage.
 ///
 /// Uses bare `String` for `object_id` (not `WorldObjectId`) because `WorldObjectId`
@@ -34,7 +46,10 @@ pub trait VoxelGeneratorImpl: Send + Sync {
 pub struct WorldObjectSpawn {
     pub object_id: String,
     pub position: Vec3,
-    /// RON-serialized persisted components. Empty for fresh spawns.
+    #[serde(default)]
+    pub position_kind: WorldObjectPositionKind,
+    /// RON-serialized persisted components. Empty means no component snapshots;
+    /// it is not a fresh-vs-reload signal.
     #[serde(default)]
     pub persisted_components: Vec<PersistedComponent>,
 }

@@ -9,7 +9,9 @@ use noise::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::config::{SurfaceHeightMap, VoxelGenerator, VoxelGeneratorImpl, WorldObjectSpawn};
+use crate::config::{
+    SurfaceHeightMap, VoxelGenerator, VoxelGeneratorImpl, WorldObjectPositionKind, WorldObjectSpawn,
+};
 use crate::meshing::flat_terrain_voxels;
 use crate::placement::jittered_grid_sample;
 use crate::types::WorldVoxel;
@@ -454,6 +456,7 @@ impl VoxelGeneratorImpl for HeightmapGenerator {
                 spawns.push(WorldObjectSpawn {
                     object_id: rule.object_id.clone(),
                     position: Vec3::new(world_pos.x, height as f32, world_pos.y),
+                    position_kind: WorldObjectPositionKind::PlacementBase,
                     persisted_components: Vec::new(),
                 });
             }

@@ -43,7 +43,7 @@ pub fn parse_chunk_filename(name: &str) -> Option<IVec3> {
     Some(IVec3::new(x, y, z))
 }
 
-pub(crate) const ENTITY_SAVE_VERSION: u32 = 2;
+pub(crate) const ENTITY_SAVE_VERSION: u32 = 3;
 
 /// Versioned envelope wrapping per-chunk entity spawn data on disk.
 #[derive(Serialize, Deserialize)]
@@ -63,6 +63,7 @@ pub fn entity_file_path(map_dir: &Path, chunk_pos: IVec3) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::WorldObjectPositionKind;
     use crate::types::{ChunkStatus, WorldVoxel};
     use persistence::Store;
     use std::sync::Arc;
@@ -196,11 +197,13 @@ mod tests {
             WorldObjectSpawn {
                 object_id: "tree_oak".to_string(),
                 position: Vec3::new(1.0, 2.0, 3.0),
+                position_kind: WorldObjectPositionKind::Final,
                 persisted_components: Vec::new(),
             },
             WorldObjectSpawn {
                 object_id: "rock_large".to_string(),
                 position: Vec3::new(-4.0, 0.0, 5.5),
+                position_kind: WorldObjectPositionKind::Final,
                 persisted_components: Vec::new(),
             },
         ]
@@ -211,7 +214,30 @@ mod tests {
         for (i, (sa, sb)) in a.iter().zip(b.iter()).enumerate() {
             assert_eq!(sa.object_id, sb.object_id, "object_id mismatch at {i}");
             assert_eq!(sa.position, sb.position, "position mismatch at {i}");
+            assert_eq!(
+                sa.position_kind, sb.position_kind,
+                "position_kind mismatch at {i}"
+            );
         }
+    }
+
+    #[test]
+    fn chunk_entities_preserve_final_position_kind_without_persisted_components() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = test_entity_store(dir.path());
+        let pos = IVec3::new(4, 0, -2);
+        let spawns = vec![WorldObjectSpawn {
+            object_id: "tree_oak".to_string(),
+            position: Vec3::new(1.0, 2.0, 3.0),
+            position_kind: WorldObjectPositionKind::Final,
+            persisted_components: Vec::new(),
+        }];
+
+        store.save(&pos, &spawns).unwrap();
+        let loaded = store.load(&pos).unwrap().expect("entities should exist");
+
+        assert_eq!(loaded[0].position_kind, WorldObjectPositionKind::Final);
+        assert!(loaded[0].persisted_components.is_empty());
     }
 
     #[test]

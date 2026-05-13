@@ -8,10 +8,10 @@ use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
 use protocol::world_object::{
     ActiveTransformation, PlacementOffset, WorldObjectDefRegistry, WorldObjectId,
 };
-use voxel_map_engine::config::WorldObjectSpawn;
+use voxel_map_engine::config::{WorldObjectPositionKind, WorldObjectSpawn};
 use voxel_map_engine::persistence::fs_chunk_entities::FsChunkEntitiesStore;
 use voxel_map_engine::prelude::{
-    chunk_to_column, PendingEntitySpawns, PersistedComponent, VoxelMapInstance,
+    PendingEntitySpawns, PersistedComponent, VoxelMapInstance, chunk_to_column,
 };
 
 use crate::world_object::spawn_world_object;
@@ -55,8 +55,7 @@ pub fn spawn_chunk_entities(
                     );
                     continue;
                 };
-                let is_reload = !spawn.persisted_components.is_empty();
-                let offset = extract_placement_offset(def, is_reload);
+                let offset = extract_placement_offset(def, spawn.position_kind);
                 let entity = spawn_world_object(
                     &mut commands,
                     id,
@@ -76,7 +75,7 @@ pub fn spawn_chunk_entities(
                     },
                 ));
 
-                if is_reload {
+                if !spawn.persisted_components.is_empty() {
                     restore_persisted(
                         &mut commands,
                         entity,
@@ -135,6 +134,7 @@ pub fn evict_chunk_entities(
                 WorldObjectSpawn {
                     object_id: obj_id.0.clone(),
                     position: Vec3::from(pos.0),
+                    position_kind: WorldObjectPositionKind::Final,
                     persisted_components: persisted,
                 },
             ));
@@ -171,6 +171,7 @@ fn collect_chunk_entities(
             .push(WorldObjectSpawn {
                 object_id: obj_id.0.clone(),
                 position: Vec3::from(pos.0),
+                position_kind: WorldObjectPositionKind::Final,
                 persisted_components: serialize_persisted(active_transform, health),
             });
     }
@@ -340,17 +341,42 @@ fn restore_persisted(
     }
 }
 
-/// Extracts `PlacementOffset` from a world object definition's reflected components.
-///
-/// Returns `Vec3::ZERO` if no `PlacementOffset` is present or if `is_reload` is true
-/// (reloaded entities already have their final position).
-fn extract_placement_offset(def: &protocol::world_object::WorldObjectDef, is_reload: bool) -> Vec3 {
-    if is_reload {
-        return Vec3::ZERO;
+/// Extracts `PlacementOffset` when a spawn stores a placement-base position.
+fn extract_placement_offset(
+    def: &protocol::world_object::WorldObjectDef,
+    position_kind: WorldObjectPositionKind,
+) -> Vec3 {
+    match position_kind {
+        WorldObjectPositionKind::Final => Vec3::ZERO,
+        WorldObjectPositionKind::PlacementBase => def
+            .components
+            .iter()
+            .find_map(|c| c.try_downcast_ref::<PlacementOffset>())
+            .map(|offset| offset.0)
+            .unwrap_or(Vec3::ZERO),
     }
-    def.components
-        .iter()
-        .find_map(|c| c.try_downcast_ref::<PlacementOffset>())
-        .map(|o| o.0)
-        .unwrap_or(Vec3::ZERO)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::reflect::PartialReflect;
+    use protocol::world_object::WorldObjectDef;
+
+    #[test]
+    fn extract_placement_offset_uses_position_kind() {
+        let offset = Vec3::new(0.0, 1.5, 0.0);
+        let def = WorldObjectDef {
+            components: vec![Box::new(PlacementOffset(offset)) as Box<dyn PartialReflect>],
+        };
+
+        assert_eq!(
+            extract_placement_offset(&def, WorldObjectPositionKind::PlacementBase),
+            offset
+        );
+        assert_eq!(
+            extract_placement_offset(&def, WorldObjectPositionKind::Final),
+            Vec3::ZERO
+        );
+    }
 }

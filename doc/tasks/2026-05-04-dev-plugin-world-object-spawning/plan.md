@@ -196,9 +196,9 @@ mod tests {
 
 #### Automated
 
-- [ ] `cargo test -p voxel_map_engine persistence::tests` passes
-- [ ] `cargo test -p server chunk_entities::tests::extract_placement_offset_uses_position_kind` passes
-- [ ] `cargo test -p server --test voxel_persistence` passes
+- [x] `cargo test -p voxel_map_engine persistence::tests` passes
+- [x] `cargo test -p server chunk_entities::tests::extract_placement_offset_uses_position_kind` passes
+- [x] `cargo test -p server --test voxel_persistence` passes
 
 #### Manual
 
