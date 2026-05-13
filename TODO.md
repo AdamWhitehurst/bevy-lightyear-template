@@ -30,11 +30,13 @@
   - [ ] Live RON editors for ability and world-object definitions with hot-reload
   - [ ] Network entity viewer exposing Lightyear replication and interest-management state
   - [ ] Reflected-registry-driven spawn panel
+
 ---
 
 
 ## Considering
 
+- [ ] Guiding player character, ability characters follow
 - moving cloud background skybox at max depth
 - process distance sprite rigs at half the rate for performance?
 - Social system that hooks into dialogue system
