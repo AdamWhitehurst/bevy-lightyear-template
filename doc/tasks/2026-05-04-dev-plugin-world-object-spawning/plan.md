@@ -1,19 +1,24 @@
 # Implementation Plan
 
 ## Overview
-The def-driven world-object tab becomes a server-authoritative placement workflow: the client selects an object, previews a base-position target, sends an ordered reliable placement request, and waits for normal Lightyear replication to create the committed object. Free-form spawning remains explicitly client-local.
 
-Implementation order is mandatory. Phase 1 fixes persistence semantics before any placed object can safely persist. Old per-chunk entity saves are not migrated; delete existing save data before manual verification.
+The def-driven world-object tab becomes a server-authoritative placement workflow: the client selects an object, previews a base-position target,
+sends an ordered reliable placement request, and waits for normal Lightyear replication to create the committed object. Free-form spawning remains
+explicitly client-local.
 
-Before every `cargo check`, `cargo build`, or `cargo test`, check that no other cargo build/check/test is running. If one is running, wait for it to finish or kill it before starting the next command.
+Implementation order is mandatory. Phase 1 fixes persistence semantics before any placed object can safely persist. Old per-chunk entity saves are not
+migrated; delete existing save data before manual verification.
+
+Before every `cargo check`, `cargo build`, or `cargo test`, check that no other cargo build/check/test is running. If one is running, wait for it to
+finish or kill it before starting the next command.
 
 ## Phase 1: Explicit World-Object Position Semantics
 
 ### Changes
 
 #### 1. World-object spawn storage boundary
-**File**: `crates/voxel_map_engine/src/config.rs`
-**Action**: modify
+
+**File**: `crates/voxel_map_engine/src/config.rs` **Action**: modify
 
 Add explicit position semantics next to `WorldObjectSpawn`.
 
@@ -45,8 +50,8 @@ pub struct WorldObjectSpawn {
 Do not make `persisted_components` imply fresh/reload state anywhere after this phase.
 
 #### 2. Generated feature spawns
-**File**: `crates/voxel_map_engine/src/terrain.rs`
-**Action**: modify
+
+**File**: `crates/voxel_map_engine/src/terrain.rs` **Action**: modify
 
 Update the existing `WorldObjectSpawn` literal in generated feature placement so generated/default spawns remain base-position spawns.
 
@@ -62,8 +67,8 @@ spawns.push(WorldObjectSpawn {
 Add `WorldObjectPositionKind` to the local import where `WorldObjectSpawn` is currently imported.
 
 #### 3. Per-chunk entity persistence tests
-**File**: `crates/voxel_map_engine/src/persistence/mod.rs`
-**Action**: modify
+
+**File**: `crates/voxel_map_engine/src/persistence/mod.rs` **Action**: modify
 
 Bump `ENTITY_SAVE_VERSION` from `2` to `3`. No legacy migration is required because old saves will be deleted before verification.
 
@@ -104,8 +109,8 @@ fn chunk_entities_preserve_final_position_kind_without_persisted_components() {
 ```
 
 #### 4. Server chunk materialization and save semantics
-**File**: `crates/server/src/chunk_entities.rs`
-**Action**: modify
+
+**File**: `crates/server/src/chunk_entities.rs` **Action**: modify
 
 Import the new enum.
 
@@ -188,15 +193,19 @@ mod tests {
 ```
 
 ### Verification
+
 #### Automated
+
 - [ ] `cargo test -p voxel_map_engine persistence::tests` passes
 - [ ] `cargo test -p server chunk_entities::tests::extract_placement_offset_uses_position_kind` passes
 - [ ] `cargo test -p server --test voxel_persistence` passes
 
 #### Manual
+
 - [ ] Delete old local save data before runtime verification because entity save v2 is intentionally not migrated.
 - [ ] Fresh/generated `WorldObjectSpawn { position_kind: PlacementBase, ... }` inserts `Position(spawn.position + PlacementOffset)`.
-- [ ] Saved/reloaded `WorldObjectSpawn { position_kind: Final, persisted_components: Vec::new(), ... }` inserts the exact saved final `Position` with no offset.
+- [ ] Saved/reloaded `WorldObjectSpawn { position_kind: Final, persisted_components: Vec::new(), ... }` inserts the exact saved final `Position` with
+      no offset.
 - [ ] Eviction and all-entity collection write `position_kind: Final` for saved chunk entities.
 - [ ] `persisted_components` controls only component restoration, not position offset semantics.
 
@@ -207,10 +216,11 @@ mod tests {
 ### Changes
 
 #### 1. Placement protocol types
-**File**: `crates/protocol/src/world_object/types.rs`
-**Action**: modify
 
-Add dedicated ordered reliable placement channel marker, request, ack, reject, and explicit reject reasons. The request must not include authoritative map scope.
+**File**: `crates/protocol/src/world_object/types.rs` **Action**: modify
+
+Add dedicated ordered reliable placement channel marker, request, ack, reject, and explicit reject reasons. The request must not include authoritative
+map scope.
 
 ```rust
 /// Ordered reliable channel for authoritative world-object placement requests and responses.
@@ -255,8 +265,8 @@ pub enum WorldObjectPlacementRejectReason {
 ```
 
 #### 2. World-object protocol re-exports
-**File**: `crates/protocol/src/world_object/mod.rs`
-**Action**: modify
+
+**File**: `crates/protocol/src/world_object/mod.rs` **Action**: modify
 
 Add the new placement protocol symbols to the existing `pub use types::{ ... }` list.
 
@@ -270,8 +280,8 @@ pub use types::{
 ```
 
 #### 3. Protocol root registration
-**File**: `crates/protocol/src/lib.rs`
-**Action**: modify
+
+**File**: `crates/protocol/src/lib.rs` **Action**: modify
 
 Expand root re-exports.
 
@@ -303,8 +313,8 @@ app.register_message::<WorldObjectPlacementReject>()
 ```
 
 #### 4. Server placed-object helper
-**File**: `crates/server/src/world_object.rs`
-**Action**: modify
+
+**File**: `crates/server/src/world_object.rs` **Action**: modify
 
 Add a helper that reuses `spawn_world_object`, applies `PlacementOffset` exactly once, and inserts normal chunk-persistence tags.
 
@@ -364,10 +374,11 @@ pub fn spawn_placed_world_object(
 ```
 
 #### 5. Existing chunk entity persistence path
-**File**: `crates/server/src/chunk_entities.rs`
-**Action**: modify
 
-Do not add a one-object immediate save path. Ensure placed entities are persistable only by receiving `ChunkEntityRef`, `WorldObjectId`, and `Position`, so existing eviction, periodic save, and shutdown save systems persist them.
+**File**: `crates/server/src/chunk_entities.rs` **Action**: modify
+
+Do not add a one-object immediate save path. Ensure placed entities are persistable only by receiving `ChunkEntityRef`, `WorldObjectId`, and
+`Position`, so existing eviction, periodic save, and shutdown save systems persist them.
 
 If duplicate chunk-position logic appears, add only this helper and reuse it from server placement validation/spawning.
 
@@ -378,8 +389,8 @@ pub(crate) fn chunk_pos_for_world_position(position: Vec3, chunk_size: u32) -> I
 ```
 
 #### 6. Server placement request handling
-**File**: `crates/server/src/map.rs`
-**Action**: modify
+
+**File**: `crates/server/src/map.rs` **Action**: modify
 
 Make `resolve_player_map` visible inside the crate so placement can reuse the voxel authority boundary.
 
@@ -396,7 +407,8 @@ pub(crate) fn resolve_player_map(
 }
 ```
 
-Add placement request handling following `handle_voxel_edit_requests`: receive per client, derive map scope from controlled character, validate, spawn, and ack/reject. Every expected `continue`/`return` must have `trace!` first.
+Add placement request handling following `handle_voxel_edit_requests`: receive per client, derive map scope from controlled character, validate,
+spawn, and ack/reject. Every expected `continue`/`return` must have `trace!` first.
 
 ```rust
 pub fn handle_world_object_placement_requests(
@@ -518,10 +530,8 @@ Add helpers.
 
 ```rust
 fn placement_chunk_in_bounds(chunk_pos: IVec3, dimensions: &MapDimensions) -> bool {
-    if !(dimensions.column_y_range.0..dimensions.column_y_range.1).contains(&chunk_pos.y) {
-        return false;
-    }
-    match dimensions.bounds {
+    (dimensions.column_y_range.0..dimensions.column_y_range.1).contains(&chunk_pos.y)
+        && match dimensions.bounds {
         Some(bounds) => {
             chunk_pos.x.abs() < bounds.x
                 && chunk_pos.y.abs() < bounds.y
@@ -569,10 +579,11 @@ handle_world_object_placement_requests.run_if(
 Do not mark `WorldDirtyState`; placed objects persist through chunk-entity tags.
 
 #### 7. Server placement tests
-**File**: `crates/server/tests/world_object_placement.rs`
-**Action**: create
 
-Create direct server-side tests for the placement handler/helper. Use the existing integration-test style: `App::new()`, `MinimalPlugins`, direct resource/component setup, and system execution.
+**File**: `crates/server/tests/world_object_placement.rs` **Action**: create
+
+Create direct server-side tests for the placement handler/helper. Use the existing integration-test style: `App::new()`, `MinimalPlugins`, direct
+resource/component setup, and system execution.
 
 Minimum scenarios:
 
@@ -597,14 +608,18 @@ fn rejected_placement_spawns_no_entity() {
 }
 ```
 
-Use loaded test chunks by creating `VoxelMapInstance::new(...)`, inserting chunk data for the expected chunk, and inserting `chunk_to_column(chunk_pos)` into `instance.chunk_levels`.
+Use loaded test chunks by creating `VoxelMapInstance::new(...)`, inserting chunk data for the expected chunk, and inserting
+`chunk_to_column(chunk_pos)` into `instance.chunk_levels`.
 
 ### Verification
+
 #### Automated
+
 - [ ] `cargo test -p server --test world_object_placement` passes
 - [ ] `cargo test -p server --test voxel_persistence` passes after Phase 1 remains green
 
 #### Manual
+
 - [ ] Successful placement entity has `Replicate`, `NetworkVisibility`, `MapInstanceId`, `WorldObjectId`, `Position`, and `ChunkEntityRef`.
 - [ ] Ack contains only correlation data and `final_position`; committed object appears through replication, not a placement broadcast.
 - [ ] Every reject reason spawns no entity.
@@ -618,8 +633,8 @@ Use loaded test chunks by creating `VoxelMapInstance::new(...)`, inserting chunk
 ### Changes
 
 #### 1. Expose spawn-panel state to the client crate
-**File**: `crates/dev/src/lib.rs`
-**Action**: modify
+
+**File**: `crates/dev/src/lib.rs` **Action**: modify
 
 Expose the panels module when the inspector feature is enabled so `client` can own placement input/preview systems while reading dev UI state.
 
@@ -629,8 +644,8 @@ pub mod panels;
 ```
 
 #### 2. Spawn panel state and UI cutover
-**File**: `crates/dev/src/panels/spawn.rs`
-**Action**: modify
+
+**File**: `crates/dev/src/panels/spawn.rs` **Action**: modify
 
 Update module docs: def-driven placement is authoritative; free-form remains client-local.
 
@@ -670,7 +685,8 @@ impl WorldObjectPlacementUi {
 }
 ```
 
-Remove `type_registry` and `commands` from `draw_def_tab`. Remove the old def-driven local `commands.spawn((id, Transform::default(), DevSpawned, MapInstanceId::Overworld, ...))` block entirely.
+Remove `type_registry` and `commands` from `draw_def_tab`. Remove the old def-driven local
+`commands.spawn((id, Transform::default(), DevSpawned, MapInstanceId::Overworld, ...))` block entirely.
 
 ```rust
 fn draw_def_tab(
@@ -713,11 +729,12 @@ fn draw_def_tab(
 }
 ```
 
-Keep `draw_freeform_tab` using `type_registry`, `commands`, `DevSpawned`, `MapInstanceId::Overworld`, and `apply_object_components`. Label the free-form tab as client-local.
+Keep `draw_freeform_tab` using `type_registry`, `commands`, `DevSpawned`, `MapInstanceId::Overworld`, and `apply_object_components`. Label the
+free-form tab as client-local.
 
 #### 3. Current-map placement targeting and click ownership
-**File**: `crates/client/src/map.rs`
-**Action**: modify
+
+**File**: `crates/client/src/map.rs` **Action**: modify
 
 Import spawn-panel state and placement protocol types under `#[cfg(feature = "spawn-panel")]`.
 
@@ -775,6 +792,8 @@ pub fn current_placement_target(
 Modify `handle_voxel_input` to skip voxel placement/removal when object placement is armed.
 
 ```rust
+// Optional because the spawn panel resource only exists when the dev spawn-panel feature/plugin is active;
+// voxel editing must still compile and run without that plugin.
 #[cfg(feature = "spawn-panel")]
 placement_ui: Option<Res<SpawnPanelUi>>,
 ```
@@ -787,7 +806,8 @@ if placement_ui.as_ref().is_some_and(|ui| ui.placement.armed) {
 }
 ```
 
-Add client-owned request sending. This is why client map/input code reads the UI state: it is the system that owns the left-click action and must suppress voxel editing, compute the current-map target, and send the network request.
+Add client-owned request sending. This is why client map/input code reads the UI state: it is the system that owns the left-click action and must
+suppress voxel editing, compute the current-map target, and send the network request.
 
 ```rust
 #[cfg(feature = "spawn-panel")]
@@ -801,6 +821,7 @@ fn handle_world_object_placement_input(
     mut message_sender: Query<&mut MessageSender<WorldObjectPlacementRequest>>,
 ) {
     if !ui_state.placement.armed {
+        trace!("handle_world_object_placement_input: placement is not armed");
         return;
     }
     let Ok(action_state) = action_query.single() else {
@@ -808,6 +829,7 @@ fn handle_world_object_placement_input(
         return;
     };
     if !action_state.just_pressed(&PlayerActions::PlaceVoxel) {
+        trace!("handle_world_object_placement_input: place action not pressed");
         return;
     }
     let Some(object_id) = ui_state.selected_object.clone() else {
@@ -928,8 +950,8 @@ Register systems in `ClientMapPlugin`. Keep object placement input after voxel i
 ```
 
 #### 4. Client public targeting re-export
-**File**: `crates/client/src/lib.rs`
-**Action**: modify
+
+**File**: `crates/client/src/lib.rs` **Action**: modify
 
 Expose the reusable targeting surface.
 
@@ -938,10 +960,11 @@ pub use map::{current_placement_target, PlacementTarget};
 ```
 
 #### 5. Client plugin tests
-**File**: `crates/client/tests/plugin.rs`
-**Action**: modify
 
-Add spawn-panel-gated tests for sequence/pending state. Keep these tests pure/lightweight; integration behavior is covered by manual verification and Phase 2 server tests.
+**File**: `crates/client/tests/plugin.rs` **Action**: modify
+
+Add spawn-panel-gated tests for sequence/pending state. Keep these tests pure/lightweight; integration behavior is covered by manual verification and
+Phase 2 server tests.
 
 ```rust
 #[cfg(feature = "spawn-panel")]
@@ -967,13 +990,17 @@ fn world_object_placement_ui_sequences_and_pending_ack() {
 ```
 
 ### Verification
+
 #### Automated
+
 - [ ] `cargo test -p client --test plugin` passes
 - [ ] `cargo check -p client --features spawn-panel` passes
 
 #### Manual
+
 - [ ] Run `cargo server` and `cargo client`.
-- [ ] Open the spawn panel, select a world object, arm placement, click terrain, and observe a placement request path rather than local entity creation.
+- [ ] Open the spawn panel, select a world object, arm placement, click terrain, and observe a placement request path rather than local entity
+      creation.
 - [ ] Confirm the final world object appears through replicated hydration, not from the dev panel's old local `commands.spawn` path.
 - [ ] Confirm voxel placement/removal does not also fire on the same click while object placement is armed.
 - [ ] Confirm free-form spawning still creates client-local `DevSpawned` entities only.
@@ -986,10 +1013,11 @@ fn world_object_placement_ui_sequences_and_pending_ack() {
 ### Changes
 
 #### 1. Visual-only helper for previews
-**File**: `crates/client/src/world_object.rs`
-**Action**: modify
 
-Add a local preview visual marker and helper that reuses visual construction without adding authoritative gameplay state. The helper must not call `apply_object_components`, must not insert colliders, and must not insert `WorldObjectId`, `Position`, `MapInstanceId`, or `Replicated`.
+**File**: `crates/client/src/world_object.rs` **Action**: modify
+
+Add a local preview visual marker and helper that reuses visual construction without adding authoritative gameplay state. The helper must not call
+`apply_object_components`, must not insert colliders, and must not insert `WorldObjectId`, `Position`, `MapInstanceId`, or `Replicated`.
 
 ```rust
 /// Marker for visual children attached to local-only placement previews.
@@ -1058,8 +1086,8 @@ fn preview_vox_mesh(
 ```
 
 #### 2. Preview state and systems in client-owned map/input code
-**File**: `crates/client/src/map.rs`
-**Action**: modify
+
+**File**: `crates/client/src/map.rs` **Action**: modify
 
 Add the preview marker in client code, not in `dev`, to avoid a `client` -> `dev` -> `client` dependency cycle.
 
@@ -1087,7 +1115,8 @@ fn preview_transform(def: &WorldObjectDef, base_position: Vec3) -> Transform {
 }
 ```
 
-Add hover/pending preview maintenance. The hover preview has `sequence: None`; after click, reuse/convert it to `Some(sequence)` or spawn a sequence preview at the accepted base position.
+Add hover/pending preview maintenance. The hover preview has `sequence: None`; after click, reuse/convert it to `Some(sequence)` or spawn a sequence
+preview at the accepted base position.
 
 ```rust
 #[cfg(feature = "spawn-panel")]
@@ -1112,30 +1141,42 @@ fn update_world_object_placement_preview(
 ```
 
 Implementation requirements for `update_world_object_placement_preview`:
+
 - If placement is not armed and no pending previews remain, despawn hover previews with `trace!` before expected cleanup returns.
 - If armed but `WorldObjectDefRegistry` is missing, `selected_object` is `None`, or the selected object id is unknown, `trace!` and skip.
 - If `current_placement_target(...)` returns `None`, `trace!` and remove/move no hover preview.
 - Ensure there is at most one hover preview (`sequence: None`) for the selected object.
-- Sequence previews must use `PendingWorldObjectPlacement.accepted_final_position` when present; otherwise use `preview_transform(def, pending.base_position)`.
+- Sequence previews must use `PendingWorldObjectPlacement.accepted_final_position` when present; otherwise use
+  `preview_transform(def, pending.base_position)`.
 - Reject handling from Phase 3 removes pending records; this system must despawn sequence previews with no matching pending record.
+- Reconciled accepted placements must be removed from `SpawnPanelUi.pending` so preview maintenance cannot recreate their previews after the matching
+  replicated object appears.
 
-Add reconciliation after replicated world-object hydration. Match accepted previews by `object_id` and accepted final position; despawn only the preview entity.
+Add reconciliation after replicated world-object hydration. Match accepted previews by `object_id` and accepted final position; despawn only the
+preview entity and remove the matching pending record.
 
 ```rust
 #[cfg(feature = "spawn-panel")]
 fn reconcile_placement_preview_on_replication(
     mut commands: Commands,
+    mut ui_state: ResMut<SpawnPanelUi>,
     replicated_query: Query<(&WorldObjectId, &Position), Added<Replicated>>,
     preview_query: Query<(Entity, &WorldObjectPlacementPreview, &Transform)>,
 ) {
     for (replicated_id, replicated_position) in &replicated_query {
         let replicated_position = Vec3::from(replicated_position.0);
         for (preview_entity, preview, preview_transform) in &preview_query {
-            if preview.sequence.is_none() || &preview.object_id != replicated_id {
+            let Some(sequence) = preview.sequence else {
+                trace!("reconcile_placement_preview_on_replication: skipping hover preview");
+                continue;
+            };
+            if &preview.object_id != replicated_id {
+                trace!("reconcile_placement_preview_on_replication: preview object id does not match replicated object");
                 continue;
             }
             if positions_match(preview_transform.translation, replicated_position) {
                 commands.entity(preview_entity).despawn();
+                ui_state.placement.pending.retain(|pending| pending.sequence != sequence);
             }
         }
     }
@@ -1147,15 +1188,19 @@ fn positions_match(a: Vec3, b: Vec3) -> bool {
 }
 ```
 
-If child preview visuals survive parent despawn in the current Bevy hierarchy behavior, replace `despawn()` with the project's recursive despawn convention.
+If child preview visuals survive parent despawn in the current Bevy hierarchy behavior, replace `despawn()` with the project's recursive despawn
+convention.
 
 Register systems in `ClientMapPlugin`:
+
 - `update_world_object_placement_preview` in `PostUpdate` after placement input and after `TransformSystems::Propagate`.
-- `reconcile_placement_preview_on_replication` after `client::world_object::on_world_object_replicated` has observed `Added<Replicated>` for the object. If direct ordering across modules is not available, register in `PostUpdate` and rely on matching the same `Added<Replicated>` frame after hydration systems; if this is not stable, add an explicit system set in `client` and order both systems in that set.
+- `reconcile_placement_preview_on_replication` after `client::world_object::on_world_object_replicated` has observed `Added<Replicated>` for the
+  object. If direct ordering across modules is not available, register in `PostUpdate` and rely on matching the same `Added<Replicated>` frame after
+  hydration systems; if this is not stable, add an explicit system set in `client` and order both systems in that set.
 
 #### 3. Preview UI state use only
-**File**: `crates/dev/src/panels/spawn.rs`
-**Action**: modify
+
+**File**: `crates/dev/src/panels/spawn.rs` **Action**: modify
 
 Keep this file UI/state-only for Phase 4. Do not call `client::map` or `client::world_object` from `dev`.
 
@@ -1172,8 +1217,8 @@ ui.label(format!("Accepted placements awaiting replication: {accepted}"));
 ```
 
 #### 4. Client plugin tests for preview state
-**File**: `crates/client/tests/plugin.rs`
-**Action**: modify
+
+**File**: `crates/client/tests/plugin.rs` **Action**: modify
 
 Add tests that exercise preview safety and reconciliation helpers. Keep direct ECS assertions small.
 
@@ -1196,11 +1241,14 @@ fn replicated_object_reconciles_matching_preview_only() {
 ```
 
 ### Verification
+
 #### Automated
+
 - [ ] `cargo test -p client --test plugin` passes
 - [ ] `cargo check -p client --features spawn-panel` passes
 
 #### Manual
+
 - [ ] Run `cargo server` and `cargo client`.
 - [ ] Select a world object, arm placement, and confirm the preview follows terrain under the mouse.
 - [ ] Click terrain and confirm there is at most one temporary accepted preview.
@@ -1213,10 +1261,14 @@ fn replicated_object_reconciles_matching_preview_only() {
 ## Final Verification and Documentation Check
 
 ### Automated
+
 - [ ] `cargo check-all` passes
 - [ ] `cargo test-all` passes
 
 ### Manual
-- [ ] Review `README.md`; if it documents dev spawn behavior, update it to describe authoritative def-driven placement and client-local free-form spawning. If it does not document this area, leave it unchanged.
-- [ ] Full runtime scenario: delete old saves, run `cargo server`, run `cargo client`, place a def-driven world object, restart server/client, and confirm the object reloads at the same final position without double-applying `PlacementOffset`.
+
+- [ ] Review `README.md`; if it documents dev spawn behavior, update it to describe authoritative def-driven placement and client-local free-form
+      spawning. If it does not document this area, leave it unchanged.
+- [ ] Full runtime scenario: delete old saves, run `cargo server`, run `cargo client`, place a def-driven world object, restart server/client, and
+      confirm the object reloads at the same final position without double-applying `PlacementOffset`.
 - [ ] Confirm free-form spawn remains a dev-only client-local scratchpad and is clearly labeled that way.

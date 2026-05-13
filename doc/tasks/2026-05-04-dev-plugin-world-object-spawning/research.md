@@ -2,7 +2,9 @@
 
 ## Q1: Trace the current dev spawn panel flow from UI interaction to entity creation: which plugins, resources, feature gates, marker components, object registries, and helper functions are involved, and how does the resulting entity differ from ordinary runtime world objects?
 
-**Direct answer:** The dev spawn panel is a feature-gated `DevPlugin` panel that spawns client-local entities at `Transform::default()` with `DevSpawned`; definition-driven spawns reuse `WorldObjectDefRegistry` and `apply_object_components`, but they do not use the server `spawn_world_object` path, `Replicate`, `NetworkVisibility`, `Position`, or `ChunkEntityRef`.
+**Direct answer:** The dev spawn panel is a feature-gated `DevPlugin` panel that spawns client-local entities at `Transform::default()` with
+`DevSpawned`; definition-driven spawns reuse `WorldObjectDefRegistry` and `apply_object_components`, but they do not use the server
+`spawn_world_object` path, `Replicate`, `NetworkVisibility`, `Position`, or `ChunkEntityRef`.
 
 ### Evidence
 
@@ -62,7 +64,8 @@ fn spawn_panel_enabled(state: Res<DevInspectorState>) -> bool {
 }
 ```
 
-- The panel input resources are `WorldObjectDefRegistry`, `AppTypeRegistry`, and `Commands`; the registry is optional because assets load during startup.
+- The panel input resources are `WorldObjectDefRegistry`, `AppTypeRegistry`, and `Commands`; the registry is optional because assets load during
+  startup.
 
 ```rust
 // crates/dev/src/panels/spawn.rs:58-65
@@ -89,7 +92,8 @@ egui::Window::new("Spawn (client-local)").show(ctx, |ui| {
     ui.label("Spawned at world origin; client-local (no Replicate).");
 ```
 
-- Definition-driven spawn enumerates `WorldObjectDefRegistry.objects`, spawns a local ECS entity, clones reflected definition components, and calls the shared helper.
+- Definition-driven spawn enumerates `WorldObjectDefRegistry.objects`, spawns a local ECS entity, clones reflected definition components, and calls
+  the shared helper.
 
 ```rust
 // crates/dev/src/panels/spawn.rs:111-138
@@ -147,7 +151,8 @@ let entity = commands
 apply_object_components(commands, entity, components, type_registry.0.clone());
 ```
 
-- Ordinary server runtime objects are spawned through `spawn_world_object`, which inserts replication and map visibility state that the dev panel does not insert.
+- Ordinary server runtime objects are spawned through `spawn_world_object`, which inserts replication and map visibility state that the dev panel does
+  not insert.
 
 ```rust
 // crates/server/src/world_object.rs:24-41
@@ -199,7 +204,10 @@ commands.entity(entity).insert((
 
 ## Q2: How are world-object definitions loaded, registered, represented, and applied at runtime — including `WorldObjectId`, reflected components, `PlacementOffset`, spawn-only versus persistent component markers, and the contract of `apply_object_components`?
 
-**Direct answer:** World-object definitions are `.object.ron` assets deserialized into `WorldObjectDef { components: Vec<Box<dyn PartialReflect>> }`, indexed by filename-derived `WorldObjectId`, and applied by `apply_object_components`, which inserts each reflected component through `ReflectComponent`; `PlacementOffset` is marked `SpawnOnly`, `ActiveTransformation` is marked `Persist`, and current persistence code explicitly serializes `ActiveTransformation` and `Health`.
+**Direct answer:** World-object definitions are `.object.ron` assets deserialized into `WorldObjectDef { components: Vec<Box<dyn PartialReflect>> }`,
+indexed by filename-derived `WorldObjectId`, and applied by `apply_object_components`, which inserts each reflected component through
+`ReflectComponent`; `PlacementOffset` is marked `SpawnOnly`, `ActiveTransformation` is marked `Persist`, and current persistence code explicitly
+serializes `ActiveTransformation` and `Health`.
 
 ### Evidence
 
@@ -328,7 +336,8 @@ fn insert_reflected_component(
 }
 ```
 
-- Server reloads skip `PlacementOffset`; fresh spawns apply it.
+- Current server code skips `PlacementOffset` only when `persisted_components` is non-empty; saved objects with no persisted components are
+  misclassified as fresh and receive the offset again.
 
 ```rust
 // crates/server/src/chunk_entities.rs:58-70
@@ -349,17 +358,19 @@ let position = Vec3::from(spawn.position) + offset;
 
 ### Runtime application sites observed
 
-| Site | Evidence |
-|---|---|
-| Dev def-driven spawn | `crates/dev/src/panels/spawn.rs:117-138` clones def components and calls `apply_object_components`. |
-| Dev free-form spawn | `crates/dev/src/panels/spawn.rs:176-198` builds default reflected components and calls `apply_object_components`. |
-| Server spawn | `crates/server/src/world_object.rs:44-52` clones def components, applies them, then optionally inserts a vox collider. |
-| Client hydration | `crates/client/src/world_object.rs:53-76` looks up the def, applies components, inserts collider/transform, and attaches visuals. |
-| Transformation | `crates/server/src/world_object.rs:62-99` removes absent components, applies source-def components, and swaps collider. |
+| Site                 | Evidence                                                                                                                          |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Dev def-driven spawn | `crates/dev/src/panels/spawn.rs:117-138` clones def components and calls `apply_object_components`.                               |
+| Dev free-form spawn  | `crates/dev/src/panels/spawn.rs:176-198` builds default reflected components and calls `apply_object_components`.                 |
+| Server spawn         | `crates/server/src/world_object.rs:44-52` clones def components, applies them, then optionally inserts a vox collider.            |
+| Client hydration     | `crates/client/src/world_object.rs:53-76` looks up the def, applies components, inserts collider/transform, and attaches visuals. |
+| Transformation       | `crates/server/src/world_object.rs:62-99` removes absent components, applies source-def components, and swaps collider.           |
 
 ## Q3: Trace the generated world-object lifecycle from terrain placement rules through `WorldObjectSpawn`, pending chunk entity queues, `spawn_world_object`, replication setup, client hydration, and eventual despawn or transformation.
 
-**Direct answer:** Generated world objects originate from voxel generator feature placement as `WorldObjectSpawn`, are queued in `PendingEntitySpawns`, materialized by the server with `spawn_world_object`, receive `Position`/`ChunkEntityRef`, are replicated via Lightyear room visibility, hydrated on clients from `WorldObjectId`, and are saved/despawned on chunk eviction or modified by transformation/death-effect systems.
+**Direct answer:** Generated world objects originate from voxel generator feature placement as `WorldObjectSpawn`, are queued in
+`PendingEntitySpawns`, materialized by the server with `spawn_world_object`, receive `Position`/`ChunkEntityRef`, are replicated via Lightyear room
+visibility, hydrated on clients from `WorldObjectId`, and are saved/despawned on chunk eviction or modified by transformation/death-effect systems.
 
 ### Evidence
 
@@ -409,7 +420,8 @@ pub struct PersistedComponent {
 }
 ```
 
-- `spawn_chunk_entities` drains queued spawns, optionally saves them, resolves definitions, spawns the server object, inserts position and chunk membership, and restores persisted components on reload.
+- `spawn_chunk_entities` drains queued spawns, optionally saves them, resolves definitions, spawns the server object, inserts position and chunk
+  membership, and restores persisted components on reload.
 
 ```rust
 // crates/server/src/chunk_entities.rs:39-91
@@ -578,7 +590,9 @@ for (entity, _) in entities {
 
 ## Q4: How does the protocol layer register world-object and map-related components/messages for networking, and what existing client-to-server request/ack/reject patterns are used for authoritative world mutations such as voxel edits?
 
-**Direct answer:** The protocol layer registers world objects as replicated components (`WorldObjectId`, `VisualKind`, `ActiveTransformation`), not as request messages; existing authoritative client-to-server world mutation uses voxel edit messages: request from client, ack/reject from server, plus server-to-client broadcasts/section updates.
+**Direct answer:** The protocol layer registers world objects as replicated components (`WorldObjectId`, `VisualKind`, `ActiveTransformation`), not as
+request messages; existing authoritative client-to-server world mutation uses voxel edit messages: request from client, ack/reject from server, plus
+server-to-client broadcasts/section updates.
 
 ### Evidence
 
@@ -713,11 +727,14 @@ apply_voxel_edit(
 send_edit_ack(client_entity, request.sequence, &mut ack_senders);
 ```
 
-- No world-object request/ack/reject registration was observed in `crates/protocol/src/lib.rs:107-182`; the adjacent authoritative mutation pattern is voxel edits.
+- No world-object request/ack/reject registration was observed in `crates/protocol/src/lib.rs:107-182`; the adjacent authoritative mutation pattern is
+  voxel edits.
 
 ## Q5: How does the server determine map scope, room visibility, and authority for map mutations and replicated entities — including `MapInstanceId`, `RoomRegistry`, chunk visibility, transitions, and validation of client-originated requests?
 
-**Direct answer:** The server uses replicated semantic `MapInstanceId` to identify map scope, `MapRegistry` to resolve local map entities, and `RoomRegistry` to map each `MapInstanceId` to a Lightyear room; client voxel requests carry no map id, so the server derives authority from the client-owned `CharacterMarker` with `ControlledBy` and that character's `MapInstanceId`.
+**Direct answer:** The server uses replicated semantic `MapInstanceId` to identify map scope, `MapRegistry` to resolve local map entities, and
+`RoomRegistry` to map each `MapInstanceId` to a Lightyear room; client voxel requests carry no map id, so the server derives authority from the
+client-owned `CharacterMarker` with `ControlledBy` and that character's `MapInstanceId`.
 
 ### Evidence
 
@@ -740,7 +757,8 @@ impl RoomRegistry {
 }
 ```
 
-- The server plugin initializes map/room state, runs voxel request handling, chunk streaming, map transitions, chunk entity spawning/eviction, and the `MapInstanceId` observer.
+- The server plugin initializes map/room state, runs voxel request handling, chunk streaming, map transitions, chunk entity spawning/eviction, and the
+  `MapInstanceId` observer.
 
 ```rust
 // crates/server/src/map.rs:624-665
@@ -807,7 +825,8 @@ fn resolve_player_map(
 }
 ```
 
-- `handle_voxel_edit_requests` performs the full authority flow: receive per client, resolve map, validate, apply, ack, and queue a map-scoped broadcast.
+- `handle_voxel_edit_requests` performs the full authority flow: receive per client, resolve map, validate, apply, ack, and queue a map-scoped
+  broadcast.
 
 ```rust
 // crates/server/src/map.rs:747-785
@@ -884,7 +903,9 @@ for (map_entity, map_id, mut pending, store, mut ops) in &mut map_query {
 
 ## Q6: How does the client convert mouse or cursor state into world-space targets today, including camera ray construction, voxel raycasts, input actions, prediction state, rollback/rejection handling, and any existing pointer/gizmo rendering conventions?
 
-**Direct answer:** Current cursor-to-world targeting exists for voxel edits: mouse button actions trigger `handle_voxel_input`, which creates a `Ray3d` from primary-window cursor and `Camera3d`, raycasts the current `ChunkTicket.map_entity`, locally predicts the voxel edit, and sends `VoxelEditRequest`; no world-object placement preview entity was observed in the inspected client/dev files.
+**Direct answer:** Current cursor-to-world targeting exists for voxel edits: mouse button actions trigger `handle_voxel_input`, which creates a
+`Ray3d` from primary-window cursor and `Camera3d`, raycasts the current `ChunkTicket.map_entity`, locally predicts the voxel edit, and sends
+`VoxelEditRequest`; no world-object placement preview entity was observed in the inspected client/dev files.
 
 ### Evidence
 
@@ -1049,11 +1070,14 @@ fn handle_voxel_edit_reject(
                 .retain(|p| p.sequence != reject.sequence);
 ```
 
-- Adjacent gizmo convention: dev physics gizmos exist and are toggled elsewhere, but no placement-preview entity was observed in the inspected spawn panel/client map/world-object paths.
+- Adjacent gizmo convention: dev physics gizmos exist and are toggled elsewhere, but no placement-preview entity was observed in the inspected spawn
+  panel/client map/world-object paths.
 
 ## Q7: How are replicated world objects hydrated on the client, and which components or child entities are local-only visuals/colliders versus authoritative replicated state?
 
-**Direct answer:** Replicated world objects arrive with protocol-registered authoritative state such as `WorldObjectId`, `MapInstanceId`, `Position`/`Rotation`, `VisualKind`, `ActiveTransformation`, and other registered gameplay components; the client locally applies reflected def components, builds vox trimesh colliders, inserts `Transform`, and attaches mesh/material child visuals and health-bar children.
+**Direct answer:** Replicated world objects arrive with protocol-registered authoritative state such as `WorldObjectId`, `MapInstanceId`,
+`Position`/`Rotation`, `VisualKind`, `ActiveTransformation`, and other registered gameplay components; the client locally applies reflected def
+components, builds vox trimesh colliders, inserts `Transform`, and attaches mesh/material child visuals and health-bar children.
 
 ### Evidence
 
@@ -1190,7 +1214,9 @@ pub fn on_visual_kind_changed(
 
 ## Q8: How are world objects persisted and restored across chunk eviction, periodic saves, shutdown saves, and map reloads, and what distinguishes per-chunk entity files from map-level entity persistence?
 
-**Direct answer:** Chunk-generated world objects persist through per-chunk entity files storing `Vec<WorldObjectSpawn>`; eviction, periodic save, shutdown save, and reload all operate on `ChunkEntityRef`/`WorldObjectSpawn`; map-level entity persistence is separate and currently stores `SavedEntity` records such as respawn points, not chunk world objects.
+**Direct answer:** Chunk-generated world objects persist through per-chunk entity files storing `Vec<WorldObjectSpawn>`; eviction, periodic save,
+shutdown save, and reload all operate on `ChunkEntityRef`/`WorldObjectSpawn`; map-level entity persistence is separate and currently stores
+`SavedEntity` records such as respawn points, not chunk world objects.
 
 ### Evidence
 
@@ -1257,32 +1283,36 @@ for (entity, _) in entities {
 }
 ```
 
-- The currently serialized persisted components are limited in the observed chunk-entity code to `ActiveTransformation` and `protocol::Health` (per subagent trace of `crates/server/src/chunk_entities.rs:257-339`); restore applies transformations before reinserting persisted component state.
+- The currently serialized persisted components are limited to `ActiveTransformation` and `protocol::Health`: `serialize_persisted` only accepts those
+  two optional components and pushes entries for those type paths (`crates/server/src/chunk_entities.rs:257-280`). `restore_persisted` reads the same
+  two type paths, applies the active transformation source definition first, then reinserts the persisted transformation and health
+  (`crates/server/src/chunk_entities.rs:282-339`).
 
 ### Persistence layer distinction
 
-| Layer | Key/value | File shape observed by code | Contents |
-|---|---|---|---|
-| Chunk terrain | `Store<IVec3, ChunkFileEnvelope>` | `map_dir/terrain/chunk_x_y_z.bin` | Voxel chunk data and metadata. |
+| Layer                   | Key/value                             | File shape observed by code                 | Contents                                                  |
+| ----------------------- | ------------------------------------- | ------------------------------------------- | --------------------------------------------------------- |
+| Chunk terrain           | `Store<IVec3, ChunkFileEnvelope>`     | `map_dir/terrain/chunk_x_y_z.bin`           | Voxel chunk data and metadata.                            |
 | Per-chunk world objects | `Store<IVec3, Vec<WorldObjectSpawn>>` | `map_dir/entities/chunk_x_y_z.entities.bin` | World-object id, position, persisted component snapshots. |
-| Map-level entities | `Store<(), Vec<SavedEntity>>` | `map_dir/entities.bin` | Map-level saved entities such as respawn points. |
+| Map-level entities      | `Store<(), Vec<SavedEntity>>`         | `map_dir/entities.bin`                      | Map-level saved entities such as respawn points.          |
 
 ## Q9: What automated tests or reusable test harnesses currently cover dev plugins, world-object replication, voxel/map persistence, chunk sync, map transitions, and multi-client behavior, and what scenarios do they exercise?
 
-**Direct answer:** Tests exist for voxel/map persistence, voxel engine lifecycle/API, chunk sync, room routing, map transitions, and plugin observer registration; no direct dev spawn panel test or direct world-object replication integration test was observed by the research agents.
+**Direct answer:** Tests exist for voxel/map persistence, voxel engine lifecycle/API, chunk sync, room routing, map transitions, and plugin observer
+registration; no direct dev spawn panel test or direct world-object replication integration test was observed by the research agents.
 
 ### Evidence inventory
 
-| Area | Observed coverage |
-|---|---|
-| Dev plugins | No `crates/dev/tests` directory was observed. Adjacent plugin harnesses exist in `crates/client/tests/plugin.rs` for client network plugin observer registration. |
-| World-object replication | No direct test file for `spawn_world_object` or `WorldObjectId` replication was observed. Adjacent room-routing tests cover `MapInstanceId` observer behavior in `crates/server/tests/rooms.rs`. |
-| Per-chunk world-object persistence | `crates/voxel_map_engine/src/persistence/mod.rs` contains chunk entity store roundtrip/missing/empty tests using `WorldObjectSpawn`. |
-| Voxel/map persistence | `crates/server/tests/voxel_persistence.rs`, `crates/server/tests/world_persistence.rs`, and persistence module tests cover dirty chunk saves, restarts, homebase/overworld stores, and map-level entity persistence. |
-| Chunk sync/client lifecycle | `crates/client/tests/chunk_sync.rs` covers `ChunkDataSync`, `UnloadColumn`, mesh despawn after unload, and server-pushed data without local generation. |
-| Voxel engine lifecycle/API | `crates/voxel_map_engine/tests/lifecycle.rs` and `crates/voxel_map_engine/tests/api.rs` cover chunk loading/unloading, tickets, map isolation, voxel set/get, dirty/remesh state, and raycasts. |
-| Map transitions/rooms | `crates/server/tests/map_transition.rs`, `crates/server/tests/rooms.rs`, and `crates/client/tests/map_transition.rs` cover server-side transition markers/rooms; the client transition test file is noted by the agent as having removed tests pending a full Lightyear message pipeline. |
-| Multi-client behavior | `crates/server/tests/rooms.rs` covers room client membership, same-frame room transfer, and excluding unrelated rooms; no full multi-client network session test was observed. |
+| Area                               | Observed coverage                                                                                                                                                                                                                                                                         |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Dev plugins                        | No `crates/dev/tests` directory was observed. Adjacent plugin harnesses exist in `crates/client/tests/plugin.rs` for client network plugin observer registration.                                                                                                                         |
+| World-object replication           | No direct test file for `spawn_world_object` or `WorldObjectId` replication was observed. Adjacent room-routing tests cover `MapInstanceId` observer behavior in `crates/server/tests/rooms.rs`.                                                                                          |
+| Per-chunk world-object persistence | `crates/voxel_map_engine/src/persistence/mod.rs` contains chunk entity store roundtrip/missing/empty tests using `WorldObjectSpawn`.                                                                                                                                                      |
+| Voxel/map persistence              | `crates/server/tests/voxel_persistence.rs`, `crates/server/tests/world_persistence.rs`, and persistence module tests cover dirty chunk saves, restarts, homebase/overworld stores, and map-level entity persistence.                                                                      |
+| Chunk sync/client lifecycle        | `crates/client/tests/chunk_sync.rs` covers `ChunkDataSync`, `UnloadColumn`, mesh despawn after unload, and server-pushed data without local generation.                                                                                                                                   |
+| Voxel engine lifecycle/API         | `crates/voxel_map_engine/tests/lifecycle.rs` and `crates/voxel_map_engine/tests/api.rs` cover chunk loading/unloading, tickets, map isolation, voxel set/get, dirty/remesh state, and raycasts.                                                                                           |
+| Map transitions/rooms              | `crates/server/tests/map_transition.rs`, `crates/server/tests/rooms.rs`, and `crates/client/tests/map_transition.rs` cover server-side transition markers/rooms; the client transition test file is noted by the agent as having removed tests pending a full Lightyear message pipeline. |
+| Multi-client behavior              | `crates/server/tests/rooms.rs` covers room client membership, same-frame room transfer, and excluding unrelated rooms; no full multi-client network session test was observed.                                                                                                            |
 
 ## Cross-Cutting Observations
 
@@ -1291,10 +1321,13 @@ for (entity, _) in entities {
 3. Runtime/generated world objects are server-authored and room-scoped; current dev-panel spawns are explicitly client-local at origin.
 4. Voxel edits are the only observed client-originated authoritative world mutation with request/ack/reject semantics.
 5. Per-chunk world-object persistence is separate from map-level entity persistence.
-6. Client cursor-to-world targeting exists for voxel edits and uses camera ray plus voxel raycast; no world-object placement preview entity was observed in the inspected paths.
+6. Client cursor-to-world targeting exists for voxel edits and uses camera ray plus voxel raycast; no world-object placement preview entity was
+   observed in the inspected paths.
 
 ## Open Areas
 
-- Direct tests for dev spawn panel behavior and world-object network replication were not observed by the agents; adjacent plugin, room, persistence, and chunk-sync tests were identified instead.
-- No world-object client-to-server placement/request message or ack/reject protocol was observed in the inspected protocol/server/client world-object paths.
+- Direct tests for dev spawn panel behavior and world-object network replication were not observed by the agents; adjacent plugin, room, persistence,
+  and chunk-sync tests were identified instead.
+- No world-object client-to-server placement/request message or ack/reject protocol was observed in the inspected protocol/server/client world-object
+  paths.
 - This research did not run build/test commands because the QRSPI research phase is documentation-only and the gathered deliverable is `research.md`.
