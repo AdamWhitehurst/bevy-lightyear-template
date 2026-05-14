@@ -14,7 +14,8 @@ pub use types::{
     ActiveTransformation, DeathEffect, ObjectCategory, OnDeathEffects, PlacementOffset,
     ReflectPersist, ReflectSpawnOnly, VisualKind, WorldObjectDef, WorldObjectDeleteAck,
     WorldObjectDeleteRequest, WorldObjectEditChannel, WorldObjectEditReject,
-    WorldObjectEditRejectReason, WorldObjectId, WorldObjectLoadError, WorldObjectPlacementAck,
+    WorldObjectEditRejectReason, WorldObjectId, WorldObjectLoadError, WorldObjectMoveAck,
+    WorldObjectMoveRequest, WorldObjectPlacementAck,
     WorldObjectPlacementChannel, WorldObjectPlacementReject, WorldObjectPlacementRejectReason,
     WorldObjectPlacementRequest,
 };

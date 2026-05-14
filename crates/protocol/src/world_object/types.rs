@@ -91,6 +91,36 @@ impl MapEntities for WorldObjectDeleteAck {
     }
 }
 
+/// Client requests moving an existing replicated world-object entity.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+#[type_path = "protocol::world_object"]
+pub struct WorldObjectMoveRequest {
+    pub sequence: u32,
+    pub target: Entity,
+    pub final_position: Vec3,
+}
+
+impl MapEntities for WorldObjectMoveRequest {
+    fn map_entities<M: EntityMapper>(&mut self, entity_mapper: &mut M) {
+        self.target = entity_mapper.get_mapped(self.target);
+    }
+}
+
+/// Server acknowledges that a move was applied. The transform change arrives by replication.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+#[type_path = "protocol::world_object"]
+pub struct WorldObjectMoveAck {
+    pub sequence: u32,
+    pub target: Entity,
+    pub final_position: Vec3,
+}
+
+impl MapEntities for WorldObjectMoveAck {
+    fn map_entities<M: EntityMapper>(&mut self, entity_mapper: &mut M) {
+        self.target = entity_mapper.get_mapped(self.target);
+    }
+}
+
 /// Server rejects a world-object edit/delete request.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
 #[type_path = "protocol::world_object"]
@@ -109,6 +139,8 @@ pub enum WorldObjectEditRejectReason {
     NotWorldObject,
     ForeignMap,
     ChunkUnavailable,
+    NonFinitePosition,
+    OutOfBounds,
 }
 
 /// Broad classification of world objects.

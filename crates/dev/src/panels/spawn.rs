@@ -70,6 +70,8 @@ pub struct WorldObjectSelectionUi {
     pub nearby_radius: f32,
     pub next_sequence: u32,
     pub pending_deletes: Vec<PendingWorldObjectDelete>,
+    pub pending_moves: Vec<PendingWorldObjectMove>,
+    pub move_armed: bool,
     pub last_reject: Option<WorldObjectEditRejectReason>,
 }
 
@@ -81,6 +83,15 @@ pub struct PendingWorldObjectDelete {
     pub accepted: bool,
 }
 
+/// A pending authoritative world-object move request.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingWorldObjectMove {
+    pub sequence: u32,
+    pub target: Entity,
+    pub final_position: Vec3,
+    pub accepted: bool,
+}
+
 impl Default for WorldObjectSelectionUi {
     fn default() -> Self {
         Self {
@@ -88,6 +99,8 @@ impl Default for WorldObjectSelectionUi {
             nearby_radius: 12.0,
             next_sequence: 0,
             pending_deletes: Vec::new(),
+            pending_moves: Vec::new(),
+            move_armed: false,
             last_reject: None,
         }
     }
@@ -227,9 +240,31 @@ fn draw_def_tab(
                 .text("Nearby radius"),
         );
         ui.label("Press Delete to delete selected.");
+        if ui
+            .add_enabled(
+                ui_state.selection.selected.is_some() && !ui_state.selection.move_armed,
+                egui::Button::new("Arm move"),
+            )
+            .clicked()
+        {
+            ui_state.selection.move_armed = true;
+            ui_state.selection.last_reject = None;
+        }
+        if ui_state.selection.move_armed && ui.button("Cancel move").clicked() {
+            ui_state.selection.move_armed = false;
+        }
+        ui.label(if ui_state.selection.move_armed {
+            "Move armed: click terrain to request server move."
+        } else {
+            "Arm move to preview moving the selected object."
+        });
         ui.label(format!(
             "Pending delete requests: {}",
             ui_state.selection.pending_deletes.len()
+        ));
+        ui.label(format!(
+            "Pending move requests: {}",
+            ui_state.selection.pending_moves.len()
         ));
         if let Some(reason) = &ui_state.selection.last_reject {
             ui.label(format!("Last edit rejected: {reason:?}"));

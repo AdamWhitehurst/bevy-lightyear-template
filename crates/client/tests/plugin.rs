@@ -53,7 +53,7 @@ fn world_object_selection_ui_sequences_and_pending_delete_ack() {
 #[test]
 fn nearest_world_object_in_radius_chooses_closest_replicated_object() {
     use avian3d::prelude::Position;
-    use client::map::nearest_world_object_in_radius;
+    use ::client::map::nearest_world_object_in_radius;
     use protocol::world_object::WorldObjectId;
 
     let mut app = App::new();
@@ -102,8 +102,8 @@ fn nearest_world_object_in_radius_chooses_closest_replicated_object() {
 #[test]
 fn placement_preview_entities_are_visual_only() {
     use avian3d::prelude::{Collider, Position};
-    use client::map::{spawn_world_object_placement_preview, WorldObjectPlacementPreview};
-    use client::world_object::DefaultVoxModelMaterial;
+    use ::client::map::{spawn_world_object_placement_preview, WorldObjectPlacementPreview};
+    use ::client::world_object::DefaultVoxModelMaterial;
     use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
     use protocol::world_object::{WorldObjectDef, WorldObjectId};
     use std::collections::HashMap;
@@ -159,7 +159,7 @@ fn placement_preview_entities_are_visual_only() {
 #[test]
 fn replicated_object_reconciles_matching_preview_only() {
     use avian3d::prelude::Position;
-    use client::map::{reconcile_placement_preview_on_replication, WorldObjectPlacementPreview};
+    use ::client::map::{reconcile_placement_preview_on_replication, WorldObjectPlacementPreview};
     use dev::panels::spawn::{PendingWorldObjectPlacement, SpawnPanelUi};
     use protocol::world_object::WorldObjectId;
 
@@ -218,6 +218,138 @@ fn replicated_object_reconciles_matching_preview_only() {
         .resource::<SpawnPanelUi>()
         .placement
         .pending
+        .is_empty());
+}
+
+#[cfg(feature = "spawn-panel")]
+#[test]
+fn edit_preview_transform_applies_placement_offset() {
+    use ::client::map::preview_transform;
+    use protocol::world_object::{PlacementOffset, WorldObjectDef};
+
+    let def = WorldObjectDef {
+        components: vec![Box::new(PlacementOffset(Vec3::new(0.0, 1.5, 0.0)))],
+    };
+
+    assert_eq!(
+        preview_transform(&def, Vec3::new(2.0, 3.0, 4.0)).translation,
+        Vec3::new(2.0, 4.5, 4.0)
+    );
+}
+
+#[cfg(feature = "spawn-panel")]
+#[test]
+fn edit_preview_entities_are_visual_only() {
+    use avian3d::prelude::{Collider, Position};
+    use ::client::map::{spawn_world_object_edit_preview, WorldObjectEditPreview};
+    use ::client::world_object::DefaultVoxModelMaterial;
+    use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
+    use protocol::world_object::{WorldObjectDef, WorldObjectId};
+    use std::collections::HashMap;
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.init_resource::<Assets<VoxModelAsset>>();
+    app.init_resource::<Assets<StandardMaterial>>();
+    app.insert_resource(VoxModelRegistry {
+        models: HashMap::new(),
+    });
+    let material = app
+        .world_mut()
+        .resource_mut::<Assets<StandardMaterial>>()
+        .add(StandardMaterial::default());
+    app.insert_resource(DefaultVoxModelMaterial(material));
+
+    let def = WorldObjectDef { components: vec![] };
+    let object_id = WorldObjectId("test:edit-preview".to_string());
+    let target = app.world_mut().spawn_empty().id();
+    let entity = app
+        .world_mut()
+        .run_system_once(
+            move |mut commands: Commands,
+                  vox_registry: Res<VoxModelRegistry>,
+                  vox_assets: Res<Assets<VoxModelAsset>>,
+                  default_material: Res<DefaultVoxModelMaterial>| {
+                spawn_world_object_edit_preview(
+                    &mut commands,
+                    Some(2),
+                    target,
+                    object_id.clone(),
+                    Transform::from_translation(Vec3::new(1.0, 2.0, 3.0)),
+                    &def,
+                    &vox_registry,
+                    &vox_assets,
+                    &default_material,
+                )
+            },
+        )
+        .expect("edit preview spawn system should run");
+    app.update();
+
+    let entity_ref = app.world().entity(entity);
+    assert!(entity_ref.contains::<WorldObjectEditPreview>());
+    assert!(entity_ref.contains::<Transform>());
+    assert!(!entity_ref.contains::<Collider>());
+    assert!(!entity_ref.contains::<Position>());
+    assert!(!entity_ref.contains::<MapInstanceId>());
+    assert!(!entity_ref.contains::<Replicated>());
+    assert!(!entity_ref.contains::<protocol::world_object::WorldObjectId>());
+}
+
+#[cfg(feature = "spawn-panel")]
+#[test]
+fn edit_preview_reconciles_when_replicated_transform_matches_accepted_move() {
+    use avian3d::prelude::Position;
+    use ::client::map::{reconcile_edit_preview_on_transform_replication, WorldObjectEditPreview};
+    use dev::panels::spawn::{PendingWorldObjectMove, SpawnPanelUi};
+    use protocol::world_object::WorldObjectId;
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.init_resource::<SpawnPanelUi>();
+    let object_id = WorldObjectId("test:moved".to_string());
+    let receiver = app.world_mut().spawn_empty().id();
+    let target = app
+        .world_mut()
+        .spawn((
+            object_id.clone(),
+            Position(Vec3::new(1.0, 2.0, 3.0).into()),
+            Replicated { receiver },
+        ))
+        .id();
+    app.world_mut()
+        .resource_mut::<SpawnPanelUi>()
+        .selection
+        .pending_moves
+        .push(PendingWorldObjectMove {
+            sequence: 9,
+            target,
+            final_position: Vec3::new(1.0, 2.0, 3.0),
+            accepted: true,
+        });
+    let preview = app
+        .world_mut()
+        .spawn((
+            WorldObjectEditPreview {
+                sequence: Some(9),
+                target,
+                object_id,
+            },
+            Transform::from_translation(Vec3::new(1.0, 2.0, 3.0)),
+        ))
+        .id();
+
+    app.world_mut()
+        .run_system_once(reconcile_edit_preview_on_transform_replication)
+        .expect("edit reconciliation system should run");
+    app.update();
+
+    assert!(app.world().get_entity(preview).is_err());
+    assert!(app
+        .world()
+        .resource::<SpawnPanelUi>()
+        .selection
+        .pending_moves
         .is_empty());
 }
 

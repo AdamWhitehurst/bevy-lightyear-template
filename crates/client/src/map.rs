@@ -4,7 +4,9 @@ use crate::world_object::{preview_visual_from_def, DefaultVoxModelMaterial};
 use avian3d::prelude::Position;
 use bevy::{prelude::*, window::PrimaryWindow};
 #[cfg(feature = "spawn-panel")]
-use dev::panels::spawn::{PendingWorldObjectDelete, PendingWorldObjectPlacement, SpawnPanelUi};
+use dev::panels::spawn::{
+    PendingWorldObjectDelete, PendingWorldObjectMove, PendingWorldObjectPlacement, SpawnPanelUi,
+};
 use leafwing_input_manager::prelude::*;
 #[cfg(feature = "spawn-panel")]
 use lightyear::prelude::Replicated;
@@ -15,8 +17,8 @@ use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
 use protocol::world_object::{
     PlacementOffset, WorldObjectDef, WorldObjectDefRegistry, WorldObjectDeleteAck,
     WorldObjectDeleteRequest, WorldObjectEditChannel, WorldObjectEditReject, WorldObjectId,
-    WorldObjectPlacementAck, WorldObjectPlacementChannel, WorldObjectPlacementReject,
-    WorldObjectPlacementRequest,
+    WorldObjectMoveAck, WorldObjectMoveRequest, WorldObjectPlacementAck,
+    WorldObjectPlacementChannel, WorldObjectPlacementReject, WorldObjectPlacementRequest,
 };
 use protocol::{
     CharacterMarker, ChunkDataSync, MapInstanceId, MapRegistry, PlayerActions, SectionBlocksUpdate,
@@ -37,6 +39,15 @@ pub struct WorldObjectPlacementPreview {
     /// Placement request sequence for accepted/pending previews; `None` marks the hover preview.
     pub sequence: Option<u32>,
     /// Object definition id rendered by this local preview.
+    pub object_id: WorldObjectId,
+}
+
+#[cfg(feature = "spawn-panel")]
+/// Marker for local-only world-object edit preview entities.
+#[derive(Component)]
+pub struct WorldObjectEditPreview {
+    pub sequence: Option<u32>,
+    pub target: Entity,
     pub object_id: WorldObjectId,
 }
 
@@ -132,6 +143,8 @@ impl Plugin for ClientMapPlugin {
                     #[cfg(feature = "spawn-panel")]
                     handle_world_object_delete_ack,
                     #[cfg(feature = "spawn-panel")]
+                    handle_world_object_move_ack,
+                    #[cfg(feature = "spawn-panel")]
                     handle_world_object_edit_reject,
                 )
                     .run_if(in_state(ui::ClientState::InGame)),
@@ -145,11 +158,17 @@ impl Plugin for ClientMapPlugin {
                     #[cfg(feature = "spawn-panel")]
                     handle_world_object_delete_input,
                     #[cfg(feature = "spawn-panel")]
+                    handle_world_object_move_input,
+                    #[cfg(feature = "spawn-panel")]
                     handle_world_object_placement_input,
                     #[cfg(feature = "spawn-panel")]
                     update_world_object_placement_preview,
                     #[cfg(feature = "spawn-panel")]
+                    update_world_object_edit_preview,
+                    #[cfg(feature = "spawn-panel")]
                     reconcile_placement_preview_on_replication,
+                    #[cfg(feature = "spawn-panel")]
+                    reconcile_edit_preview_on_transform_replication,
                 )
                     .chain()
                     .run_if(in_state(ui::ClientState::InGame))
@@ -442,6 +461,55 @@ pub fn spawn_world_object_placement_preview(
 }
 
 #[cfg(feature = "spawn-panel")]
+/// Computes the current final move target for an existing world object.
+pub fn current_world_object_move_target(
+    def: &WorldObjectDef,
+    player_query: &Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    voxel_world: &mut VoxelWorld,
+    camera_query: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    window_query: &Query<&Window, With<PrimaryWindow>>,
+) -> Option<Vec3> {
+    current_placement_target(player_query, voxel_world, camera_query, window_query)
+        .map(|target| preview_transform(def, target.base_position).translation)
+}
+
+#[cfg(feature = "spawn-panel")]
+/// Spawns a local-only edit preview parent and optional visual child.
+pub fn spawn_world_object_edit_preview(
+    commands: &mut Commands,
+    sequence: Option<u32>,
+    target: Entity,
+    object_id: WorldObjectId,
+    transform: Transform,
+    def: &WorldObjectDef,
+    vox_registry: &VoxModelRegistry,
+    vox_assets: &Assets<VoxModelAsset>,
+    default_material: &DefaultVoxModelMaterial,
+) -> Entity {
+    let entity = commands
+        .spawn((
+            WorldObjectEditPreview {
+                sequence,
+                target,
+                object_id,
+            },
+            transform,
+            Visibility::default(),
+            Name::new("world-object-edit-preview"),
+        ))
+        .id();
+    preview_visual_from_def(
+        commands,
+        entity,
+        def,
+        vox_registry,
+        vox_assets,
+        default_material,
+    );
+    entity
+}
+
+#[cfg(feature = "spawn-panel")]
 /// Returns the nearest replicated world object in radius on the current map.
 pub fn nearest_world_object_in_radius(
     origin: Vec3,
@@ -532,6 +600,84 @@ fn handle_world_object_delete_input(
         .push(PendingWorldObjectDelete {
             sequence,
             target,
+            accepted: false,
+        });
+}
+
+#[cfg(feature = "spawn-panel")]
+fn handle_world_object_move_input(
+    mut ui_state: ResMut<SpawnPanelUi>,
+    action_query: Query<&ActionState<PlayerActions>, With<Controlled>>,
+    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    mut voxel_world: VoxelWorld,
+    camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    registry: Option<Res<WorldObjectDefRegistry>>,
+    target_query: Query<&WorldObjectId, With<Replicated>>,
+    mut message_sender: Query<&mut MessageSender<WorldObjectMoveRequest>>,
+) {
+    if !ui_state.selection.move_armed {
+        trace!("handle_world_object_move_input: move is not armed");
+        return;
+    }
+    let Ok(action_state) = action_query.single() else {
+        trace!("handle_world_object_move_input: no entity with ActionState + Controlled");
+        return;
+    };
+    if !action_state.just_pressed(&PlayerActions::PlaceVoxel) {
+        trace!("handle_world_object_move_input: place action not pressed");
+        return;
+    }
+    let Some(target) = ui_state.selection.selected else {
+        trace!("handle_world_object_move_input: move armed without selected object");
+        return;
+    };
+    let Ok(object_id) = target_query.get(target) else {
+        trace!("handle_world_object_move_input: selected object no longer exists");
+        return;
+    };
+    let Some(registry) = registry else {
+        trace!("handle_world_object_move_input: WorldObjectDefRegistry not loaded");
+        return;
+    };
+    let Some(def) = registry.get(object_id) else {
+        trace!("handle_world_object_move_input: selected object definition missing");
+        return;
+    };
+    let Some(final_position) = current_world_object_move_target(
+        def,
+        &player_query,
+        &mut voxel_world,
+        &camera_query,
+        &window_query,
+    ) else {
+        trace!("handle_world_object_move_input: no move target");
+        return;
+    };
+
+    let sequence = ui_state.selection.next_sequence();
+    let request = WorldObjectMoveRequest {
+        sequence,
+        target,
+        final_position,
+    };
+    let mut sent = false;
+    for mut sender in &mut message_sender {
+        sender.send::<WorldObjectEditChannel>(request.clone());
+        sent = true;
+    }
+    if !sent {
+        trace!("handle_world_object_move_input: no WorldObjectMoveRequest sender");
+        return;
+    }
+    ui_state.selection.last_reject = None;
+    ui_state
+        .selection
+        .pending_moves
+        .push(PendingWorldObjectMove {
+            sequence,
+            target,
+            final_position,
             accepted: false,
         });
 }
@@ -741,6 +887,162 @@ fn update_world_object_placement_preview(
 }
 
 #[cfg(feature = "spawn-panel")]
+/// Maintains hover and pending local edit previews from spawn-panel move state.
+#[allow(clippy::too_many_arguments)]
+fn update_world_object_edit_preview(
+    mut commands: Commands,
+    ui_state: Res<SpawnPanelUi>,
+    registry: Option<Res<WorldObjectDefRegistry>>,
+    vox_registry: Res<VoxModelRegistry>,
+    vox_assets: Res<Assets<VoxModelAsset>>,
+    default_material: Res<DefaultVoxModelMaterial>,
+    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    mut voxel_world: VoxelWorld,
+    camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    target_query: Query<(Entity, &WorldObjectId), With<Replicated>>,
+    mut preview_query: Query<(Entity, &mut Transform, &WorldObjectEditPreview)>,
+) {
+    for (entity, _, preview) in &mut preview_query {
+        let target_exists = target_query.get(preview.target).is_ok();
+        let still_pending = preview.sequence.is_some_and(|sequence| {
+            ui_state
+                .selection
+                .pending_moves
+                .iter()
+                .any(|pending| pending.sequence == sequence)
+        });
+        let hover = preview.sequence.is_none() && ui_state.selection.move_armed;
+        if !target_exists || (!still_pending && !hover) {
+            trace!("update_world_object_edit_preview: despawning stale edit preview");
+            commands.entity(entity).despawn();
+        }
+    }
+
+    let Some(registry) = registry else {
+        trace!("update_world_object_edit_preview: WorldObjectDefRegistry not loaded");
+        return;
+    };
+    let Some(target) = ui_state.selection.selected else {
+        trace!("update_world_object_edit_preview: no selected world object");
+        return;
+    };
+    let Ok((_, object_id)) = target_query.get(target) else {
+        trace!("update_world_object_edit_preview: selected object is missing or not replicated");
+        return;
+    };
+    let Some(def) = registry.get(object_id) else {
+        trace!("update_world_object_edit_preview: selected object definition missing");
+        return;
+    };
+
+    if ui_state.selection.move_armed {
+        if let Some(final_position) = current_world_object_move_target(
+            def,
+            &player_query,
+            &mut voxel_world,
+            &camera_query,
+            &window_query,
+        ) {
+            upsert_world_object_edit_preview(
+                &mut commands,
+                None,
+                target,
+                object_id.clone(),
+                Transform::from_translation(final_position),
+                def,
+                &vox_registry,
+                &vox_assets,
+                &default_material,
+                &mut preview_query,
+            );
+        } else {
+            trace!("update_world_object_edit_preview: no current move target");
+        }
+    }
+
+    for pending in &ui_state.selection.pending_moves {
+        upsert_world_object_edit_preview(
+            &mut commands,
+            Some(pending.sequence),
+            pending.target,
+            object_id.clone(),
+            Transform::from_translation(pending.final_position),
+            def,
+            &vox_registry,
+            &vox_assets,
+            &default_material,
+            &mut preview_query,
+        );
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+#[allow(clippy::too_many_arguments)]
+fn upsert_world_object_edit_preview(
+    commands: &mut Commands,
+    sequence: Option<u32>,
+    target: Entity,
+    object_id: WorldObjectId,
+    transform: Transform,
+    def: &WorldObjectDef,
+    vox_registry: &VoxModelRegistry,
+    vox_assets: &Assets<VoxModelAsset>,
+    default_material: &DefaultVoxModelMaterial,
+    preview_query: &mut Query<(Entity, &mut Transform, &WorldObjectEditPreview)>,
+) {
+    let mut preview_entity = None;
+    for (entity, mut preview_transform, preview) in preview_query.iter_mut() {
+        if preview.sequence == sequence && preview.target == target {
+            *preview_transform = transform;
+            preview_entity = Some(entity);
+        }
+    }
+    if preview_entity.is_none() {
+        spawn_world_object_edit_preview(
+            commands,
+            sequence,
+            target,
+            object_id,
+            transform,
+            def,
+            vox_registry,
+            vox_assets,
+            default_material,
+        );
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+/// Removes accepted local edit previews once replicated position matches the accepted move.
+pub fn reconcile_edit_preview_on_transform_replication(
+    mut commands: Commands,
+    mut ui_state: ResMut<SpawnPanelUi>,
+    target_query: Query<(Entity, &Position), (With<WorldObjectId>, Changed<Position>)>,
+    preview_query: Query<(Entity, &WorldObjectEditPreview, &Transform)>,
+) {
+    for (target, position) in &target_query {
+        for (preview_entity, preview, preview_transform) in &preview_query {
+            let Some(sequence) = preview.sequence else {
+                trace!("reconcile_edit_preview_on_transform_replication: skipping hover preview");
+                continue;
+            };
+            if preview.target != target
+                || !positions_match(preview_transform.translation, position.0)
+            {
+                trace!("reconcile_edit_preview_on_transform_replication: preview does not match changed target");
+                continue;
+            }
+            commands.entity(preview_entity).despawn();
+            ui_state
+                .selection
+                .pending_moves
+                .retain(|pending| pending.sequence != sequence);
+        }
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
 /// Removes accepted local previews once the matching replicated object appears.
 pub fn reconcile_placement_preview_on_replication(
     mut commands: Commands,
@@ -868,6 +1170,33 @@ fn handle_world_object_delete_ack(
 }
 
 #[cfg(feature = "spawn-panel")]
+fn handle_world_object_move_ack(
+    mut receivers: Query<&mut MessageReceiver<WorldObjectMoveAck>>,
+    mut ui_state: ResMut<SpawnPanelUi>,
+) {
+    for mut receiver in &mut receivers {
+        for ack in receiver.receive() {
+            if let Some(pending) = ui_state
+                .selection
+                .pending_moves
+                .iter_mut()
+                .find(|pending| pending.sequence == ack.sequence)
+            {
+                pending.accepted = true;
+                pending.final_position = ack.final_position;
+                ui_state.selection.last_reject = None;
+                ui_state.selection.move_armed = false;
+            } else {
+                trace!(
+                    "handle_world_object_move_ack: ack seq={} had no pending move",
+                    ack.sequence
+                );
+            }
+        }
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
 fn handle_world_object_edit_reject(
     mut receivers: Query<&mut MessageReceiver<WorldObjectEditReject>>,
     mut ui_state: ResMut<SpawnPanelUi>,
@@ -877,6 +1206,10 @@ fn handle_world_object_edit_reject(
             ui_state
                 .selection
                 .pending_deletes
+                .retain(|pending| pending.sequence != reject.sequence);
+            ui_state
+                .selection
+                .pending_moves
                 .retain(|pending| pending.sequence != reject.sequence);
             ui_state.selection.last_reject = Some(reject.reason);
         }

@@ -34,9 +34,9 @@ use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
 use protocol::world_object::{
     apply_object_components, ActiveTransformation, WorldObjectDef, WorldObjectDefRegistry,
     WorldObjectDeleteAck, WorldObjectDeleteRequest, WorldObjectEditChannel, WorldObjectEditReject,
-    WorldObjectEditRejectReason, WorldObjectId, WorldObjectPlacementAck,
-    WorldObjectPlacementChannel, WorldObjectPlacementReject, WorldObjectPlacementRejectReason,
-    WorldObjectPlacementRequest,
+    WorldObjectEditRejectReason, WorldObjectId, WorldObjectMoveAck, WorldObjectMoveRequest,
+    WorldObjectPlacementAck, WorldObjectPlacementChannel, WorldObjectPlacementReject,
+    WorldObjectPlacementRejectReason, WorldObjectPlacementRequest,
 };
 use protocol::{AppState, RespawnPoint, TerrainDefRegistry};
 use voxel_map_engine::config::WorldObjectSpawn;
@@ -649,6 +649,7 @@ impl Plugin for ServerMapPlugin {
                             .and(resource_exists::<VoxModelRegistry>),
                     ),
                     handle_world_object_delete_requests,
+                    handle_world_object_move_requests,
                     push_chunks_to_clients,
                     save_dirty_chunks_debounced,
                     handle_map_switch_requests.run_if(resource_exists::<TerrainDefRegistry>),
@@ -963,6 +964,7 @@ pub fn handle_world_object_delete_requests(
                         validated.map_entity,
                         validated.chunk_pos,
                         Some(request.target),
+                        None,
                         &entity_save_query,
                         &mut store_query,
                     );
@@ -971,6 +973,150 @@ pub fn handle_world_object_delete_requests(
                         WorldObjectDeleteAck {
                             sequence: request.sequence,
                             target: request.target,
+                        },
+                        &mut ack_senders,
+                    );
+                }
+                Err(reason) => {
+                    send_world_object_edit_reject(
+                        client_entity,
+                        request.sequence,
+                        reason,
+                        &mut reject_senders,
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Validated data needed to move a world object and persist its chunk.
+#[derive(Debug, PartialEq)]
+pub struct ValidatedWorldObjectMove {
+    pub map_entity: Entity,
+    pub old_chunk_pos: IVec3,
+    pub new_chunk_pos: IVec3,
+    pub final_position: Vec3,
+}
+
+/// Validates a same-chunk world-object move against player map and loaded chunk state.
+pub fn validate_world_object_move(
+    request: &WorldObjectMoveRequest,
+    player_map_entity: Entity,
+    player_map_id: &MapInstanceId,
+    object_query: &Query<(&WorldObjectId, &MapInstanceId, &ChunkEntityRef)>,
+    map_query: &Query<(&VoxelMapInstance, &MapDimensions)>,
+) -> Result<ValidatedWorldObjectMove, WorldObjectEditRejectReason> {
+    if !request.final_position.is_finite() {
+        return Err(WorldObjectEditRejectReason::NonFinitePosition);
+    }
+    let Ok((_id, object_map_id, chunk_ref)) = object_query.get(request.target) else {
+        return Err(WorldObjectEditRejectReason::MissingTarget);
+    };
+    if object_map_id != player_map_id || chunk_ref.map_entity != player_map_entity {
+        return Err(WorldObjectEditRejectReason::ForeignMap);
+    }
+    let (instance, dimensions) = map_query
+        .get(player_map_entity)
+        .expect("resolved map entity must have VoxelMapInstance and MapDimensions");
+    let new_chunk_pos = crate::chunk_entities::chunk_pos_for_world_position(
+        request.final_position,
+        dimensions.chunk_size,
+    );
+    if !placement_chunk_in_bounds(new_chunk_pos, dimensions) {
+        return Err(WorldObjectEditRejectReason::OutOfBounds);
+    }
+    if new_chunk_pos != chunk_ref.chunk_pos {
+        return Err(WorldObjectEditRejectReason::ChunkUnavailable);
+    }
+    let column = voxel_map_engine::prelude::chunk_to_column(new_chunk_pos);
+    if !instance.chunk_levels.contains_key(&column)
+        || instance.get_chunk_data(new_chunk_pos).is_none()
+    {
+        return Err(WorldObjectEditRejectReason::ChunkUnavailable);
+    }
+    Ok(ValidatedWorldObjectMove {
+        map_entity: player_map_entity,
+        old_chunk_pos: chunk_ref.chunk_pos,
+        new_chunk_pos,
+        final_position: request.final_position,
+    })
+}
+
+/// Applies a validated world-object move to the target entity.
+pub fn apply_world_object_move(
+    entity: Entity,
+    validated: &ValidatedWorldObjectMove,
+    commands: &mut Commands,
+) {
+    commands
+        .entity(entity)
+        .insert(Position(validated.final_position));
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn handle_world_object_move_requests(
+    mut receivers: Query<(Entity, &mut MessageReceiver<WorldObjectMoveRequest>)>,
+    mut ack_senders: Query<&mut MessageSender<WorldObjectMoveAck>>,
+    mut reject_senders: Query<&mut MessageSender<WorldObjectEditReject>>,
+    controlled_query: Query<(&ControlledBy, &MapInstanceId), With<CharacterMarker>>,
+    map_registry: Res<MapRegistry>,
+    map_query: Query<(&VoxelMapInstance, &MapDimensions)>,
+    object_query: Query<(&WorldObjectId, &MapInstanceId, &ChunkEntityRef)>,
+    entity_save_query: Query<(
+        Entity,
+        &ChunkEntityRef,
+        &WorldObjectId,
+        &Position,
+        Option<&ActiveTransformation>,
+        Option<&protocol::Health>,
+    )>,
+    mut store_query: Query<(
+        &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
+        &mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>,
+    )>,
+    mut commands: Commands,
+) {
+    for (client_entity, mut receiver) in &mut receivers {
+        for request in receiver.receive() {
+            let Some((map_entity, map_id)) =
+                resolve_player_map(client_entity, &controlled_query, &map_registry)
+            else {
+                send_world_object_edit_reject(
+                    client_entity,
+                    request.sequence,
+                    WorldObjectEditRejectReason::NoControlledCharacter,
+                    &mut reject_senders,
+                );
+                continue;
+            };
+            match validate_world_object_move(
+                &request,
+                map_entity,
+                &map_id,
+                &object_query,
+                &map_query,
+            ) {
+                Ok(validated) => {
+                    apply_world_object_move(request.target, &validated, &mut commands);
+                    crate::chunk_entities::save_chunk_entities_now_or_queue(
+                        validated.map_entity,
+                        validated.old_chunk_pos,
+                        None,
+                        Some(crate::chunk_entities::ChunkEntitySaveOverride {
+                            entity: request.target,
+                            position: Some(validated.final_position),
+                            chunk_pos: Some(validated.new_chunk_pos),
+                        }),
+                        &entity_save_query,
+                        &mut store_query,
+                    );
+                    send_world_object_move_ack(
+                        client_entity,
+                        WorldObjectMoveAck {
+                            sequence: request.sequence,
+                            target: request.target,
+                            final_position: validated.final_position,
                         },
                         &mut ack_senders,
                     );
@@ -1050,6 +1196,19 @@ fn send_world_object_delete_ack(
 ) {
     let Ok(mut sender) = ack_senders.get_mut(client_entity) else {
         trace!("send_world_object_delete_ack: no ack sender for {client_entity:?}");
+        return;
+    };
+    sender.send::<WorldObjectEditChannel>(ack);
+}
+
+/// Sends a world-object move acknowledgment to a client if its acknowledgment sender exists.
+fn send_world_object_move_ack(
+    client_entity: Entity,
+    ack: WorldObjectMoveAck,
+    ack_senders: &mut Query<&mut MessageSender<WorldObjectMoveAck>>,
+) {
+    let Ok(mut sender) = ack_senders.get_mut(client_entity) else {
+        trace!("send_world_object_move_ack: no ack sender for {client_entity:?}");
         return;
     };
     sender.send::<WorldObjectEditChannel>(ack);

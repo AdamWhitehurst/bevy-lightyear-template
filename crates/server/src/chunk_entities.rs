@@ -172,11 +172,20 @@ pub fn evict_chunk_entities(
     }
 }
 
+/// Per-entity override applied while collecting chunk entity saves.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChunkEntitySaveOverride {
+    pub entity: Entity,
+    pub position: Option<Vec3>,
+    pub chunk_pos: Option<IVec3>,
+}
+
 /// Collects saved spawn data for one loaded chunk.
 pub fn collect_chunk_entity_spawns(
     map_entity: Entity,
     chunk_pos: IVec3,
     exclude_entity: Option<Entity>,
+    save_override: Option<ChunkEntitySaveOverride>,
     entity_query: &Query<(
         Entity,
         &ChunkEntityRef,
@@ -191,12 +200,19 @@ pub fn collect_chunk_entity_spawns(
         .filter(|(entity, chunk_ref, _, _, _, _)| {
             Some(*entity) != exclude_entity
                 && chunk_ref.map_entity == map_entity
-                && chunk_ref.chunk_pos == chunk_pos
+                && save_override
+                    .filter(|save_override| save_override.entity == *entity)
+                    .and_then(|save_override| save_override.chunk_pos)
+                    .unwrap_or(chunk_ref.chunk_pos)
+                    == chunk_pos
         })
         .map(
-            |(_, _, obj_id, pos, active_transform, health)| WorldObjectSpawn {
+            |(entity, _, obj_id, pos, active_transform, health)| WorldObjectSpawn {
                 object_id: obj_id.0.clone(),
-                position: pos.0,
+                position: save_override
+                    .filter(|save_override| save_override.entity == entity)
+                    .and_then(|save_override| save_override.position)
+                    .unwrap_or(pos.0),
                 position_kind: WorldObjectPositionKind::Final,
                 persisted_components: serialize_persisted(active_transform, health),
             },
@@ -209,6 +225,7 @@ pub fn save_chunk_entities_now_or_queue(
     map_entity: Entity,
     chunk_pos: IVec3,
     exclude_entity: Option<Entity>,
+    save_override: Option<ChunkEntitySaveOverride>,
     entity_query: &Query<(
         Entity,
         &ChunkEntityRef,
@@ -222,7 +239,13 @@ pub fn save_chunk_entities_now_or_queue(
         &mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>,
     )>,
 ) {
-    let spawns = collect_chunk_entity_spawns(map_entity, chunk_pos, exclude_entity, entity_query);
+    let spawns = collect_chunk_entity_spawns(
+        map_entity,
+        chunk_pos,
+        exclude_entity,
+        save_override,
+        entity_query,
+    );
     let Ok((store, mut ops)) = store_query.get_mut(map_entity) else {
         trace!(
             "save_chunk_entities_now_or_queue: map entity {map_entity:?} has no chunk entity store"
@@ -251,6 +274,7 @@ fn collect_chunk_entities(
                 collect_chunk_entity_spawns(
                     chunk_ref.map_entity,
                     chunk_ref.chunk_pos,
+                    None,
                     None,
                     entity_query,
                 )

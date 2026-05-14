@@ -1097,11 +1097,11 @@ fn edit_preview_reconciles_when_replicated_transform_matches_accepted_move() { /
 
 #### Automated
 
-- [ ] Confirm no cargo build/check/test is running:
+- [x] Confirm no cargo build/check/test is running:
       `pgrep -af 'cargo (build|check|test|make|server|client)|rustc|rustdoc' || true`
-- [ ] `cargo test -p server --test world_object_edit move_same_chunk` passes
-- [ ] Confirm no cargo build/check/test is running again
-- [ ] `cargo test -p client --features spawn-panel --test plugin edit_preview` passes
+- [x] `cargo test -p server --test world_object_edit move_same_chunk` passes
+- [x] Confirm no cargo build/check/test is running again
+- [x] `cargo test -p client --features spawn-panel --test plugin edit_preview` passes
 
 #### Manual
 

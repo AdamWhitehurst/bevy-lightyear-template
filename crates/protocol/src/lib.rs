@@ -56,7 +56,8 @@ pub use transition::{MapTransitionEntity, TransitionPlugin};
 pub use vox_model::{VoxModelAsset, VoxModelPlugin, VoxModelRegistry};
 pub use world_object::{
     WorldObjectDefRegistry, WorldObjectDeleteAck, WorldObjectDeleteRequest, WorldObjectEditChannel,
-    WorldObjectEditReject, WorldObjectEditRejectReason, WorldObjectId, WorldObjectPlacementAck,
+    WorldObjectEditReject, WorldObjectEditRejectReason, WorldObjectId, WorldObjectMoveAck,
+    WorldObjectMoveRequest, WorldObjectPlacementAck,
     WorldObjectPlacementChannel, WorldObjectPlacementReject, WorldObjectPlacementRejectReason,
     WorldObjectPlacementRequest, WorldObjectPlugin,
 };
@@ -155,6 +156,12 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::ClientToServer)
             .add_map_entities();
         app.register_message::<WorldObjectDeleteAck>()
+            .add_direction(NetworkDirection::ServerToClient)
+            .add_map_entities();
+        app.register_message::<WorldObjectMoveRequest>()
+            .add_direction(NetworkDirection::ClientToServer)
+            .add_map_entities();
+        app.register_message::<WorldObjectMoveAck>()
             .add_direction(NetworkDirection::ServerToClient)
             .add_map_entities();
         app.register_message::<WorldObjectEditReject>()

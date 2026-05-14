@@ -5,11 +5,11 @@ use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use persistence::{PendingStoreOps, Store, StoreBackend};
 use protocol::map::{ChunkEntityRef, MapInstanceId};
-use protocol::world_object::{WorldObjectEditRejectReason, WorldObjectId};
+use protocol::world_object::{WorldObjectEditRejectReason, WorldObjectId, WorldObjectMoveRequest};
 use voxel_map_engine::config::WorldObjectSpawn;
 use voxel_map_engine::persistence::fs_chunk_entities::FsChunkEntitiesStore;
 use voxel_map_engine::prelude::{
-    chunk_to_column, ChunkData, ChunkStatus, VoxelMapInstance, WorldVoxel,
+    chunk_to_column, ChunkData, ChunkStatus, MapDimensions, VoxelMapInstance, WorldVoxel,
 };
 
 const CHUNK_SIZE: u32 = 16;
@@ -28,6 +28,15 @@ fn loaded_instance(chunk_pos: IVec3) -> VoxelMapInstance {
 
 fn object_id() -> WorldObjectId {
     WorldObjectId("test_tree".to_string())
+}
+
+fn dimensions(bounds: Option<IVec3>) -> MapDimensions {
+    MapDimensions {
+        chunk_size: CHUNK_SIZE,
+        column_y_range: (-4, 4),
+        tree_height: 5,
+        bounds,
+    }
 }
 
 fn validate_in_world(
@@ -204,6 +213,7 @@ fn delete_save_writes_empty_chunk_file() {
                     map_entity,
                     chunk_pos,
                     Some(deleted),
+                    None,
                     &entity_query,
                     &mut store_query,
                 );
@@ -215,4 +225,200 @@ fn delete_save_writes_empty_chunk_file() {
 
     let loaded = store.load(&chunk_pos).unwrap().expect("empty file exists");
     assert!(loaded.is_empty());
+}
+
+fn validate_move_in_world(
+    app: &mut App,
+    request: WorldObjectMoveRequest,
+    map_entity: Entity,
+    map_id: MapInstanceId,
+) -> Result<server::map::ValidatedWorldObjectMove, WorldObjectEditRejectReason> {
+    app.world_mut()
+        .run_system_once(
+            move |object_query: Query<(&WorldObjectId, &MapInstanceId, &ChunkEntityRef)>,
+                  map_query: Query<(&VoxelMapInstance, &MapDimensions)>| {
+                server::map::validate_world_object_move(
+                    &request,
+                    map_entity,
+                    &map_id,
+                    &object_query,
+                    &map_query,
+                )
+            },
+        )
+        .expect("move validation system should run")
+}
+
+#[test]
+fn move_same_chunk_validation_accepts_loaded_target() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let chunk_pos = IVec3::ZERO;
+    let map_entity = app
+        .world_mut()
+        .spawn((loaded_instance(chunk_pos), dimensions(None)))
+        .id();
+    let target = app
+        .world_mut()
+        .spawn((
+            object_id(),
+            MapInstanceId::Overworld,
+            ChunkEntityRef {
+                map_entity,
+                chunk_pos,
+            },
+        ))
+        .id();
+    let final_position = Vec3::new(2.0, 3.0, 4.0);
+
+    let result = validate_move_in_world(
+        &mut app,
+        WorldObjectMoveRequest {
+            sequence: 1,
+            target,
+            final_position,
+        },
+        map_entity,
+        MapInstanceId::Overworld,
+    )
+    .expect("same-chunk move should be valid");
+
+    assert_eq!(result.map_entity, map_entity);
+    assert_eq!(result.old_chunk_pos, chunk_pos);
+    assert_eq!(result.new_chunk_pos, chunk_pos);
+    assert_eq!(result.final_position, final_position);
+}
+
+#[test]
+fn move_same_chunk_validation_rejects_non_finite_out_of_bounds_and_unloaded() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let loaded_chunk = IVec3::ZERO;
+    let map_entity = app
+        .world_mut()
+        .spawn((
+            loaded_instance(loaded_chunk),
+            dimensions(Some(IVec3::new(2, 4, 2))),
+        ))
+        .id();
+    let target = app
+        .world_mut()
+        .spawn((
+            object_id(),
+            MapInstanceId::Overworld,
+            ChunkEntityRef {
+                map_entity,
+                chunk_pos: loaded_chunk,
+            },
+        ))
+        .id();
+
+    assert_eq!(
+        validate_move_in_world(
+            &mut app,
+            WorldObjectMoveRequest {
+                sequence: 1,
+                target,
+                final_position: Vec3::new(f32::NAN, 0.0, 0.0),
+            },
+            map_entity,
+            MapInstanceId::Overworld,
+        )
+        .unwrap_err(),
+        WorldObjectEditRejectReason::NonFinitePosition
+    );
+    assert_eq!(
+        validate_move_in_world(
+            &mut app,
+            WorldObjectMoveRequest {
+                sequence: 2,
+                target,
+                final_position: Vec3::new(64.0, 0.0, 0.0),
+            },
+            map_entity,
+            MapInstanceId::Overworld,
+        )
+        .unwrap_err(),
+        WorldObjectEditRejectReason::OutOfBounds
+    );
+    assert_eq!(
+        validate_move_in_world(
+            &mut app,
+            WorldObjectMoveRequest {
+                sequence: 3,
+                target,
+                final_position: Vec3::new(17.0, 0.0, 0.0),
+            },
+            map_entity,
+            MapInstanceId::Overworld,
+        )
+        .unwrap_err(),
+        WorldObjectEditRejectReason::ChunkUnavailable
+    );
+}
+
+#[test]
+fn move_same_chunk_save_uses_new_final_position() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FsChunkEntitiesStore {
+        map_dir: Arc::new(dir.path().to_path_buf()),
+    };
+    let chunk_pos = IVec3::ZERO;
+    let final_position = Vec3::new(4.0, 5.0, 6.0);
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let map_entity = app
+        .world_mut()
+        .spawn((
+            StoreBackend::new(store.clone()),
+            PendingStoreOps::<IVec3, Vec<WorldObjectSpawn>>::default(),
+        ))
+        .id();
+    let moved = app
+        .world_mut()
+        .spawn((
+            ChunkEntityRef {
+                map_entity,
+                chunk_pos,
+            },
+            object_id(),
+            Position(Vec3::new(1.0, 2.0, 3.0).into()),
+        ))
+        .id();
+
+    app.world_mut()
+        .run_system_once(
+            move |entity_query: Query<(
+                Entity,
+                &ChunkEntityRef,
+                &WorldObjectId,
+                &Position,
+                Option<&protocol::world_object::ActiveTransformation>,
+                Option<&protocol::Health>,
+            )>,
+                  mut store_query: Query<(
+                &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
+                &mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>,
+            )>| {
+                server::chunk_entities::save_chunk_entities_now_or_queue(
+                    map_entity,
+                    chunk_pos,
+                    None,
+                    Some(server::chunk_entities::ChunkEntitySaveOverride {
+                        entity: moved,
+                        position: Some(final_position),
+                        chunk_pos: Some(chunk_pos),
+                    }),
+                    &entity_query,
+                    &mut store_query,
+                );
+                let (_, mut ops) = store_query.get_mut(map_entity).unwrap();
+                ops.flush();
+            },
+        )
+        .unwrap();
+
+    let loaded = store.load(&chunk_pos).unwrap().expect("move save exists");
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].position, final_position);
 }
