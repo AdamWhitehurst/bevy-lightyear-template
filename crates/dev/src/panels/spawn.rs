@@ -92,6 +92,8 @@ pub struct PendingWorldObjectMove {
     pub sequence: u32,
     pub target: Entity,
     pub final_position: Vec3,
+    pub old_chunk_pos: Option<IVec3>,
+    pub new_chunk_pos: Option<IVec3>,
     pub accepted: bool,
 }
 
@@ -295,6 +297,11 @@ fn draw_def_tab(
             "Pending move requests: {}",
             ui_state.selection.pending_moves.len()
         ));
+        for pending in &ui_state.selection.pending_moves {
+            if let (Some(old), Some(new)) = (pending.old_chunk_pos, pending.new_chunk_pos) {
+                ui.label(format!("Move {}: {old:?} -> {new:?}", pending.sequence));
+            }
+        }
         ui.label(format!(
             "Pending rotation requests: {}",
             ui_state.selection.pending_rotations.len()

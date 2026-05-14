@@ -619,7 +619,12 @@ fn handle_world_object_move_input(
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     registry: Option<Res<WorldObjectDefRegistry>>,
-    target_query: Query<&WorldObjectId, With<Replicated>>,
+    target_query: Query<
+        (&WorldObjectId, Option<&Position>, Option<&MapInstanceId>),
+        With<Replicated>,
+    >,
+    map_registry: Option<Res<MapRegistry>>,
+    map_query: Query<&MapDimensions>,
     mut message_sender: Query<&mut MessageSender<WorldObjectMoveRequest>>,
 ) {
     if !ui_state.selection.move_armed {
@@ -638,7 +643,7 @@ fn handle_world_object_move_input(
         trace!("handle_world_object_move_input: move armed without selected object");
         return;
     };
-    let Ok(object_id) = target_query.get(target) else {
+    let Ok((object_id, current_position, target_map_id)) = target_query.get(target) else {
         trace!("handle_world_object_move_input: selected object no longer exists");
         return;
     };
@@ -661,6 +666,13 @@ fn handle_world_object_move_input(
         return;
     };
 
+    let (old_chunk_pos, new_chunk_pos) = world_object_move_chunk_display(
+        current_position,
+        target_map_id,
+        final_position,
+        map_registry.as_deref(),
+        &map_query,
+    );
     let sequence = ui_state.selection.next_sequence();
     let request = WorldObjectMoveRequest {
         sequence,
@@ -684,8 +696,45 @@ fn handle_world_object_move_input(
             sequence,
             target,
             final_position,
+            old_chunk_pos,
+            new_chunk_pos,
             accepted: false,
         });
+}
+
+#[cfg(feature = "spawn-panel")]
+fn world_object_move_chunk_display(
+    current_position: Option<&Position>,
+    target_map_id: Option<&MapInstanceId>,
+    final_position: Vec3,
+    map_registry: Option<&MapRegistry>,
+    map_query: &Query<&MapDimensions>,
+) -> (Option<IVec3>, Option<IVec3>) {
+    let Some(current_position) = current_position else {
+        trace!("world_object_move_chunk_display: selected object has no Position");
+        return (None, None);
+    };
+    let Some(target_map_id) = target_map_id else {
+        trace!("world_object_move_chunk_display: selected object has no MapInstanceId");
+        return (None, None);
+    };
+    let Some(map_registry) = map_registry else {
+        trace!("world_object_move_chunk_display: MapRegistry not loaded");
+        return (None, None);
+    };
+    let Some(map_entity) = map_registry.0.get(target_map_id).copied() else {
+        trace!("world_object_move_chunk_display: target map id is not registered");
+        return (None, None);
+    };
+    let Ok(dimensions) = map_query.get(map_entity) else {
+        trace!("world_object_move_chunk_display: target map has no MapDimensions");
+        return (None, None);
+    };
+    let old_chunk_pos =
+        voxel_map_engine::lifecycle::world_to_chunk_pos(current_position.0, dimensions.chunk_size);
+    let new_chunk_pos =
+        voxel_map_engine::lifecycle::world_to_chunk_pos(final_position, dimensions.chunk_size);
+    (Some(old_chunk_pos), Some(new_chunk_pos))
 }
 
 #[cfg(feature = "spawn-panel")]
@@ -723,12 +772,15 @@ fn handle_world_object_rotate_input(
         trace!("handle_world_object_rotate_input: no WorldObjectRotateRequest sender");
         return;
     }
-    ui_state.selection.pending_rotations.push(PendingWorldObjectRotation {
-        sequence,
-        target,
-        rotation,
-        accepted: false,
-    });
+    ui_state
+        .selection
+        .pending_rotations
+        .push(PendingWorldObjectRotation {
+            sequence,
+            target,
+            rotation,
+            accepted: false,
+        });
 }
 
 #[cfg(feature = "spawn-panel")]
@@ -949,7 +1001,10 @@ fn update_world_object_edit_preview(
     mut voxel_world: VoxelWorld,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
-    target_query: Query<(Entity, &WorldObjectId, Option<&Position>, Option<&Rotation>), With<Replicated>>,
+    target_query: Query<
+        (Entity, &WorldObjectId, Option<&Position>, Option<&Rotation>),
+        With<Replicated>,
+    >,
     mut preview_query: Query<(Entity, &mut Transform, &WorldObjectEditPreview)>,
 ) {
     for (entity, _, preview) in &mut preview_query {
@@ -1130,7 +1185,10 @@ pub fn reconcile_edit_preview_on_transform_replication(
     mut ui_state: ResMut<SpawnPanelUi>,
     target_query: Query<
         (Entity, Option<&Position>, Option<&Rotation>),
-        (With<WorldObjectId>, Or<(Changed<Position>, Changed<Rotation>)>),
+        (
+            With<WorldObjectId>,
+            Or<(Changed<Position>, Changed<Rotation>)>,
+        ),
     >,
     preview_query: Query<(Entity, &WorldObjectEditPreview, &Transform)>,
 ) {

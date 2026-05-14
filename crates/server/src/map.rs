@@ -1002,7 +1002,7 @@ pub struct ValidatedWorldObjectMove {
     pub final_position: Vec3,
 }
 
-/// Validates a same-chunk world-object move against player map and loaded chunk state.
+/// Validates a world-object move against player map and loaded chunk state.
 pub fn validate_world_object_move(
     request: &WorldObjectMoveRequest,
     player_map_entity: Entity,
@@ -1029,14 +1029,15 @@ pub fn validate_world_object_move(
     if !placement_chunk_in_bounds(new_chunk_pos, dimensions) {
         return Err(WorldObjectEditRejectReason::OutOfBounds);
     }
-    if new_chunk_pos != chunk_ref.chunk_pos {
-        return Err(WorldObjectEditRejectReason::ChunkUnavailable);
-    }
     let column = voxel_map_engine::prelude::chunk_to_column(new_chunk_pos);
     if !instance.chunk_levels.contains_key(&column)
         || instance.get_chunk_data(new_chunk_pos).is_none()
     {
-        return Err(WorldObjectEditRejectReason::ChunkUnavailable);
+        return Err(if new_chunk_pos == chunk_ref.chunk_pos {
+            WorldObjectEditRejectReason::ChunkUnavailable
+        } else {
+            WorldObjectEditRejectReason::DestinationChunkUnavailable
+        });
     }
     Ok(ValidatedWorldObjectMove {
         map_entity: player_map_entity,
@@ -1055,6 +1056,12 @@ pub fn apply_world_object_move(
     commands
         .entity(entity)
         .insert(Position(validated.final_position));
+    if validated.old_chunk_pos != validated.new_chunk_pos {
+        commands.entity(entity).insert(ChunkEntityRef {
+            map_entity: validated.map_entity,
+            chunk_pos: validated.new_chunk_pos,
+        });
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1103,16 +1110,12 @@ pub fn handle_world_object_move_requests(
             ) {
                 Ok(validated) => {
                     apply_world_object_move(request.target, &validated, &mut commands);
-                    crate::chunk_entities::save_chunk_entities_now_or_queue(
+                    crate::chunk_entities::queue_world_object_move_persistence(
                         validated.map_entity,
                         validated.old_chunk_pos,
-                        None,
-                        Some(crate::chunk_entities::ChunkEntitySaveOverride {
-                            entity: request.target,
-                            position: Some(validated.final_position),
-                            chunk_pos: Some(validated.new_chunk_pos),
-                            rotation: None,
-                        }),
+                        validated.new_chunk_pos,
+                        request.target,
+                        validated.final_position,
                         &entity_save_query,
                         &mut store_query,
                     );

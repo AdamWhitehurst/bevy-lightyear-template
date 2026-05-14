@@ -1578,18 +1578,18 @@ fn cross_chunk_move_saves_empty_source_and_destination_with_moved_object() { /* 
 
 #### Automated
 
-- [ ] Confirm no cargo build/check/test is running:
+- [x] Confirm no cargo build/check/test is running:
       `pgrep -af 'cargo (build|check|test|make|server|client)|rustc|rustdoc' || true`
-- [ ] `cargo test -p server --test world_object_edit cross_chunk` passes
+- [x] `cargo test -p server --test world_object_edit cross_chunk` passes
 
 #### Manual
 
-- [ ] Run server/client and select an object in a loaded chunk.
-- [ ] Move it into an adjacent loaded chunk.
-- [ ] Confirm the move is accepted and replicated.
-- [ ] Unload/reload both source and destination chunks.
-- [ ] Confirm the source chunk stays empty and the destination chunk contains the moved object.
-- [ ] Attempt moving into an unloaded destination chunk and confirm the UI shows `DestinationChunkUnavailable`.
+- [x] Run server/client and select an object in a loaded chunk.
+- [x] Move it into an adjacent loaded chunk.
+- [x] Confirm the move is accepted and replicated.
+- [x] Unload/reload both source and destination chunks.
+- [x] Confirm the source chunk stays empty and the destination chunk contains the moved object.
+- [x] Attempt moving into an unloaded destination chunk and confirm the UI shows `DestinationChunkUnavailable`.
 
 ---
 
@@ -1802,7 +1802,7 @@ remains client-local.
 - [ ] After Phase 2: same-chunk moves use local previews, server mutation, ack/reject cleanup, replication
       reconciliation, and persistence.
 - [x] After Phase 3: rotations replicate and survive chunk unload/reload through persisted components.
-- [ ] After Phase 4: cross-chunk moves save both source and destination chunks and reject unavailable destinations.
+- [x] After Phase 4: cross-chunk moves save both source and destination chunks and reject unavailable destinations.
 - [ ] After Phase 5: both selection modes work in the dev panel, stale previews are cleaned up, full cargo checks/tests
       pass, and runtime QA covers the complete edit workflow.
 

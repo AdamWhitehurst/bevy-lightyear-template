@@ -137,8 +137,8 @@ bevy-lightyear-template/
 Press `F4` to toggle the dev inspector root menu. With the spawn panel enabled, press `F6` or use the root menu to open
 it. Def-driven world-object placement is server-authoritative: select an object, arm placement, preview the terrain
 target, then click terrain in-game. The existing-object edit section can select nearby replicated world objects, request
-authoritative deletion, arm same-chunk moves with local-only previews before the server commits the new position, and rotate
-selected objects with persisted yaw. Free-form spawning remains client-local.
+authoritative deletion, move objects across loaded chunks with local-only previews before the server commits the new
+position, and rotate selected objects with persisted yaw. Free-form spawning remains client-local.
 
 ### Certificate Regeneration
 

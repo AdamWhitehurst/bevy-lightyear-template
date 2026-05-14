@@ -174,6 +174,7 @@ pub enum WorldObjectEditRejectReason {
     NotWorldObject,
     ForeignMap,
     ChunkUnavailable,
+    DestinationChunkUnavailable,
     NonFinitePosition,
     OutOfBounds,
     InvalidRotation,

@@ -53,7 +53,7 @@ fn world_object_selection_ui_sequences_and_pending_delete_ack() {
 #[test]
 fn nearest_world_object_in_radius_chooses_closest_replicated_object() {
     use avian3d::prelude::Position;
-    use ::client::map::nearest_world_object_in_radius;
+    use client::map::nearest_world_object_in_radius;
     use protocol::world_object::WorldObjectId;
 
     let mut app = App::new();
@@ -102,8 +102,8 @@ fn nearest_world_object_in_radius_chooses_closest_replicated_object() {
 #[test]
 fn placement_preview_entities_are_visual_only() {
     use avian3d::prelude::{Collider, Position};
-    use ::client::map::{spawn_world_object_placement_preview, WorldObjectPlacementPreview};
-    use ::client::world_object::DefaultVoxModelMaterial;
+    use client::map::{spawn_world_object_placement_preview, WorldObjectPlacementPreview};
+    use client::world_object::DefaultVoxModelMaterial;
     use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
     use protocol::world_object::{WorldObjectDef, WorldObjectId};
     use std::collections::HashMap;
@@ -159,7 +159,7 @@ fn placement_preview_entities_are_visual_only() {
 #[test]
 fn replicated_object_reconciles_matching_preview_only() {
     use avian3d::prelude::Position;
-    use ::client::map::{reconcile_placement_preview_on_replication, WorldObjectPlacementPreview};
+    use client::map::{reconcile_placement_preview_on_replication, WorldObjectPlacementPreview};
     use dev::panels::spawn::{PendingWorldObjectPlacement, SpawnPanelUi};
     use protocol::world_object::WorldObjectId;
 
@@ -224,7 +224,7 @@ fn replicated_object_reconciles_matching_preview_only() {
 #[cfg(feature = "spawn-panel")]
 #[test]
 fn edit_preview_transform_applies_placement_offset() {
-    use ::client::map::preview_transform;
+    use client::map::preview_transform;
     use protocol::world_object::{PlacementOffset, WorldObjectDef};
 
     let def = WorldObjectDef {
@@ -241,8 +241,8 @@ fn edit_preview_transform_applies_placement_offset() {
 #[test]
 fn edit_preview_entities_are_visual_only() {
     use avian3d::prelude::{Collider, Position};
-    use ::client::map::{spawn_world_object_edit_preview, WorldObjectEditPreview};
-    use ::client::world_object::DefaultVoxModelMaterial;
+    use client::map::{spawn_world_object_edit_preview, WorldObjectEditPreview};
+    use client::world_object::DefaultVoxModelMaterial;
     use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
     use protocol::world_object::{WorldObjectDef, WorldObjectId};
     use std::collections::HashMap;
@@ -300,7 +300,7 @@ fn edit_preview_entities_are_visual_only() {
 #[test]
 fn edit_preview_reconciles_when_replicated_rotation_matches_accepted_rotate() {
     use avian3d::prelude::Rotation;
-    use ::client::map::{reconcile_edit_preview_on_transform_replication, WorldObjectEditPreview};
+    use client::map::{reconcile_edit_preview_on_transform_replication, WorldObjectEditPreview};
     use dev::panels::spawn::{PendingWorldObjectRotation, SpawnPanelUi};
     use protocol::world_object::WorldObjectId;
 
@@ -312,7 +312,11 @@ fn edit_preview_reconciles_when_replicated_rotation_matches_accepted_rotate() {
     let receiver = app.world_mut().spawn_empty().id();
     let target = app
         .world_mut()
-        .spawn((object_id.clone(), Rotation(rotation), Replicated { receiver }))
+        .spawn((
+            object_id.clone(),
+            Rotation(rotation),
+            Replicated { receiver },
+        ))
         .id();
     app.world_mut()
         .resource_mut::<SpawnPanelUi>()
@@ -357,7 +361,7 @@ fn edit_preview_reconciles_when_replicated_rotation_matches_accepted_rotate() {
 #[test]
 fn edit_preview_reconciles_when_replicated_transform_matches_accepted_move() {
     use avian3d::prelude::Position;
-    use ::client::map::{reconcile_edit_preview_on_transform_replication, WorldObjectEditPreview};
+    use client::map::{reconcile_edit_preview_on_transform_replication, WorldObjectEditPreview};
     use dev::panels::spawn::{PendingWorldObjectMove, SpawnPanelUi};
     use protocol::world_object::WorldObjectId;
 
@@ -382,6 +386,8 @@ fn edit_preview_reconciles_when_replicated_transform_matches_accepted_move() {
             sequence: 9,
             target,
             final_position: Vec3::new(1.0, 2.0, 3.0),
+            old_chunk_pos: None,
+            new_chunk_pos: None,
             accepted: true,
         });
     let preview = app

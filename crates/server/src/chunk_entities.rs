@@ -270,6 +270,50 @@ pub fn save_chunk_entities_now_or_queue(
     ops.spawn_save(&store.0, chunk_pos, spawns);
 }
 
+/// Queues saves for both chunks affected by a moved world object.
+pub fn queue_world_object_move_persistence(
+    map_entity: Entity,
+    old_chunk_pos: IVec3,
+    new_chunk_pos: IVec3,
+    moved_entity: Entity,
+    final_position: Vec3,
+    entity_query: &Query<(
+        Entity,
+        &ChunkEntityRef,
+        &WorldObjectId,
+        &Position,
+        Option<&ActiveTransformation>,
+        Option<&protocol::Health>,
+        Option<&Rotation>,
+    )>,
+    store_query: &mut Query<(
+        &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
+        &mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>,
+    )>,
+) {
+    save_chunk_entities_now_or_queue(
+        map_entity,
+        old_chunk_pos,
+        Some(moved_entity),
+        None,
+        entity_query,
+        store_query,
+    );
+    save_chunk_entities_now_or_queue(
+        map_entity,
+        new_chunk_pos,
+        None,
+        Some(ChunkEntitySaveOverride {
+            entity: moved_entity,
+            position: Some(final_position),
+            chunk_pos: Some(new_chunk_pos),
+            rotation: None,
+        }),
+        entity_query,
+        store_query,
+    );
+}
+
 /// Collect all living chunk entities grouped by `(map_entity, chunk_pos)`.
 fn collect_chunk_entities(
     entity_query: &Query<(
