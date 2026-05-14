@@ -154,6 +154,22 @@ pub fn on_world_object_replicated(
     }
 }
 
+/// Keeps replicated world-object transforms aligned with physics position/rotation changes.
+pub fn on_world_object_transform_changed(
+    mut query: Query<
+        (&mut Transform, Option<&Position>, Option<&Rotation>),
+        (
+            With<WorldObjectId>,
+            With<Replicated>,
+            Or<(Changed<Position>, Changed<Rotation>)>,
+        ),
+    >,
+) {
+    for (mut transform, position, rotation) in &mut query {
+        *transform = transform_from_physics(position, rotation);
+    }
+}
+
 /// Clones the definition's reflected components for insertion.
 ///
 /// When `filter_collider_constructor` is true, `ColliderConstructor` is excluded

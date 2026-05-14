@@ -56,5 +56,6 @@ impl Plugin for WorldObjectPlugin {
         app.register_type::<super::types::OnDeathEffects>();
         app.register_type::<super::types::DeathEffect>();
         app.register_type::<super::types::ActiveTransformation>();
+        app.register_type::<super::types::WorldObjectRotationSnapshot>();
     }
 }

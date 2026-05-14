@@ -57,9 +57,9 @@ pub use vox_model::{VoxModelAsset, VoxModelPlugin, VoxModelRegistry};
 pub use world_object::{
     WorldObjectDefRegistry, WorldObjectDeleteAck, WorldObjectDeleteRequest, WorldObjectEditChannel,
     WorldObjectEditReject, WorldObjectEditRejectReason, WorldObjectId, WorldObjectMoveAck,
-    WorldObjectMoveRequest, WorldObjectPlacementAck,
-    WorldObjectPlacementChannel, WorldObjectPlacementReject, WorldObjectPlacementRejectReason,
-    WorldObjectPlacementRequest, WorldObjectPlugin,
+    WorldObjectMoveRequest, WorldObjectPlacementAck, WorldObjectPlacementChannel,
+    WorldObjectPlacementReject, WorldObjectPlacementRejectReason, WorldObjectPlacementRequest,
+    WorldObjectPlugin, WorldObjectRotateAck, WorldObjectRotateRequest, WorldObjectRotationSnapshot,
 };
 
 pub const PROTOCOL_ID: u64 = 0;
@@ -162,6 +162,12 @@ impl Plugin for ProtocolPlugin {
             .add_direction(NetworkDirection::ClientToServer)
             .add_map_entities();
         app.register_message::<WorldObjectMoveAck>()
+            .add_direction(NetworkDirection::ServerToClient)
+            .add_map_entities();
+        app.register_message::<WorldObjectRotateRequest>()
+            .add_direction(NetworkDirection::ClientToServer)
+            .add_map_entities();
+        app.register_message::<WorldObjectRotateAck>()
             .add_direction(NetworkDirection::ServerToClient)
             .add_map_entities();
         app.register_message::<WorldObjectEditReject>()

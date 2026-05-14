@@ -8,6 +8,7 @@ use render::CameraOrbitState;
 
 use crate::world_object::{
     init_default_vox_model_material, on_visual_kind_changed, on_world_object_replicated,
+    on_world_object_transform_changed,
 };
 
 pub struct ClientGameplayPlugin;
@@ -31,7 +32,12 @@ impl Plugin for ClientGameplayPlugin {
         );
         app.add_systems(
             Update,
-            (on_world_object_replicated, on_visual_kind_changed).run_if(ready),
+            (
+                on_world_object_replicated,
+                on_world_object_transform_changed,
+                on_visual_kind_changed,
+            )
+                .run_if(ready),
         );
 
         app.add_observer(on_respawn_timer_added);

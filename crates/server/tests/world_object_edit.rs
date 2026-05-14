@@ -1,11 +1,14 @@
 use std::sync::Arc;
 
-use avian3d::prelude::Position;
+use avian3d::prelude::{Position, Rotation};
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use persistence::{PendingStoreOps, Store, StoreBackend};
 use protocol::map::{ChunkEntityRef, MapInstanceId};
-use protocol::world_object::{WorldObjectEditRejectReason, WorldObjectId, WorldObjectMoveRequest};
+use protocol::world_object::{
+    WorldObjectEditRejectReason, WorldObjectId, WorldObjectMoveRequest, WorldObjectRotateRequest,
+    WorldObjectRotationSnapshot,
+};
 use voxel_map_engine::config::WorldObjectSpawn;
 use voxel_map_engine::persistence::fs_chunk_entities::FsChunkEntitiesStore;
 use voxel_map_engine::prelude::{
@@ -204,6 +207,7 @@ fn delete_save_writes_empty_chunk_file() {
                 &Position,
                 Option<&protocol::world_object::ActiveTransformation>,
                 Option<&protocol::Health>,
+                Option<&Rotation>,
             )>,
                   mut store_query: Query<(
                 &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
@@ -395,6 +399,7 @@ fn move_same_chunk_save_uses_new_final_position() {
                 &Position,
                 Option<&protocol::world_object::ActiveTransformation>,
                 Option<&protocol::Health>,
+                Option<&Rotation>,
             )>,
                   mut store_query: Query<(
                 &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
@@ -408,6 +413,7 @@ fn move_same_chunk_save_uses_new_final_position() {
                         entity: moved,
                         position: Some(final_position),
                         chunk_pos: Some(chunk_pos),
+                        rotation: None,
                     }),
                     &entity_query,
                     &mut store_query,
@@ -421,4 +427,198 @@ fn move_same_chunk_save_uses_new_final_position() {
     let loaded = store.load(&chunk_pos).unwrap().expect("move save exists");
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].position, final_position);
+}
+
+fn validate_rotate_in_world(
+    app: &mut App,
+    request: WorldObjectRotateRequest,
+    map_entity: Entity,
+    map_id: MapInstanceId,
+) -> Result<Quat, WorldObjectEditRejectReason> {
+    app.world_mut()
+        .run_system_once(
+            move |object_query: Query<(&WorldObjectId, &MapInstanceId, &ChunkEntityRef)>,
+                  map_query: Query<&VoxelMapInstance>| {
+                server::map::validate_world_object_rotation(
+                    &request,
+                    map_entity,
+                    &map_id,
+                    &object_query,
+                    &map_query,
+                )
+            },
+        )
+        .expect("rotation validation system should run")
+}
+
+#[test]
+fn rotate_validation_accepts_normalized_finite_rotation() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let chunk_pos = IVec3::ZERO;
+    let map_entity = app.world_mut().spawn(loaded_instance(chunk_pos)).id();
+    let target = app
+        .world_mut()
+        .spawn((
+            object_id(),
+            MapInstanceId::Overworld,
+            ChunkEntityRef {
+                map_entity,
+                chunk_pos,
+            },
+        ))
+        .id();
+    let rotation = Quat::from_xyzw(0.0, 2.0, 0.0, 0.0);
+
+    let result = validate_rotate_in_world(
+        &mut app,
+        WorldObjectRotateRequest {
+            sequence: 1,
+            target,
+            rotation,
+        },
+        map_entity,
+        MapInstanceId::Overworld,
+    )
+    .expect("rotation should be valid");
+
+    assert!((result.length_squared() - 1.0).abs() <= 0.0001);
+}
+
+#[test]
+fn rotate_validation_rejects_invalid_rotation_and_unavailable_chunk() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let loaded_chunk = IVec3::ZERO;
+    let unloaded_chunk = IVec3::new(1, 0, 0);
+    let map_entity = app.world_mut().spawn(loaded_instance(loaded_chunk)).id();
+    let target = app
+        .world_mut()
+        .spawn((
+            object_id(),
+            MapInstanceId::Overworld,
+            ChunkEntityRef {
+                map_entity,
+                chunk_pos: loaded_chunk,
+            },
+        ))
+        .id();
+    let unloaded_target = app
+        .world_mut()
+        .spawn((
+            object_id(),
+            MapInstanceId::Overworld,
+            ChunkEntityRef {
+                map_entity,
+                chunk_pos: unloaded_chunk,
+            },
+        ))
+        .id();
+
+    assert_eq!(
+        validate_rotate_in_world(
+            &mut app,
+            WorldObjectRotateRequest {
+                sequence: 1,
+                target,
+                rotation: Quat::from_xyzw(f32::NAN, 0.0, 0.0, 1.0),
+            },
+            map_entity,
+            MapInstanceId::Overworld,
+        )
+        .unwrap_err(),
+        WorldObjectEditRejectReason::InvalidRotation
+    );
+    assert_eq!(
+        validate_rotate_in_world(
+            &mut app,
+            WorldObjectRotateRequest {
+                sequence: 2,
+                target: unloaded_target,
+                rotation: Quat::IDENTITY,
+            },
+            map_entity,
+            MapInstanceId::Overworld,
+        )
+        .unwrap_err(),
+        WorldObjectEditRejectReason::ChunkUnavailable
+    );
+}
+
+#[test]
+fn rotate_persists_through_chunk_entity_save_restore_payload() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FsChunkEntitiesStore {
+        map_dir: Arc::new(dir.path().to_path_buf()),
+    };
+    let chunk_pos = IVec3::ZERO;
+    let rotation = Quat::from_rotation_y(1.25);
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let map_entity = app
+        .world_mut()
+        .spawn((
+            StoreBackend::new(store.clone()),
+            PendingStoreOps::<IVec3, Vec<WorldObjectSpawn>>::default(),
+        ))
+        .id();
+    let rotated = app
+        .world_mut()
+        .spawn((
+            ChunkEntityRef {
+                map_entity,
+                chunk_pos,
+            },
+            object_id(),
+            Position(Vec3::new(1.0, 2.0, 3.0).into()),
+        ))
+        .id();
+
+    app.world_mut()
+        .run_system_once(
+            move |entity_query: Query<(
+                Entity,
+                &ChunkEntityRef,
+                &WorldObjectId,
+                &Position,
+                Option<&protocol::world_object::ActiveTransformation>,
+                Option<&protocol::Health>,
+                Option<&Rotation>,
+            )>,
+                  mut store_query: Query<(
+                &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
+                &mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>,
+            )>| {
+                server::chunk_entities::save_chunk_entities_now_or_queue(
+                    map_entity,
+                    chunk_pos,
+                    None,
+                    Some(server::chunk_entities::ChunkEntitySaveOverride {
+                        entity: rotated,
+                        position: None,
+                        chunk_pos: None,
+                        rotation: Some(rotation),
+                    }),
+                    &entity_query,
+                    &mut store_query,
+                );
+                let (_, mut ops) = store_query.get_mut(map_entity).unwrap();
+                ops.flush();
+            },
+        )
+        .unwrap();
+
+    let loaded = store
+        .load(&chunk_pos)
+        .unwrap()
+        .expect("rotation save exists");
+    assert_eq!(loaded.len(), 1);
+    let rotation_type = std::any::type_name::<WorldObjectRotationSnapshot>();
+    let saved = loaded[0]
+        .persisted_components
+        .iter()
+        .find(|component| component.type_path == rotation_type)
+        .expect("rotation persisted component exists");
+    let snapshot: WorldObjectRotationSnapshot = ron::from_str(&saved.ron_data).unwrap();
+    assert!(snapshot.0.dot(rotation).abs() >= 1.0 - 0.0001);
 }

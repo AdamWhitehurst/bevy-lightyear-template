@@ -121,6 +121,41 @@ impl MapEntities for WorldObjectMoveAck {
     }
 }
 
+/// Client requests rotating an existing replicated world-object entity.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+#[type_path = "protocol::world_object"]
+pub struct WorldObjectRotateRequest {
+    pub sequence: u32,
+    pub target: Entity,
+    pub rotation: Quat,
+}
+
+impl MapEntities for WorldObjectRotateRequest {
+    fn map_entities<M: EntityMapper>(&mut self, entity_mapper: &mut M) {
+        self.target = entity_mapper.get_mapped(self.target);
+    }
+}
+
+/// Server acknowledges that a rotation was applied. The transform change arrives by replication.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+#[type_path = "protocol::world_object"]
+pub struct WorldObjectRotateAck {
+    pub sequence: u32,
+    pub target: Entity,
+    pub rotation: Quat,
+}
+
+impl MapEntities for WorldObjectRotateAck {
+    fn map_entities<M: EntityMapper>(&mut self, entity_mapper: &mut M) {
+        self.target = entity_mapper.get_mapped(self.target);
+    }
+}
+
+/// Persisted rotation snapshot for chunk entity saves.
+#[derive(Component, Reflect, Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[reflect(Component, Persist)]
+pub struct WorldObjectRotationSnapshot(pub Quat);
+
 /// Server rejects a world-object edit/delete request.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
 #[type_path = "protocol::world_object"]
@@ -141,6 +176,7 @@ pub enum WorldObjectEditRejectReason {
     ChunkUnavailable,
     NonFinitePosition,
     OutOfBounds,
+    InvalidRotation,
 }
 
 /// Broad classification of world objects.

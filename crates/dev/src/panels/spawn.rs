@@ -71,7 +71,10 @@ pub struct WorldObjectSelectionUi {
     pub next_sequence: u32,
     pub pending_deletes: Vec<PendingWorldObjectDelete>,
     pub pending_moves: Vec<PendingWorldObjectMove>,
+    pub pending_rotations: Vec<PendingWorldObjectRotation>,
     pub move_armed: bool,
+    pub rotation_degrees_y: f32,
+    pub rotate_requested: bool,
     pub last_reject: Option<WorldObjectEditRejectReason>,
 }
 
@@ -92,6 +95,15 @@ pub struct PendingWorldObjectMove {
     pub accepted: bool,
 }
 
+/// A pending authoritative world-object rotation request.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingWorldObjectRotation {
+    pub sequence: u32,
+    pub target: Entity,
+    pub rotation: Quat,
+    pub accepted: bool,
+}
+
 impl Default for WorldObjectSelectionUi {
     fn default() -> Self {
         Self {
@@ -100,7 +112,10 @@ impl Default for WorldObjectSelectionUi {
             next_sequence: 0,
             pending_deletes: Vec::new(),
             pending_moves: Vec::new(),
+            pending_rotations: Vec::new(),
             move_armed: false,
+            rotation_degrees_y: 0.0,
+            rotate_requested: false,
             last_reject: None,
         }
     }
@@ -262,9 +277,27 @@ fn draw_def_tab(
             "Pending delete requests: {}",
             ui_state.selection.pending_deletes.len()
         ));
+        ui.add(
+            egui::Slider::new(&mut ui_state.selection.rotation_degrees_y, -180.0..=180.0)
+                .text("Yaw"),
+        );
+        if ui
+            .add_enabled(
+                ui_state.selection.selected.is_some(),
+                egui::Button::new("Rotate selected"),
+            )
+            .clicked()
+        {
+            ui_state.selection.rotate_requested = true;
+            ui_state.selection.last_reject = None;
+        }
         ui.label(format!(
             "Pending move requests: {}",
             ui_state.selection.pending_moves.len()
+        ));
+        ui.label(format!(
+            "Pending rotation requests: {}",
+            ui_state.selection.pending_rotations.len()
         ));
         if let Some(reason) = &ui_state.selection.last_reject {
             ui.label(format!("Last edit rejected: {reason:?}"));

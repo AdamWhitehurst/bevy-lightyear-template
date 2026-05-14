@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
-use avian3d::prelude::Position;
+use avian3d::prelude::{Position, Rotation};
 use bevy::prelude::*;
 use persistence::{PendingStoreOps, StoreBackend};
 use protocol::map::{ChunkEntityRef, MapInstanceId};
 use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
 use protocol::world_object::{
     ActiveTransformation, PlacementOffset, WorldObjectDefRegistry, WorldObjectId,
+    WorldObjectRotationSnapshot,
 };
 use voxel_map_engine::config::{WorldObjectPositionKind, WorldObjectSpawn};
 use voxel_map_engine::persistence::fs_chunk_entities::FsChunkEntitiesStore;
@@ -32,6 +33,7 @@ pub type ChunkEntitySaveQuery<'w, 's> = Query<
         &'static Position,
         Option<&'static ActiveTransformation>,
         Option<&'static protocol::Health>,
+        Option<&'static Rotation>,
     ),
 >;
 
@@ -125,6 +127,7 @@ pub fn evict_chunk_entities(
         &Position,
         Option<&ActiveTransformation>,
         Option<&protocol::Health>,
+        Option<&Rotation>,
     )>,
     map_query: Query<&VoxelMapInstance>,
     mut store_query: Query<(
@@ -134,7 +137,7 @@ pub fn evict_chunk_entities(
 ) {
     let mut by_chunk: HashMap<(Entity, IVec3), Vec<(Entity, WorldObjectSpawn)>> = HashMap::new();
 
-    for (entity, chunk_ref, obj_id, pos, active_transform, health) in &entity_query {
+    for (entity, chunk_ref, obj_id, pos, active_transform, health, rotation) in &entity_query {
         let Ok(instance) = map_query.get(chunk_ref.map_entity) else {
             continue;
         };
@@ -143,7 +146,7 @@ pub fn evict_chunk_entities(
             continue;
         }
 
-        let persisted = serialize_persisted(active_transform, health);
+        let persisted = serialize_persisted(active_transform, health, rotation);
 
         by_chunk
             .entry((chunk_ref.map_entity, chunk_ref.chunk_pos))
@@ -178,6 +181,7 @@ pub struct ChunkEntitySaveOverride {
     pub entity: Entity,
     pub position: Option<Vec3>,
     pub chunk_pos: Option<IVec3>,
+    pub rotation: Option<Quat>,
 }
 
 /// Collects saved spawn data for one loaded chunk.
@@ -193,11 +197,12 @@ pub fn collect_chunk_entity_spawns(
         &Position,
         Option<&ActiveTransformation>,
         Option<&protocol::Health>,
+        Option<&Rotation>,
     )>,
 ) -> Vec<WorldObjectSpawn> {
     entity_query
         .iter()
-        .filter(|(entity, chunk_ref, _, _, _, _)| {
+        .filter(|(entity, chunk_ref, _, _, _, _, _)| {
             Some(*entity) != exclude_entity
                 && chunk_ref.map_entity == map_entity
                 && save_override
@@ -207,14 +212,23 @@ pub fn collect_chunk_entity_spawns(
                     == chunk_pos
         })
         .map(
-            |(entity, _, obj_id, pos, active_transform, health)| WorldObjectSpawn {
+            |(entity, _, obj_id, pos, active_transform, health, rotation)| WorldObjectSpawn {
                 object_id: obj_id.0.clone(),
                 position: save_override
                     .filter(|save_override| save_override.entity == entity)
                     .and_then(|save_override| save_override.position)
                     .unwrap_or(pos.0),
                 position_kind: WorldObjectPositionKind::Final,
-                persisted_components: serialize_persisted(active_transform, health),
+                persisted_components: serialize_persisted(
+                    active_transform,
+                    health,
+                    save_override
+                        .filter(|save_override| save_override.entity == entity)
+                        .and_then(|save_override| save_override.rotation)
+                        .map(Rotation)
+                        .as_ref()
+                        .or(rotation),
+                ),
             },
         )
         .collect()
@@ -233,6 +247,7 @@ pub fn save_chunk_entities_now_or_queue(
         &Position,
         Option<&ActiveTransformation>,
         Option<&protocol::Health>,
+        Option<&Rotation>,
     )>,
     store_query: &mut Query<(
         &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
@@ -264,10 +279,11 @@ fn collect_chunk_entities(
         &Position,
         Option<&ActiveTransformation>,
         Option<&protocol::Health>,
+        Option<&Rotation>,
     )>,
 ) -> HashMap<(Entity, IVec3), Vec<WorldObjectSpawn>> {
     let mut by_chunk: HashMap<(Entity, IVec3), Vec<WorldObjectSpawn>> = HashMap::new();
-    for (_, chunk_ref, _, _, _, _) in entity_query {
+    for (_, chunk_ref, _, _, _, _, _) in entity_query {
         by_chunk
             .entry((chunk_ref.map_entity, chunk_ref.chunk_pos))
             .or_insert_with(|| {
@@ -314,6 +330,7 @@ pub fn save_chunk_entities_periodic(
         &Position,
         Option<&ActiveTransformation>,
         Option<&protocol::Health>,
+        Option<&Rotation>,
     )>,
     mut store_query: Query<(
         &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
@@ -348,6 +365,7 @@ pub fn save_all_chunk_entities_on_exit(
         &Position,
         Option<&ActiveTransformation>,
         Option<&protocol::Health>,
+        Option<&Rotation>,
     )>,
     mut store_query: Query<(
         &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
@@ -369,6 +387,7 @@ pub fn save_all_chunk_entities_on_exit(
 fn serialize_persisted(
     active_transform: Option<&ActiveTransformation>,
     health: Option<&protocol::Health>,
+    rotation: Option<&Rotation>,
 ) -> Vec<PersistedComponent> {
     let mut result = Vec::new();
     if let Some(at) = active_transform {
@@ -383,6 +402,15 @@ fn serialize_persisted(
         if let Ok(ron_data) = ron::to_string(h) {
             result.push(PersistedComponent {
                 type_path: std::any::type_name::<protocol::Health>().to_string(),
+                ron_data,
+            });
+        }
+    }
+    if let Some(rotation) = rotation {
+        let snapshot = WorldObjectRotationSnapshot(rotation.0);
+        if let Ok(ron_data) = ron::to_string(&snapshot) {
+            result.push(PersistedComponent {
+                type_path: std::any::type_name::<WorldObjectRotationSnapshot>().to_string(),
                 ron_data,
             });
         }
@@ -408,9 +436,11 @@ fn restore_persisted(
 ) {
     let at_type = std::any::type_name::<ActiveTransformation>();
     let health_type = std::any::type_name::<protocol::Health>();
+    let rotation_type = std::any::type_name::<WorldObjectRotationSnapshot>();
 
     let mut active_transform: Option<ActiveTransformation> = None;
     let mut persisted_health: Option<protocol::Health> = None;
+    let mut persisted_rotation: Option<WorldObjectRotationSnapshot> = None;
 
     for pc in persisted {
         if pc.type_path == at_type {
@@ -422,6 +452,11 @@ fn restore_persisted(
             match ron::from_str::<protocol::Health>(&pc.ron_data) {
                 Ok(h) => persisted_health = Some(h),
                 Err(e) => warn!("Failed to deserialize Health: {e}"),
+            }
+        } else if pc.type_path == rotation_type {
+            match ron::from_str::<WorldObjectRotationSnapshot>(&pc.ron_data) {
+                Ok(rotation) => persisted_rotation = Some(rotation),
+                Err(e) => warn!("Failed to deserialize WorldObjectRotationSnapshot: {e}"),
             }
         }
     }
@@ -445,6 +480,10 @@ fn restore_persisted(
 
     if let Some(health) = persisted_health {
         commands.entity(entity).insert(health);
+    }
+
+    if let Some(rotation) = persisted_rotation {
+        commands.entity(entity).insert(Rotation(rotation.0));
     }
 }
 

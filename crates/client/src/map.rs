@@ -1,11 +1,12 @@
 #[cfg(feature = "spawn-panel")]
 use crate::world_object::{preview_visual_from_def, DefaultVoxModelMaterial};
 #[cfg(feature = "spawn-panel")]
-use avian3d::prelude::Position;
+use avian3d::prelude::{Position, Rotation};
 use bevy::{prelude::*, window::PrimaryWindow};
 #[cfg(feature = "spawn-panel")]
 use dev::panels::spawn::{
-    PendingWorldObjectDelete, PendingWorldObjectMove, PendingWorldObjectPlacement, SpawnPanelUi,
+    PendingWorldObjectDelete, PendingWorldObjectMove, PendingWorldObjectPlacement,
+    PendingWorldObjectRotation, SpawnPanelUi,
 };
 use leafwing_input_manager::prelude::*;
 #[cfg(feature = "spawn-panel")]
@@ -19,6 +20,7 @@ use protocol::world_object::{
     WorldObjectDeleteRequest, WorldObjectEditChannel, WorldObjectEditReject, WorldObjectId,
     WorldObjectMoveAck, WorldObjectMoveRequest, WorldObjectPlacementAck,
     WorldObjectPlacementChannel, WorldObjectPlacementReject, WorldObjectPlacementRequest,
+    WorldObjectRotateAck, WorldObjectRotateRequest,
 };
 use protocol::{
     CharacterMarker, ChunkDataSync, MapInstanceId, MapRegistry, PlayerActions, SectionBlocksUpdate,
@@ -145,6 +147,8 @@ impl Plugin for ClientMapPlugin {
                     #[cfg(feature = "spawn-panel")]
                     handle_world_object_move_ack,
                     #[cfg(feature = "spawn-panel")]
+                    handle_world_object_rotate_ack,
+                    #[cfg(feature = "spawn-panel")]
                     handle_world_object_edit_reject,
                 )
                     .run_if(in_state(ui::ClientState::InGame)),
@@ -159,6 +163,8 @@ impl Plugin for ClientMapPlugin {
                     handle_world_object_delete_input,
                     #[cfg(feature = "spawn-panel")]
                     handle_world_object_move_input,
+                    #[cfg(feature = "spawn-panel")]
+                    handle_world_object_rotate_input,
                     #[cfg(feature = "spawn-panel")]
                     handle_world_object_placement_input,
                     #[cfg(feature = "spawn-panel")]
@@ -683,6 +689,49 @@ fn handle_world_object_move_input(
 }
 
 #[cfg(feature = "spawn-panel")]
+fn handle_world_object_rotate_input(
+    mut ui_state: ResMut<SpawnPanelUi>,
+    target_query: Query<(), (With<WorldObjectId>, With<Replicated>)>,
+    mut message_sender: Query<&mut MessageSender<WorldObjectRotateRequest>>,
+) {
+    if !ui_state.selection.rotate_requested {
+        trace!("handle_world_object_rotate_input: rotate was not requested");
+        return;
+    }
+    ui_state.selection.rotate_requested = false;
+    let Some(target) = ui_state.selection.selected else {
+        trace!("handle_world_object_rotate_input: no selected world object");
+        return;
+    };
+    if target_query.get(target).is_err() {
+        trace!("handle_world_object_rotate_input: selected object no longer exists");
+        return;
+    }
+    let rotation = Quat::from_rotation_y(ui_state.selection.rotation_degrees_y.to_radians());
+    let sequence = ui_state.selection.next_sequence();
+    let request = WorldObjectRotateRequest {
+        sequence,
+        target,
+        rotation,
+    };
+    let mut sent = false;
+    for mut sender in &mut message_sender {
+        sender.send::<WorldObjectEditChannel>(request.clone());
+        sent = true;
+    }
+    if !sent {
+        trace!("handle_world_object_rotate_input: no WorldObjectRotateRequest sender");
+        return;
+    }
+    ui_state.selection.pending_rotations.push(PendingWorldObjectRotation {
+        sequence,
+        target,
+        rotation,
+        accepted: false,
+    });
+}
+
+#[cfg(feature = "spawn-panel")]
 fn handle_world_object_placement_input(
     mut ui_state: ResMut<SpawnPanelUi>,
     action_query: Query<&ActionState<PlayerActions>, With<Controlled>>,
@@ -900,7 +949,7 @@ fn update_world_object_edit_preview(
     mut voxel_world: VoxelWorld,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
-    target_query: Query<(Entity, &WorldObjectId), With<Replicated>>,
+    target_query: Query<(Entity, &WorldObjectId, Option<&Position>, Option<&Rotation>), With<Replicated>>,
     mut preview_query: Query<(Entity, &mut Transform, &WorldObjectEditPreview)>,
 ) {
     for (entity, _, preview) in &mut preview_query {
@@ -911,6 +960,11 @@ fn update_world_object_edit_preview(
                 .pending_moves
                 .iter()
                 .any(|pending| pending.sequence == sequence)
+                || ui_state
+                    .selection
+                    .pending_rotations
+                    .iter()
+                    .any(|pending| pending.sequence == sequence)
         });
         let hover = preview.sequence.is_none() && ui_state.selection.move_armed;
         if !target_exists || (!still_pending && !hover) {
@@ -927,7 +981,7 @@ fn update_world_object_edit_preview(
         trace!("update_world_object_edit_preview: no selected world object");
         return;
     };
-    let Ok((_, object_id)) = target_query.get(target) else {
+    let Ok((_, object_id, current_position, current_rotation)) = target_query.get(target) else {
         trace!("update_world_object_edit_preview: selected object is missing or not replicated");
         return;
     };
@@ -949,7 +1003,15 @@ fn update_world_object_edit_preview(
                 None,
                 target,
                 object_id.clone(),
-                Transform::from_translation(final_position),
+                Transform {
+                    translation: final_position,
+                    rotation: current_or_pending_world_object_rotation(
+                        target,
+                        current_rotation,
+                        &ui_state,
+                    ),
+                    ..default()
+                },
                 def,
                 &vox_registry,
                 &vox_assets,
@@ -967,7 +1029,15 @@ fn update_world_object_edit_preview(
             Some(pending.sequence),
             pending.target,
             object_id.clone(),
-            Transform::from_translation(pending.final_position),
+            Transform {
+                translation: pending.final_position,
+                rotation: current_or_pending_world_object_rotation(
+                    pending.target,
+                    current_rotation,
+                    &ui_state,
+                ),
+                ..default()
+            },
             def,
             &vox_registry,
             &vox_assets,
@@ -975,6 +1045,46 @@ fn update_world_object_edit_preview(
             &mut preview_query,
         );
     }
+
+    if let Some(current_position) = current_position {
+        for pending in &ui_state.selection.pending_rotations {
+            upsert_world_object_edit_preview(
+                &mut commands,
+                Some(pending.sequence),
+                pending.target,
+                object_id.clone(),
+                Transform {
+                    translation: current_position.0,
+                    rotation: pending.rotation,
+                    ..default()
+                },
+                def,
+                &vox_registry,
+                &vox_assets,
+                &default_material,
+                &mut preview_query,
+            );
+        }
+    } else {
+        trace!("update_world_object_edit_preview: selected object has no Position for rotation preview");
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+fn current_or_pending_world_object_rotation(
+    target: Entity,
+    current_rotation: Option<&Rotation>,
+    ui_state: &SpawnPanelUi,
+) -> Quat {
+    ui_state
+        .selection
+        .pending_rotations
+        .iter()
+        .rev()
+        .find(|pending| pending.target == target)
+        .map(|pending| pending.rotation)
+        .or_else(|| current_rotation.map(|rotation| rotation.0))
+        .unwrap_or(Quat::IDENTITY)
 }
 
 #[cfg(feature = "spawn-panel")]
@@ -1014,22 +1124,43 @@ fn upsert_world_object_edit_preview(
 }
 
 #[cfg(feature = "spawn-panel")]
-/// Removes accepted local edit previews once replicated position matches the accepted move.
+/// Removes accepted local edit previews once replicated position or rotation matches the accepted edit.
 pub fn reconcile_edit_preview_on_transform_replication(
     mut commands: Commands,
     mut ui_state: ResMut<SpawnPanelUi>,
-    target_query: Query<(Entity, &Position), (With<WorldObjectId>, Changed<Position>)>,
+    target_query: Query<
+        (Entity, Option<&Position>, Option<&Rotation>),
+        (With<WorldObjectId>, Or<(Changed<Position>, Changed<Rotation>)>),
+    >,
     preview_query: Query<(Entity, &WorldObjectEditPreview, &Transform)>,
 ) {
-    for (target, position) in &target_query {
+    for (target, position, rotation) in &target_query {
         for (preview_entity, preview, preview_transform) in &preview_query {
             let Some(sequence) = preview.sequence else {
                 trace!("reconcile_edit_preview_on_transform_replication: skipping hover preview");
                 continue;
             };
-            if preview.target != target
-                || !positions_match(preview_transform.translation, position.0)
-            {
+            if preview.target != target {
+                trace!("reconcile_edit_preview_on_transform_replication: preview target does not match changed target");
+                continue;
+            }
+            let move_matches = position.is_some_and(|position| {
+                positions_match(preview_transform.translation, position.0)
+                    && ui_state
+                        .selection
+                        .pending_moves
+                        .iter()
+                        .any(|pending| pending.sequence == sequence)
+            });
+            let rotation_matches = rotation.is_some_and(|rotation| {
+                rotations_match(preview_transform.rotation, rotation.0)
+                    && ui_state
+                        .selection
+                        .pending_rotations
+                        .iter()
+                        .any(|pending| pending.sequence == sequence)
+            });
+            if !move_matches && !rotation_matches {
                 trace!("reconcile_edit_preview_on_transform_replication: preview does not match changed target");
                 continue;
             }
@@ -1037,6 +1168,10 @@ pub fn reconcile_edit_preview_on_transform_replication(
             ui_state
                 .selection
                 .pending_moves
+                .retain(|pending| pending.sequence != sequence);
+            ui_state
+                .selection
+                .pending_rotations
                 .retain(|pending| pending.sequence != sequence);
         }
     }
@@ -1078,6 +1213,12 @@ pub fn reconcile_placement_preview_on_replication(
 /// Returns true when two world positions are close enough for preview reconciliation.
 pub fn positions_match(a: Vec3, b: Vec3) -> bool {
     a.distance_squared(b) <= 0.01 * 0.01
+}
+
+#[cfg(feature = "spawn-panel")]
+/// Returns true when two rotations are close enough for preview reconciliation.
+pub fn rotations_match(a: Quat, b: Quat) -> bool {
+    a.dot(b).abs() >= 1.0 - 0.0001
 }
 
 fn camera_ray(
@@ -1197,6 +1338,32 @@ fn handle_world_object_move_ack(
 }
 
 #[cfg(feature = "spawn-panel")]
+fn handle_world_object_rotate_ack(
+    mut receivers: Query<&mut MessageReceiver<WorldObjectRotateAck>>,
+    mut ui_state: ResMut<SpawnPanelUi>,
+) {
+    for mut receiver in &mut receivers {
+        for ack in receiver.receive() {
+            if let Some(pending) = ui_state
+                .selection
+                .pending_rotations
+                .iter_mut()
+                .find(|pending| pending.sequence == ack.sequence)
+            {
+                pending.accepted = true;
+                pending.rotation = ack.rotation;
+                ui_state.selection.last_reject = None;
+            } else {
+                trace!(
+                    "handle_world_object_rotate_ack: ack seq={} had no pending rotation",
+                    ack.sequence
+                );
+            }
+        }
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
 fn handle_world_object_edit_reject(
     mut receivers: Query<&mut MessageReceiver<WorldObjectEditReject>>,
     mut ui_state: ResMut<SpawnPanelUi>,
@@ -1210,6 +1377,10 @@ fn handle_world_object_edit_reject(
             ui_state
                 .selection
                 .pending_moves
+                .retain(|pending| pending.sequence != reject.sequence);
+            ui_state
+                .selection
+                .pending_rotations
                 .retain(|pending| pending.sequence != reject.sequence);
             ui_state.selection.last_reject = Some(reject.reason);
         }

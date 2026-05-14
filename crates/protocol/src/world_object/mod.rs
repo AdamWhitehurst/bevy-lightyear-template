@@ -15,7 +15,7 @@ pub use types::{
     ReflectPersist, ReflectSpawnOnly, VisualKind, WorldObjectDef, WorldObjectDeleteAck,
     WorldObjectDeleteRequest, WorldObjectEditChannel, WorldObjectEditReject,
     WorldObjectEditRejectReason, WorldObjectId, WorldObjectLoadError, WorldObjectMoveAck,
-    WorldObjectMoveRequest, WorldObjectPlacementAck,
-    WorldObjectPlacementChannel, WorldObjectPlacementReject, WorldObjectPlacementRejectReason,
-    WorldObjectPlacementRequest,
+    WorldObjectMoveRequest, WorldObjectPlacementAck, WorldObjectPlacementChannel,
+    WorldObjectPlacementReject, WorldObjectPlacementRejectReason, WorldObjectPlacementRequest,
+    WorldObjectRotateAck, WorldObjectRotateRequest, WorldObjectRotationSnapshot,
 };

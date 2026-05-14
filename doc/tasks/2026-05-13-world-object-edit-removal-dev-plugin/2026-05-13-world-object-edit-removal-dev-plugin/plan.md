@@ -1377,19 +1377,19 @@ fn rotation_persists_through_chunk_entity_save_restore_payload() { /* save/load 
 
 #### Automated
 
-- [ ] Confirm no cargo build/check/test is running:
+- [x] Confirm no cargo build/check/test is running:
       `pgrep -af 'cargo (build|check|test|make|server|client)|rustc|rustdoc' || true`
-- [ ] `cargo test -p server --test world_object_edit rotate` passes
-- [ ] Confirm no cargo build/check/test is running again
-- [ ] `cargo test -p voxel_map_engine chunk_entities` passes
+- [x] `cargo test -p server --test world_object_edit rotate` passes
+- [x] Confirm no cargo build/check/test is running again
+- [x] `cargo test -p voxel_map_engine chunk_entities` passes
 
 #### Manual
 
-- [ ] Run server/client, select a replicated world object in the F6 panel.
-- [ ] Rotate the object using the yaw control.
-- [ ] Confirm orientation changes by server replication.
-- [ ] Unload/reload the chunk.
-- [ ] Confirm replicated orientation persists after reload.
+- [x] Run server/client, select a replicated world object in the F6 panel.
+- [x] Rotate the object using the yaw control.
+- [x] Confirm orientation changes by server replication.
+- [x] Unload/reload the chunk.
+- [x] Confirm replicated orientation persists after reload.
 
 ---
 
@@ -1801,7 +1801,7 @@ remains client-local.
       deleted generated objects do not return.
 - [ ] After Phase 2: same-chunk moves use local previews, server mutation, ack/reject cleanup, replication
       reconciliation, and persistence.
-- [ ] After Phase 3: rotations replicate and survive chunk unload/reload through persisted components.
+- [x] After Phase 3: rotations replicate and survive chunk unload/reload through persisted components.
 - [ ] After Phase 4: cross-chunk moves save both source and destination chunks and reject unavailable destinations.
 - [ ] After Phase 5: both selection modes work in the dev panel, stale previews are cleaned up, full cargo checks/tests
       pass, and runtime QA covers the complete edit workflow.

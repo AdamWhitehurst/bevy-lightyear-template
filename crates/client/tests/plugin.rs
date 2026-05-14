@@ -298,6 +298,63 @@ fn edit_preview_entities_are_visual_only() {
 
 #[cfg(feature = "spawn-panel")]
 #[test]
+fn edit_preview_reconciles_when_replicated_rotation_matches_accepted_rotate() {
+    use avian3d::prelude::Rotation;
+    use ::client::map::{reconcile_edit_preview_on_transform_replication, WorldObjectEditPreview};
+    use dev::panels::spawn::{PendingWorldObjectRotation, SpawnPanelUi};
+    use protocol::world_object::WorldObjectId;
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.init_resource::<SpawnPanelUi>();
+    let object_id = WorldObjectId("test:rotated".to_string());
+    let rotation = Quat::from_rotation_y(1.0);
+    let receiver = app.world_mut().spawn_empty().id();
+    let target = app
+        .world_mut()
+        .spawn((object_id.clone(), Rotation(rotation), Replicated { receiver }))
+        .id();
+    app.world_mut()
+        .resource_mut::<SpawnPanelUi>()
+        .selection
+        .pending_rotations
+        .push(PendingWorldObjectRotation {
+            sequence: 10,
+            target,
+            rotation,
+            accepted: true,
+        });
+    let preview = app
+        .world_mut()
+        .spawn((
+            WorldObjectEditPreview {
+                sequence: Some(10),
+                target,
+                object_id,
+            },
+            Transform {
+                rotation,
+                ..default()
+            },
+        ))
+        .id();
+
+    app.world_mut()
+        .run_system_once(reconcile_edit_preview_on_transform_replication)
+        .expect("edit reconciliation system should run");
+    app.update();
+
+    assert!(app.world().get_entity(preview).is_err());
+    assert!(app
+        .world()
+        .resource::<SpawnPanelUi>()
+        .selection
+        .pending_rotations
+        .is_empty());
+}
+
+#[cfg(feature = "spawn-panel")]
+#[test]
 fn edit_preview_reconciles_when_replicated_transform_matches_accepted_move() {
     use avian3d::prelude::Position;
     use ::client::map::{reconcile_edit_preview_on_transform_replication, WorldObjectEditPreview};

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use avian3d::prelude::Position;
+use avian3d::prelude::{Position, Rotation};
 use bevy::app::AppExit;
 use bevy::prelude::*;
 use lightyear::prelude::{
@@ -36,7 +36,8 @@ use protocol::world_object::{
     WorldObjectDeleteAck, WorldObjectDeleteRequest, WorldObjectEditChannel, WorldObjectEditReject,
     WorldObjectEditRejectReason, WorldObjectId, WorldObjectMoveAck, WorldObjectMoveRequest,
     WorldObjectPlacementAck, WorldObjectPlacementChannel, WorldObjectPlacementReject,
-    WorldObjectPlacementRejectReason, WorldObjectPlacementRequest,
+    WorldObjectPlacementRejectReason, WorldObjectPlacementRequest, WorldObjectRotateAck,
+    WorldObjectRotateRequest,
 };
 use protocol::{AppState, RespawnPoint, TerrainDefRegistry};
 use voxel_map_engine::config::WorldObjectSpawn;
@@ -650,6 +651,7 @@ impl Plugin for ServerMapPlugin {
                     ),
                     handle_world_object_delete_requests,
                     handle_world_object_move_requests,
+                    handle_world_object_rotate_requests,
                     push_chunks_to_clients,
                     save_dirty_chunks_debounced,
                     handle_map_switch_requests.run_if(resource_exists::<TerrainDefRegistry>),
@@ -930,6 +932,7 @@ pub fn handle_world_object_delete_requests(
         &Position,
         Option<&ActiveTransformation>,
         Option<&protocol::Health>,
+        Option<&Rotation>,
     )>,
     mut store_query: Query<(
         &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
@@ -1070,6 +1073,7 @@ pub fn handle_world_object_move_requests(
         &Position,
         Option<&ActiveTransformation>,
         Option<&protocol::Health>,
+        Option<&Rotation>,
     )>,
     mut store_query: Query<(
         &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
@@ -1107,6 +1111,7 @@ pub fn handle_world_object_move_requests(
                             entity: request.target,
                             position: Some(validated.final_position),
                             chunk_pos: Some(validated.new_chunk_pos),
+                            rotation: None,
                         }),
                         &entity_save_query,
                         &mut store_query,
@@ -1117,6 +1122,120 @@ pub fn handle_world_object_move_requests(
                             sequence: request.sequence,
                             target: request.target,
                             final_position: validated.final_position,
+                        },
+                        &mut ack_senders,
+                    );
+                }
+                Err(reason) => {
+                    send_world_object_edit_reject(
+                        client_entity,
+                        request.sequence,
+                        reason,
+                        &mut reject_senders,
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Validates a world-object rotation against player map and loaded chunk state.
+pub fn validate_world_object_rotation(
+    request: &WorldObjectRotateRequest,
+    player_map_entity: Entity,
+    player_map_id: &MapInstanceId,
+    object_query: &Query<(&WorldObjectId, &MapInstanceId, &ChunkEntityRef)>,
+    map_query: &Query<&VoxelMapInstance>,
+) -> Result<Quat, WorldObjectEditRejectReason> {
+    if !request.rotation.is_finite() || request.rotation.length_squared() <= f32::EPSILON {
+        return Err(WorldObjectEditRejectReason::InvalidRotation);
+    }
+    let Ok((_id, object_map_id, chunk_ref)) = object_query.get(request.target) else {
+        return Err(WorldObjectEditRejectReason::MissingTarget);
+    };
+    if object_map_id != player_map_id || chunk_ref.map_entity != player_map_entity {
+        return Err(WorldObjectEditRejectReason::ForeignMap);
+    }
+    let instance = map_query
+        .get(player_map_entity)
+        .expect("resolved map entity must have VoxelMapInstance");
+    let column = voxel_map_engine::prelude::chunk_to_column(chunk_ref.chunk_pos);
+    if !instance.chunk_levels.contains_key(&column)
+        || instance.get_chunk_data(chunk_ref.chunk_pos).is_none()
+    {
+        return Err(WorldObjectEditRejectReason::ChunkUnavailable);
+    }
+    Ok(request.rotation.normalize())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn handle_world_object_rotate_requests(
+    mut receivers: Query<(Entity, &mut MessageReceiver<WorldObjectRotateRequest>)>,
+    mut ack_senders: Query<&mut MessageSender<WorldObjectRotateAck>>,
+    mut reject_senders: Query<&mut MessageSender<WorldObjectEditReject>>,
+    controlled_query: Query<(&ControlledBy, &MapInstanceId), With<CharacterMarker>>,
+    map_registry: Res<MapRegistry>,
+    map_query: Query<&VoxelMapInstance>,
+    object_query: Query<(&WorldObjectId, &MapInstanceId, &ChunkEntityRef)>,
+    entity_save_query: Query<(
+        Entity,
+        &ChunkEntityRef,
+        &WorldObjectId,
+        &Position,
+        Option<&ActiveTransformation>,
+        Option<&protocol::Health>,
+        Option<&Rotation>,
+    )>,
+    mut store_query: Query<(
+        &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
+        &mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>,
+    )>,
+    mut commands: Commands,
+) {
+    for (client_entity, mut receiver) in &mut receivers {
+        for request in receiver.receive() {
+            let Some((map_entity, map_id)) =
+                resolve_player_map(client_entity, &controlled_query, &map_registry)
+            else {
+                send_world_object_edit_reject(
+                    client_entity,
+                    request.sequence,
+                    WorldObjectEditRejectReason::NoControlledCharacter,
+                    &mut reject_senders,
+                );
+                continue;
+            };
+            match validate_world_object_rotation(
+                &request,
+                map_entity,
+                &map_id,
+                &object_query,
+                &map_query,
+            ) {
+                Ok(rotation) => {
+                    let (_, _, chunk_ref) = object_query
+                        .get(request.target)
+                        .expect("validated rotate target must remain queryable");
+                    commands.entity(request.target).insert(Rotation(rotation));
+                    crate::chunk_entities::save_chunk_entities_now_or_queue(
+                        map_entity,
+                        chunk_ref.chunk_pos,
+                        None,
+                        Some(crate::chunk_entities::ChunkEntitySaveOverride {
+                            entity: request.target,
+                            position: None,
+                            chunk_pos: None,
+                            rotation: Some(rotation),
+                        }),
+                        &entity_save_query,
+                        &mut store_query,
+                    );
+                    send_world_object_rotate_ack(
+                        client_entity,
+                        WorldObjectRotateAck {
+                            sequence: request.sequence,
+                            target: request.target,
+                            rotation,
                         },
                         &mut ack_senders,
                     );
@@ -1209,6 +1328,19 @@ fn send_world_object_move_ack(
 ) {
     let Ok(mut sender) = ack_senders.get_mut(client_entity) else {
         trace!("send_world_object_move_ack: no ack sender for {client_entity:?}");
+        return;
+    };
+    sender.send::<WorldObjectEditChannel>(ack);
+}
+
+/// Sends a world-object rotation acknowledgment to a client if its acknowledgment sender exists.
+fn send_world_object_rotate_ack(
+    client_entity: Entity,
+    ack: WorldObjectRotateAck,
+    ack_senders: &mut Query<&mut MessageSender<WorldObjectRotateAck>>,
+) {
+    let Ok(mut sender) = ack_senders.get_mut(client_entity) else {
+        trace!("send_world_object_rotate_ack: no ack sender for {client_entity:?}");
         return;
     };
     sender.send::<WorldObjectEditChannel>(ack);

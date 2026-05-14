@@ -63,7 +63,7 @@ pub fn entity_file_path(map_dir: &Path, chunk_pos: IVec3) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::WorldObjectPositionKind;
+    use crate::config::{PersistedComponent, WorldObjectPositionKind};
     use crate::types::{ChunkStatus, WorldVoxel};
     use persistence::Store;
     use std::sync::Arc;
@@ -280,5 +280,30 @@ mod tests {
         store.save(&IVec3::ZERO, &Vec::new()).unwrap();
         let loaded = store.load(&IVec3::ZERO).unwrap();
         assert!(matches!(loaded, Some(spawns) if spawns.is_empty()));
+    }
+
+    #[test]
+    fn chunk_entities_preserve_rotation_persisted_component() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = test_entity_store(dir.path());
+        let pos = IVec3::new(2, 0, -1);
+        let rotation_component = PersistedComponent {
+            type_path: "protocol::world_object::types::WorldObjectRotationSnapshot".to_string(),
+            ron_data: "(x:0.0,y:0.5,z:0.0,w:0.8660254)".to_string(),
+        };
+        let spawns = vec![WorldObjectSpawn {
+            object_id: "tree_oak".to_string(),
+            position: Vec3::new(1.0, 2.0, 3.0),
+            position_kind: WorldObjectPositionKind::Final,
+            persisted_components: vec![rotation_component.clone()],
+        }];
+
+        store.save(&pos, &spawns).unwrap();
+        let loaded = store.load(&pos).unwrap().expect("entities should exist");
+
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].persisted_components.len(), 1);
+        assert_eq!(loaded[0].persisted_components[0].type_path, rotation_component.type_path);
+        assert_eq!(loaded[0].persisted_components[0].ron_data, rotation_component.ron_data);
     }
 }
