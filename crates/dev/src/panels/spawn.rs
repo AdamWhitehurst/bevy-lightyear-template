@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
 use protocol::map::MapInstanceId;
 use protocol::world_object::{
-    apply_object_components, WorldObjectDefRegistry, WorldObjectId,
+    apply_object_components, WorldObjectDefRegistry, WorldObjectEditRejectReason, WorldObjectId,
     WorldObjectPlacementRejectReason,
 };
 
@@ -33,6 +33,7 @@ pub struct SpawnPanelUi {
     tab: SpawnTab,
     pub selected_object: Option<WorldObjectId>,
     pub placement: WorldObjectPlacementUi,
+    pub selection: WorldObjectSelectionUi,
     selected_freeform: Vec<String>,
 }
 
@@ -56,6 +57,44 @@ pub struct PendingWorldObjectPlacement {
 
 impl WorldObjectPlacementUi {
     /// Returns the next placement sequence number and increments it.
+    pub fn next_sequence(&mut self) -> u32 {
+        let sequence = self.next_sequence;
+        self.next_sequence += 1;
+        sequence
+    }
+}
+
+/// Client-owned world-object selection and edit request state shown by the spawn panel.
+pub struct WorldObjectSelectionUi {
+    pub selected: Option<Entity>,
+    pub nearby_radius: f32,
+    pub next_sequence: u32,
+    pub pending_deletes: Vec<PendingWorldObjectDelete>,
+    pub last_reject: Option<WorldObjectEditRejectReason>,
+}
+
+/// A pending authoritative world-object delete request.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingWorldObjectDelete {
+    pub sequence: u32,
+    pub target: Entity,
+    pub accepted: bool,
+}
+
+impl Default for WorldObjectSelectionUi {
+    fn default() -> Self {
+        Self {
+            selected: None,
+            nearby_radius: 12.0,
+            next_sequence: 0,
+            pending_deletes: Vec::new(),
+            last_reject: None,
+        }
+    }
+}
+
+impl WorldObjectSelectionUi {
+    /// Returns the next edit sequence number and increments it.
     pub fn next_sequence(&mut self) -> u32 {
         let sequence = self.next_sequence;
         self.next_sequence += 1;
@@ -175,6 +214,25 @@ fn draw_def_tab(
         ));
         if let Some(reason) = &ui_state.placement.last_reject {
             ui.label(format!("Last placement rejected: {reason:?}"));
+        }
+
+        ui.separator();
+        ui.label("Existing World Object");
+        ui.label(match ui_state.selection.selected {
+            Some(entity) => format!("Selected: {entity:?}"),
+            None => "Selected: (none)".to_string(),
+        });
+        ui.add(
+            egui::Slider::new(&mut ui_state.selection.nearby_radius, 1.0..=64.0)
+                .text("Nearby radius"),
+        );
+        ui.label("Press Delete to delete selected.");
+        ui.label(format!(
+            "Pending delete requests: {}",
+            ui_state.selection.pending_deletes.len()
+        ));
+        if let Some(reason) = &ui_state.selection.last_reject {
+            ui.label(format!("Last edit rejected: {reason:?}"));
         }
     } else {
         ui.label("(WorldObjectDefRegistry not yet loaded)");

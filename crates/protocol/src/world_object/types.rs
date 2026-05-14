@@ -1,3 +1,4 @@
+use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
 use bevy::reflect::PartialReflect;
 use serde::{Deserialize, Serialize};
@@ -5,6 +6,9 @@ use std::fmt;
 
 /// Ordered reliable channel for authoritative world-object placement requests and responses.
 pub struct WorldObjectPlacementChannel;
+
+/// Ordered reliable channel for authoritative world-object edit and delete requests.
+pub struct WorldObjectEditChannel;
 
 /// Unique identifier for a world object definition. Derived from the `.object.ron` filename.
 ///
@@ -56,6 +60,54 @@ pub enum WorldObjectPlacementRejectReason {
     UnknownObject,
     NonFinitePosition,
     OutOfBounds,
+    ChunkUnavailable,
+}
+
+/// Client requests deletion of an existing replicated world-object entity.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+#[type_path = "protocol::world_object"]
+pub struct WorldObjectDeleteRequest {
+    pub sequence: u32,
+    pub target: Entity,
+}
+
+impl MapEntities for WorldObjectDeleteRequest {
+    fn map_entities<M: EntityMapper>(&mut self, entity_mapper: &mut M) {
+        self.target = entity_mapper.get_mapped(self.target);
+    }
+}
+
+/// Server acknowledges that deletion was applied. The despawn arrives by replication.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+#[type_path = "protocol::world_object"]
+pub struct WorldObjectDeleteAck {
+    pub sequence: u32,
+    pub target: Entity,
+}
+
+impl MapEntities for WorldObjectDeleteAck {
+    fn map_entities<M: EntityMapper>(&mut self, entity_mapper: &mut M) {
+        self.target = entity_mapper.get_mapped(self.target);
+    }
+}
+
+/// Server rejects a world-object edit/delete request.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+#[type_path = "protocol::world_object"]
+pub struct WorldObjectEditReject {
+    pub sequence: u32,
+    pub reason: WorldObjectEditRejectReason,
+}
+
+/// Explicit reasons that a world-object edit/delete request can be rejected.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+#[type_path = "protocol::world_object"]
+pub enum WorldObjectEditRejectReason {
+    NoControlledCharacter,
+    TargetNotMapped,
+    MissingTarget,
+    NotWorldObject,
+    ForeignMap,
     ChunkUnavailable,
 }
 

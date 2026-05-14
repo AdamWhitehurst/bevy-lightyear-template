@@ -1,10 +1,10 @@
 #[cfg(feature = "spawn-panel")]
-use crate::world_object::{DefaultVoxModelMaterial, preview_visual_from_def};
+use crate::world_object::{preview_visual_from_def, DefaultVoxModelMaterial};
 #[cfg(feature = "spawn-panel")]
 use avian3d::prelude::Position;
 use bevy::{prelude::*, window::PrimaryWindow};
 #[cfg(feature = "spawn-panel")]
-use dev::panels::spawn::{PendingWorldObjectPlacement, SpawnPanelUi};
+use dev::panels::spawn::{PendingWorldObjectDelete, PendingWorldObjectPlacement, SpawnPanelUi};
 use leafwing_input_manager::prelude::*;
 #[cfg(feature = "spawn-panel")]
 use lightyear::prelude::Replicated;
@@ -13,7 +13,8 @@ use lightyear::prelude::{Controlled, MessageReceiver, MessageSender, Predicted};
 use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
 #[cfg(feature = "spawn-panel")]
 use protocol::world_object::{
-    PlacementOffset, WorldObjectDef, WorldObjectDefRegistry, WorldObjectId,
+    PlacementOffset, WorldObjectDef, WorldObjectDefRegistry, WorldObjectDeleteAck,
+    WorldObjectDeleteRequest, WorldObjectEditChannel, WorldObjectEditReject, WorldObjectId,
     WorldObjectPlacementAck, WorldObjectPlacementChannel, WorldObjectPlacementReject,
     WorldObjectPlacementRequest,
 };
@@ -23,8 +24,8 @@ use protocol::{
     VoxelEditRequest, VoxelType,
 };
 use voxel_map_engine::prelude::{
-    ChunkData, ChunkStatus, ChunkTicket, MapDimensions, VoxelMapInstance, VoxelPlugin, VoxelWorld,
-    WorldVoxel, chunk_to_column, column_to_chunks,
+    chunk_to_column, column_to_chunks, ChunkData, ChunkStatus, ChunkTicket, MapDimensions,
+    VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
 };
 
 const RAYCAST_MAX_DISTANCE: f32 = 100.0;
@@ -128,6 +129,10 @@ impl Plugin for ClientMapPlugin {
                     handle_world_object_placement_ack,
                     #[cfg(feature = "spawn-panel")]
                     handle_world_object_placement_reject,
+                    #[cfg(feature = "spawn-panel")]
+                    handle_world_object_delete_ack,
+                    #[cfg(feature = "spawn-panel")]
+                    handle_world_object_edit_reject,
                 )
                     .run_if(in_state(ui::ClientState::InGame)),
             )
@@ -135,6 +140,10 @@ impl Plugin for ClientMapPlugin {
                 PostUpdate,
                 (
                     handle_voxel_input,
+                    #[cfg(feature = "spawn-panel")]
+                    update_world_object_nearby_selection,
+                    #[cfg(feature = "spawn-panel")]
+                    handle_world_object_delete_input,
                     #[cfg(feature = "spawn-panel")]
                     handle_world_object_placement_input,
                     #[cfg(feature = "spawn-panel")]
@@ -265,7 +274,8 @@ fn handle_voxel_broadcasts(
 
             trace!(
                 "handle_voxel_broadcasts: applying broadcast at {:?} voxel={:?}",
-                broadcast.position, broadcast.voxel
+                broadcast.position,
+                broadcast.voxel
             );
             voxel_world.set_voxel(
                 chunk_ticket.map_entity,
@@ -316,8 +326,11 @@ fn handle_voxel_input(
     #[cfg(feature = "spawn-panel")] placement_ui: Option<Res<SpawnPanelUi>>,
 ) {
     #[cfg(feature = "spawn-panel")]
-    if placement_ui.as_ref().is_some_and(|ui| ui.placement.armed) {
-        trace!("handle_voxel_input: world object placement armed; skipping voxel input");
+    if placement_ui
+        .as_ref()
+        .is_some_and(|ui| ui.placement.armed || ui.selection.selected.is_some())
+    {
+        trace!("handle_voxel_input: world object edit/placement active; skipping voxel input");
         return;
     }
 
@@ -426,6 +439,101 @@ pub fn spawn_world_object_placement_preview(
         default_material,
     );
     entity
+}
+
+#[cfg(feature = "spawn-panel")]
+/// Returns the nearest replicated world object in radius on the current map.
+pub fn nearest_world_object_in_radius(
+    origin: Vec3,
+    radius: f32,
+    objects: &Query<
+        (Entity, &Position, Option<&MapInstanceId>),
+        (With<WorldObjectId>, With<Replicated>),
+    >,
+    current_map: Option<&MapInstanceId>,
+) -> Option<Entity> {
+    let radius_sq = radius * radius;
+    objects
+        .iter()
+        .filter(|(_, _, object_map)| match (current_map, object_map) {
+            (Some(current), Some(object_map)) => *object_map == current,
+            _ => true,
+        })
+        .filter_map(|(entity, position, _)| {
+            let dist_sq = position.0.distance_squared(origin);
+            (dist_sq <= radius_sq).then_some((entity, dist_sq))
+        })
+        .min_by(|(_, a), (_, b)| a.total_cmp(b))
+        .map(|(entity, _)| entity)
+}
+
+#[cfg(feature = "spawn-panel")]
+fn update_world_object_nearby_selection(
+    mut ui_state: ResMut<SpawnPanelUi>,
+    player_query: Query<
+        (&Position, &MapInstanceId),
+        (With<Predicted>, With<Controlled>, With<CharacterMarker>),
+    >,
+    object_query: Query<
+        (Entity, &Position, Option<&MapInstanceId>),
+        (With<WorldObjectId>, With<Replicated>),
+    >,
+) {
+    let Ok((player_position, player_map)) = player_query.single() else {
+        trace!("update_world_object_nearby_selection: no predicted controlled player position");
+        return;
+    };
+    if ui_state
+        .selection
+        .selected
+        .is_some_and(|entity| object_query.get(entity).is_ok())
+    {
+        trace!("update_world_object_nearby_selection: selected object still exists");
+        return;
+    }
+    ui_state.selection.selected = nearest_world_object_in_radius(
+        player_position.0,
+        ui_state.selection.nearby_radius,
+        &object_query,
+        Some(player_map),
+    );
+}
+
+#[cfg(feature = "spawn-panel")]
+fn handle_world_object_delete_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut ui_state: ResMut<SpawnPanelUi>,
+    mut message_sender: Query<&mut MessageSender<WorldObjectDeleteRequest>>,
+) {
+    if !keys.just_pressed(KeyCode::Delete) {
+        trace!("handle_world_object_delete_input: delete key not pressed");
+        return;
+    }
+    let Some(target) = ui_state.selection.selected else {
+        trace!("handle_world_object_delete_input: no selected world object");
+        return;
+    };
+    let sequence = ui_state.selection.next_sequence();
+    let request = WorldObjectDeleteRequest { sequence, target };
+
+    let mut sent = false;
+    for mut sender in &mut message_sender {
+        sender.send::<WorldObjectEditChannel>(request.clone());
+        sent = true;
+    }
+    if !sent {
+        trace!("handle_world_object_delete_input: no WorldObjectDeleteRequest sender");
+        return;
+    }
+
+    ui_state
+        .selection
+        .pending_deletes
+        .push(PendingWorldObjectDelete {
+            sequence,
+            target,
+            accepted: false,
+        });
 }
 
 #[cfg(feature = "spawn-panel")]
@@ -641,7 +749,7 @@ pub fn reconcile_placement_preview_on_replication(
     preview_query: Query<(Entity, &WorldObjectPlacementPreview, &Transform)>,
 ) {
     for (replicated_id, replicated_position) in &replicated_query {
-        let replicated_position = Vec3::from(replicated_position.0);
+        let replicated_position = replicated_position.0;
         for (preview_entity, preview, preview_transform) in &preview_query {
             let Some(sequence) = preview.sequence else {
                 trace!("reconcile_placement_preview_on_replication: skipping hover preview");
@@ -722,13 +830,55 @@ fn handle_world_object_placement_reject(
         for reject in receiver.receive() {
             trace!(
                 "handle_world_object_placement_reject: reject seq={} reason={:?}",
-                reject.sequence, reject.reason,
+                reject.sequence,
+                reject.reason,
             );
             ui_state
                 .placement
                 .pending
                 .retain(|pending| pending.sequence != reject.sequence);
             ui_state.placement.last_reject = Some(reject.reason);
+        }
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+fn handle_world_object_delete_ack(
+    mut receivers: Query<&mut MessageReceiver<WorldObjectDeleteAck>>,
+    mut ui_state: ResMut<SpawnPanelUi>,
+) {
+    for mut receiver in &mut receivers {
+        for ack in receiver.receive() {
+            if let Some(pending) = ui_state
+                .selection
+                .pending_deletes
+                .iter_mut()
+                .find(|pending| pending.sequence == ack.sequence)
+            {
+                pending.accepted = true;
+                ui_state.selection.last_reject = None;
+            } else {
+                trace!(
+                    "handle_world_object_delete_ack: ack seq={} had no pending delete",
+                    ack.sequence
+                );
+            }
+        }
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+fn handle_world_object_edit_reject(
+    mut receivers: Query<&mut MessageReceiver<WorldObjectEditReject>>,
+    mut ui_state: ResMut<SpawnPanelUi>,
+) {
+    for mut receiver in &mut receivers {
+        for reject in receiver.receive() {
+            ui_state
+                .selection
+                .pending_deletes
+                .retain(|pending| pending.sequence != reject.sequence);
+            ui_state.selection.last_reject = Some(reject.reason);
         }
     }
 }

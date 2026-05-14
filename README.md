@@ -24,7 +24,8 @@ This installs dependencies and generates certificates.
 
 ### 2. Configure Nostr identities
 
-Nostr `nsec1...` values are plaintext private keys. Do not commit them, paste them into logs, or share them. The server and client use them differently:
+Nostr `nsec1...` values are plaintext private keys. Do not commit them, paste them into logs, or share them. The server
+and client use them differently:
 
 #### Server identity
 
@@ -33,7 +34,8 @@ The server signs its relay announcement with a durable Nostr key. Provide it wit
 - `SERVER_NSEC`, which takes precedence, or
 - `keys/server.nsec`, used as the local development fallback.
 
-Both sources may contain either a raw `nsec1...` secret or an encrypted NIP-49 `ncryptsec1...` value. If you use `ncryptsec1...`, also set `SERVER_NSEC_PASSPHRASE`.
+Both sources may contain either a raw `nsec1...` secret or an encrypted NIP-49 `ncryptsec1...` value. If you use
+`ncryptsec1...`, also set `SERVER_NSEC_PASSPHRASE`.
 
 ```bash
 # One-shot env var
@@ -53,14 +55,17 @@ SERVER_NSEC='ncryptsec1...' SERVER_NSEC_PASSPHRASE='...' cargo server
 
 The native client starts on the Nostr Login screen:
 
-- **Generate** creates a new Nostr key, encrypts it with the passphrase you enter, and stores only encrypted identity data in `worlds/identity.bin`.
-- **Import** accepts an existing `nsec1...`, encrypts it with the passphrase you enter, and stores only encrypted identity data in `worlds/identity.bin`.
+- **Generate** creates a new Nostr key, encrypts it with the passphrase you enter, and stores only encrypted identity
+  data in `worlds/identity.bin`.
+- **Import** accepts an existing `nsec1...`, encrypts it with the passphrase you enter, and stores only encrypted
+  identity data in `worlds/identity.bin`.
 - On later launches, enter the same passphrase on **Unlock** to reuse the same public key and durable identity.
 - To reset the native client identity, stop the client and delete `worlds/identity.bin`.
 
 The web client can Generate or Import for the current browser session, but it does not write `worlds/identity.bin`.
 
-Relay discovery uses the default public relay list unless `NOSTR_RELAYS` is set to a comma-separated list of `wss://...` relay URLs:
+Relay discovery uses the default public relay list unless `NOSTR_RELAYS` is set to a comma-separated list of `wss://...`
+relay URLs:
 
 ```bash
 NOSTR_RELAYS='wss://relay.damus.io,wss://nos.lol' cargo client
@@ -73,6 +78,7 @@ cargo server
 ```
 
 Server listens on:
+
 - UDP: `0.0.0.0:5000`
 - WebTransport: `0.0.0.0:5001`
 - WebSocket: `0.0.0.0:5002`
@@ -128,7 +134,10 @@ bevy-lightyear-template/
 
 ### Dev Inspector
 
-Press `F4` to toggle the dev inspector root menu. With the spawn panel enabled, press `F6` or use the root menu to open it. Def-driven world-object placement is server-authoritative: select an object, arm placement, preview the terrain target, then click terrain in-game. Free-form spawning remains client-local.
+Press `F4` to toggle the dev inspector root menu. With the spawn panel enabled, press `F6` or use the root menu to open
+it. Def-driven world-object placement is server-authoritative: select an object, arm placement, preview the terrain
+target, then click terrain in-game. The existing-object edit section can select nearby replicated world objects and
+request authoritative deletion from the server. Free-form spawning remains client-local.
 
 ### Certificate Regeneration
 
@@ -152,7 +161,8 @@ bevy run --bin web --open
 
 ## Ability System
 
-Abilities are defined in `assets/abilities.ron` and loaded at startup. Each character has 4 ability slots mapped to keys 1-4.
+Abilities are defined in `assets/abilities.ron` and loaded at startup. Each character has 4 ability slots mapped to keys
+1-4.
 
 ### Hotkeys
 
@@ -165,7 +175,11 @@ Abilities are defined in `assets/abilities.ron` and loaded at startup. Each char
 ### Defining Abilities
 
 Edit `assets/abilities.ron` to add or modify abilities. Each ability has:
+
 - Phase durations (startup, active, recovery) in ticks (64 ticks = 1 second)
 - Cooldown in ticks
-- Effects list with triggers: `OnTick` (fires once on a specified Active-phase tick offset, defaults to tick 0), `WhileActive` (fires every tick), `OnHit` (fires when a hitbox/projectile hits a target), `OnEnd` (fires on Active exit), or `OnInput` (fires on input during Active for combo chaining)
-- Effect types: `Melee`, `Projectile`, `AreaOfEffect`, `SetVelocity`, `Damage`, `ApplyForce`, `Ability` (spawns sub-ability), `Teleport`, `Shield`, or `Buff`
+- Effects list with triggers: `OnTick` (fires once on a specified Active-phase tick offset, defaults to tick 0),
+  `WhileActive` (fires every tick), `OnHit` (fires when a hitbox/projectile hits a target), `OnEnd` (fires on Active
+  exit), or `OnInput` (fires on input during Active for combo chaining)
+- Effect types: `Melee`, `Projectile`, `AreaOfEffect`, `SetVelocity`, `Damage`, `ApplyForce`, `Ability` (spawns
+  sub-ability), `Teleport`, `Shield`, or `Buff`

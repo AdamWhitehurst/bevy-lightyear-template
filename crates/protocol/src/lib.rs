@@ -55,9 +55,10 @@ pub use terrain::{TerrainDefRegistry, TerrainPlugin};
 pub use transition::{MapTransitionEntity, TransitionPlugin};
 pub use vox_model::{VoxModelAsset, VoxModelPlugin, VoxModelRegistry};
 pub use world_object::{
-    WorldObjectDefRegistry, WorldObjectId, WorldObjectPlacementAck, WorldObjectPlacementChannel,
-    WorldObjectPlacementReject, WorldObjectPlacementRejectReason, WorldObjectPlacementRequest,
-    WorldObjectPlugin,
+    WorldObjectDefRegistry, WorldObjectDeleteAck, WorldObjectDeleteRequest, WorldObjectEditChannel,
+    WorldObjectEditReject, WorldObjectEditRejectReason, WorldObjectId, WorldObjectPlacementAck,
+    WorldObjectPlacementChannel, WorldObjectPlacementReject, WorldObjectPlacementRejectReason,
+    WorldObjectPlacementRequest, WorldObjectPlugin,
 };
 
 pub const PROTOCOL_ID: u64 = 0;
@@ -140,6 +141,23 @@ impl Plugin for ProtocolPlugin {
         app.register_message::<WorldObjectPlacementAck>()
             .add_direction(NetworkDirection::ServerToClient);
         app.register_message::<WorldObjectPlacementReject>()
+            .add_direction(NetworkDirection::ServerToClient);
+
+        // World object edit channel
+        app.add_channel::<WorldObjectEditChannel>(ChannelSettings {
+            mode: ChannelMode::OrderedReliable(ReliableSettings::default()),
+            ..default()
+        })
+        .add_direction(NetworkDirection::Bidirectional);
+
+        // World object edit/delete messages
+        app.register_message::<WorldObjectDeleteRequest>()
+            .add_direction(NetworkDirection::ClientToServer)
+            .add_map_entities();
+        app.register_message::<WorldObjectDeleteAck>()
+            .add_direction(NetworkDirection::ServerToClient)
+            .add_map_entities();
+        app.register_message::<WorldObjectEditReject>()
             .add_direction(NetworkDirection::ServerToClient);
 
         // Chunk streaming channel

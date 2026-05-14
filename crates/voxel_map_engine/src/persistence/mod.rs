@@ -272,4 +272,13 @@ mod tests {
             .expect("entities file should exist");
         assert!(loaded.is_empty());
     }
+
+    #[test]
+    fn empty_entities_file_is_authoritative_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = test_entity_store(dir.path());
+        store.save(&IVec3::ZERO, &Vec::new()).unwrap();
+        let loaded = store.load(&IVec3::ZERO).unwrap();
+        assert!(matches!(loaded, Some(spawns) if spawns.is_empty()));
+    }
 }

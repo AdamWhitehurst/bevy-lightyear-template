@@ -21,6 +21,20 @@ pub(crate) fn chunk_pos_for_world_position(position: Vec3, chunk_size: u32) -> I
     voxel_map_engine::lifecycle::world_to_chunk_pos(position, chunk_size)
 }
 
+/// Query shape used when saving loaded world objects from a chunk.
+pub type ChunkEntitySaveQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static ChunkEntityRef,
+        &'static WorldObjectId,
+        &'static Position,
+        Option<&'static ActiveTransformation>,
+        Option<&'static protocol::Health>,
+    ),
+>;
+
 /// Spawns world objects from completed Features stages.
 ///
 /// Drains `PendingEntitySpawns` and calls `spawn_world_object` for each entry,
@@ -158,9 +172,70 @@ pub fn evict_chunk_entities(
     }
 }
 
+/// Collects saved spawn data for one loaded chunk.
+pub fn collect_chunk_entity_spawns(
+    map_entity: Entity,
+    chunk_pos: IVec3,
+    exclude_entity: Option<Entity>,
+    entity_query: &Query<(
+        Entity,
+        &ChunkEntityRef,
+        &WorldObjectId,
+        &Position,
+        Option<&ActiveTransformation>,
+        Option<&protocol::Health>,
+    )>,
+) -> Vec<WorldObjectSpawn> {
+    entity_query
+        .iter()
+        .filter(|(entity, chunk_ref, _, _, _, _)| {
+            Some(*entity) != exclude_entity
+                && chunk_ref.map_entity == map_entity
+                && chunk_ref.chunk_pos == chunk_pos
+        })
+        .map(
+            |(_, _, obj_id, pos, active_transform, health)| WorldObjectSpawn {
+                object_id: obj_id.0.clone(),
+                position: pos.0,
+                position_kind: WorldObjectPositionKind::Final,
+                persisted_components: serialize_persisted(active_transform, health),
+            },
+        )
+        .collect()
+}
+
+/// Queues an immediate save for one loaded chunk, writing an empty entity file when no objects remain.
+pub fn save_chunk_entities_now_or_queue(
+    map_entity: Entity,
+    chunk_pos: IVec3,
+    exclude_entity: Option<Entity>,
+    entity_query: &Query<(
+        Entity,
+        &ChunkEntityRef,
+        &WorldObjectId,
+        &Position,
+        Option<&ActiveTransformation>,
+        Option<&protocol::Health>,
+    )>,
+    store_query: &mut Query<(
+        &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
+        &mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>,
+    )>,
+) {
+    let spawns = collect_chunk_entity_spawns(map_entity, chunk_pos, exclude_entity, entity_query);
+    let Ok((store, mut ops)) = store_query.get_mut(map_entity) else {
+        trace!(
+            "save_chunk_entities_now_or_queue: map entity {map_entity:?} has no chunk entity store"
+        );
+        return;
+    };
+    ops.spawn_save(&store.0, chunk_pos, spawns);
+}
+
 /// Collect all living chunk entities grouped by `(map_entity, chunk_pos)`.
 fn collect_chunk_entities(
     entity_query: &Query<(
+        Entity,
         &ChunkEntityRef,
         &WorldObjectId,
         &Position,
@@ -169,15 +244,16 @@ fn collect_chunk_entities(
     )>,
 ) -> HashMap<(Entity, IVec3), Vec<WorldObjectSpawn>> {
     let mut by_chunk: HashMap<(Entity, IVec3), Vec<WorldObjectSpawn>> = HashMap::new();
-    for (chunk_ref, obj_id, pos, active_transform, health) in entity_query {
+    for (_, chunk_ref, _, _, _, _) in entity_query {
         by_chunk
             .entry((chunk_ref.map_entity, chunk_ref.chunk_pos))
-            .or_default()
-            .push(WorldObjectSpawn {
-                object_id: obj_id.0.clone(),
-                position: pos.0,
-                position_kind: WorldObjectPositionKind::Final,
-                persisted_components: serialize_persisted(active_transform, health),
+            .or_insert_with(|| {
+                collect_chunk_entity_spawns(
+                    chunk_ref.map_entity,
+                    chunk_ref.chunk_pos,
+                    None,
+                    entity_query,
+                )
             });
     }
     by_chunk
@@ -208,6 +284,7 @@ pub fn save_chunk_entities_periodic(
     time: Res<Time>,
     mut last_save: Local<f64>,
     entity_query: Query<(
+        Entity,
         &ChunkEntityRef,
         &WorldObjectId,
         &Position,
@@ -241,6 +318,7 @@ pub fn save_chunk_entities_periodic(
 pub fn save_all_chunk_entities_on_exit(
     mut exit_reader: MessageReader<AppExit>,
     entity_query: Query<(
+        Entity,
         &ChunkEntityRef,
         &WorldObjectId,
         &Position,

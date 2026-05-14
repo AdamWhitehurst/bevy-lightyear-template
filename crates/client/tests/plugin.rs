@@ -33,10 +33,77 @@ fn world_object_placement_ui_sequences_and_pending_ack() {
 
 #[cfg(feature = "spawn-panel")]
 #[test]
+fn world_object_selection_ui_sequences_and_pending_delete_ack() {
+    use dev::panels::spawn::{PendingWorldObjectDelete, WorldObjectSelectionUi};
+
+    let mut ui = WorldObjectSelectionUi::default();
+    let target = Entity::from_raw_u32(42).expect("test entity id should be valid");
+    assert_eq!(ui.next_sequence(), 0);
+    assert_eq!(ui.next_sequence(), 1);
+    ui.pending_deletes.push(PendingWorldObjectDelete {
+        sequence: 0,
+        target,
+        accepted: false,
+    });
+    ui.pending_deletes[0].accepted = true;
+    assert!(ui.pending_deletes[0].accepted);
+}
+
+#[cfg(feature = "spawn-panel")]
+#[test]
+fn nearest_world_object_in_radius_chooses_closest_replicated_object() {
+    use avian3d::prelude::Position;
+    use client::map::nearest_world_object_in_radius;
+    use protocol::world_object::WorldObjectId;
+
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let receiver = app.world_mut().spawn_empty().id();
+    let far = app
+        .world_mut()
+        .spawn((
+            WorldObjectId("far".to_string()),
+            Position(Vec3::new(5.0, 0.0, 0.0).into()),
+            MapInstanceId::Overworld,
+            Replicated { receiver },
+        ))
+        .id();
+    let near = app
+        .world_mut()
+        .spawn((
+            WorldObjectId("near".to_string()),
+            Position(Vec3::new(2.0, 0.0, 0.0).into()),
+            MapInstanceId::Overworld,
+            Replicated { receiver },
+        ))
+        .id();
+
+    let selected = app
+        .world_mut()
+        .run_system_once(
+            |query: Query<
+                (Entity, &Position, Option<&MapInstanceId>),
+                (With<WorldObjectId>, With<Replicated>),
+            >| {
+                nearest_world_object_in_radius(
+                    Vec3::ZERO,
+                    6.0,
+                    &query,
+                    Some(&MapInstanceId::Overworld),
+                )
+            },
+        )
+        .expect("selection system should run");
+    assert_eq!(selected, Some(near));
+    assert_ne!(Some(far), Some(near));
+}
+
+#[cfg(feature = "spawn-panel")]
+#[test]
 fn placement_preview_entities_are_visual_only() {
-    use ::client::map::{spawn_world_object_placement_preview, WorldObjectPlacementPreview};
-    use ::client::world_object::DefaultVoxModelMaterial;
     use avian3d::prelude::{Collider, Position};
+    use client::map::{spawn_world_object_placement_preview, WorldObjectPlacementPreview};
+    use client::world_object::DefaultVoxModelMaterial;
     use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
     use protocol::world_object::{WorldObjectDef, WorldObjectId};
     use std::collections::HashMap;
@@ -91,8 +158,8 @@ fn placement_preview_entities_are_visual_only() {
 #[cfg(feature = "spawn-panel")]
 #[test]
 fn replicated_object_reconciles_matching_preview_only() {
-    use ::client::map::{reconcile_placement_preview_on_replication, WorldObjectPlacementPreview};
     use avian3d::prelude::Position;
+    use client::map::{reconcile_placement_preview_on_replication, WorldObjectPlacementPreview};
     use dev::panels::spawn::{PendingWorldObjectPlacement, SpawnPanelUi};
     use protocol::world_object::WorldObjectId;
 

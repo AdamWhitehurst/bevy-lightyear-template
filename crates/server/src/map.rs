@@ -28,11 +28,13 @@ use crate::persistence::fs_map_entities::FsMapEntitiesStore;
 use crate::persistence::fs_map_meta::FsMapMetaStore;
 use crate::persistence::{map_save_dir, MapMeta, WorldSavePath};
 use persistence::{PendingStoreOps, StoreBackend};
-use protocol::map::{MapSaveTarget, SavedEntity, SavedEntityKind};
+use protocol::map::{ChunkEntityRef, MapSaveTarget, SavedEntity, SavedEntityKind};
 use protocol::terrain::TerrainDef;
 use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
 use protocol::world_object::{
-    apply_object_components, WorldObjectDef, WorldObjectDefRegistry, WorldObjectPlacementAck,
+    apply_object_components, ActiveTransformation, WorldObjectDef, WorldObjectDefRegistry,
+    WorldObjectDeleteAck, WorldObjectDeleteRequest, WorldObjectEditChannel, WorldObjectEditReject,
+    WorldObjectEditRejectReason, WorldObjectId, WorldObjectPlacementAck,
     WorldObjectPlacementChannel, WorldObjectPlacementReject, WorldObjectPlacementRejectReason,
     WorldObjectPlacementRequest,
 };
@@ -646,6 +648,7 @@ impl Plugin for ServerMapPlugin {
                         resource_exists::<WorldObjectDefRegistry>
                             .and(resource_exists::<VoxModelRegistry>),
                     ),
+                    handle_world_object_delete_requests,
                     push_chunks_to_clients,
                     save_dirty_chunks_debounced,
                     handle_map_switch_requests.run_if(resource_exists::<TerrainDefRegistry>),
@@ -869,6 +872,122 @@ pub fn validate_world_object_placement<'a>(
     Ok((def, final_position, chunk_pos))
 }
 
+/// Validated data needed to delete a world object and persist its chunk.
+#[derive(Debug, PartialEq, Eq)]
+pub struct ValidatedWorldObjectDelete {
+    pub map_entity: Entity,
+    pub chunk_pos: IVec3,
+}
+
+/// Validates a world-object delete target against player map and loaded chunk state.
+pub fn validate_world_object_delete(
+    target: Entity,
+    player_map_entity: Entity,
+    player_map_id: &MapInstanceId,
+    target_exists: &Query<Entity>,
+    object_query: &Query<(&WorldObjectId, &MapInstanceId, &ChunkEntityRef)>,
+    map_query: &Query<&VoxelMapInstance>,
+) -> Result<ValidatedWorldObjectDelete, WorldObjectEditRejectReason> {
+    let Ok((_id, object_map_id, chunk_ref)) = object_query.get(target) else {
+        if target_exists.get(target).is_ok() {
+            return Err(WorldObjectEditRejectReason::NotWorldObject);
+        }
+        return Err(WorldObjectEditRejectReason::MissingTarget);
+    };
+    if object_map_id != player_map_id || chunk_ref.map_entity != player_map_entity {
+        return Err(WorldObjectEditRejectReason::ForeignMap);
+    }
+    let instance = map_query
+        .get(player_map_entity)
+        .expect("resolved map entity must have VoxelMapInstance");
+    let column = voxel_map_engine::prelude::chunk_to_column(chunk_ref.chunk_pos);
+    if !instance.chunk_levels.contains_key(&column)
+        || instance.get_chunk_data(chunk_ref.chunk_pos).is_none()
+    {
+        return Err(WorldObjectEditRejectReason::ChunkUnavailable);
+    }
+    Ok(ValidatedWorldObjectDelete {
+        map_entity: player_map_entity,
+        chunk_pos: chunk_ref.chunk_pos,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn handle_world_object_delete_requests(
+    mut receivers: Query<(Entity, &mut MessageReceiver<WorldObjectDeleteRequest>)>,
+    mut ack_senders: Query<&mut MessageSender<WorldObjectDeleteAck>>,
+    mut reject_senders: Query<&mut MessageSender<WorldObjectEditReject>>,
+    controlled_query: Query<(&ControlledBy, &MapInstanceId), With<CharacterMarker>>,
+    map_registry: Res<MapRegistry>,
+    map_query: Query<&VoxelMapInstance>,
+    target_exists: Query<Entity>,
+    object_query: Query<(&WorldObjectId, &MapInstanceId, &ChunkEntityRef)>,
+    entity_save_query: Query<(
+        Entity,
+        &ChunkEntityRef,
+        &WorldObjectId,
+        &Position,
+        Option<&ActiveTransformation>,
+        Option<&protocol::Health>,
+    )>,
+    mut store_query: Query<(
+        &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
+        &mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>,
+    )>,
+    mut commands: Commands,
+) {
+    for (client_entity, mut receiver) in &mut receivers {
+        for request in receiver.receive() {
+            let Some((map_entity, map_id)) =
+                resolve_player_map(client_entity, &controlled_query, &map_registry)
+            else {
+                send_world_object_edit_reject(
+                    client_entity,
+                    request.sequence,
+                    WorldObjectEditRejectReason::NoControlledCharacter,
+                    &mut reject_senders,
+                );
+                continue;
+            };
+            match validate_world_object_delete(
+                request.target,
+                map_entity,
+                &map_id,
+                &target_exists,
+                &object_query,
+                &map_query,
+            ) {
+                Ok(validated) => {
+                    commands.entity(request.target).despawn();
+                    crate::chunk_entities::save_chunk_entities_now_or_queue(
+                        validated.map_entity,
+                        validated.chunk_pos,
+                        Some(request.target),
+                        &entity_save_query,
+                        &mut store_query,
+                    );
+                    send_world_object_delete_ack(
+                        client_entity,
+                        WorldObjectDeleteAck {
+                            sequence: request.sequence,
+                            target: request.target,
+                        },
+                        &mut ack_senders,
+                    );
+                }
+                Err(reason) => {
+                    send_world_object_edit_reject(
+                        client_entity,
+                        request.sequence,
+                        reason,
+                        &mut reject_senders,
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// Returns whether a candidate chunk is within a map's configured placement bounds.
 fn placement_chunk_in_bounds(chunk_pos: IVec3, dimensions: &MapDimensions) -> bool {
     (dimensions.column_y_range.0..dimensions.column_y_range.1).contains(&chunk_pos.y)
@@ -907,6 +1026,33 @@ fn send_placement_ack(
         return;
     };
     sender.send::<WorldObjectPlacementChannel>(ack);
+}
+
+/// Sends a world-object edit rejection to a client if its reject sender exists.
+fn send_world_object_edit_reject(
+    client_entity: Entity,
+    sequence: u32,
+    reason: WorldObjectEditRejectReason,
+    reject_senders: &mut Query<&mut MessageSender<WorldObjectEditReject>>,
+) {
+    let Ok(mut sender) = reject_senders.get_mut(client_entity) else {
+        trace!("send_world_object_edit_reject: no reject sender for {client_entity:?}");
+        return;
+    };
+    sender.send::<WorldObjectEditChannel>(WorldObjectEditReject { sequence, reason });
+}
+
+/// Sends a world-object delete acknowledgment to a client if its acknowledgment sender exists.
+fn send_world_object_delete_ack(
+    client_entity: Entity,
+    ack: WorldObjectDeleteAck,
+    ack_senders: &mut Query<&mut MessageSender<WorldObjectDeleteAck>>,
+) {
+    let Ok(mut sender) = ack_senders.get_mut(client_entity) else {
+        trace!("send_world_object_delete_ack: no ack sender for {client_entity:?}");
+        return;
+    };
+    sender.send::<WorldObjectEditChannel>(ack);
 }
 
 pub fn handle_voxel_edit_requests(

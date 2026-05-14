@@ -1,0 +1,218 @@
+use std::sync::Arc;
+
+use avian3d::prelude::Position;
+use bevy::ecs::system::RunSystemOnce;
+use bevy::prelude::*;
+use persistence::{PendingStoreOps, Store, StoreBackend};
+use protocol::map::{ChunkEntityRef, MapInstanceId};
+use protocol::world_object::{WorldObjectEditRejectReason, WorldObjectId};
+use voxel_map_engine::config::WorldObjectSpawn;
+use voxel_map_engine::persistence::fs_chunk_entities::FsChunkEntitiesStore;
+use voxel_map_engine::prelude::{
+    chunk_to_column, ChunkData, ChunkStatus, VoxelMapInstance, WorldVoxel,
+};
+
+const CHUNK_SIZE: u32 = 16;
+const PADDED_VOLUME_16: usize = 18 * 18 * 18;
+
+fn loaded_instance(chunk_pos: IVec3) -> VoxelMapInstance {
+    let mut instance = VoxelMapInstance::new(5, CHUNK_SIZE);
+    let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
+    instance.insert_chunk_data(
+        chunk_pos,
+        ChunkData::from_voxels(&voxels, ChunkStatus::Full),
+    );
+    instance.chunk_levels.insert(chunk_to_column(chunk_pos), 0);
+    instance
+}
+
+fn object_id() -> WorldObjectId {
+    WorldObjectId("test_tree".to_string())
+}
+
+fn validate_in_world(
+    app: &mut App,
+    target: Entity,
+    map_entity: Entity,
+    map_id: MapInstanceId,
+) -> Result<server::map::ValidatedWorldObjectDelete, WorldObjectEditRejectReason> {
+    app.world_mut()
+        .run_system_once(
+            move |target_exists: Query<Entity>,
+                  object_query: Query<(&WorldObjectId, &MapInstanceId, &ChunkEntityRef)>,
+                  map_query: Query<&VoxelMapInstance>| {
+                server::map::validate_world_object_delete(
+                    target,
+                    map_entity,
+                    &map_id,
+                    &target_exists,
+                    &object_query,
+                    &map_query,
+                )
+            },
+        )
+        .expect("validation system should run")
+}
+
+#[test]
+fn delete_validation_accepts_loaded_world_object_on_player_map() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let chunk_pos = IVec3::ZERO;
+    let map_entity = app.world_mut().spawn(loaded_instance(chunk_pos)).id();
+    let target = app
+        .world_mut()
+        .spawn((
+            object_id(),
+            MapInstanceId::Overworld,
+            ChunkEntityRef {
+                map_entity,
+                chunk_pos,
+            },
+        ))
+        .id();
+
+    let result = validate_in_world(&mut app, target, map_entity, MapInstanceId::Overworld)
+        .expect("delete should be valid");
+
+    assert_eq!(result.map_entity, map_entity);
+    assert_eq!(result.chunk_pos, chunk_pos);
+}
+
+#[test]
+fn delete_validation_rejects_missing_or_non_world_object_target() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let chunk_pos = IVec3::ZERO;
+    let map_entity = app.world_mut().spawn(loaded_instance(chunk_pos)).id();
+    let non_world_object = app.world_mut().spawn_empty().id();
+    let missing = Entity::PLACEHOLDER;
+
+    assert_eq!(
+        validate_in_world(&mut app, missing, map_entity, MapInstanceId::Overworld).unwrap_err(),
+        WorldObjectEditRejectReason::MissingTarget
+    );
+    assert_eq!(
+        validate_in_world(
+            &mut app,
+            non_world_object,
+            map_entity,
+            MapInstanceId::Overworld
+        )
+        .unwrap_err(),
+        WorldObjectEditRejectReason::NotWorldObject
+    );
+}
+
+#[test]
+fn delete_validation_rejects_foreign_map_and_unloaded_chunk() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let loaded_chunk = IVec3::ZERO;
+    let unloaded_chunk = IVec3::new(1, 0, 0);
+    let map_entity = app.world_mut().spawn(loaded_instance(loaded_chunk)).id();
+    let foreign_target = app
+        .world_mut()
+        .spawn((
+            object_id(),
+            MapInstanceId::Homebase {
+                owner: protocol::NostrPublicKey([1; 32]),
+            },
+            ChunkEntityRef {
+                map_entity,
+                chunk_pos: loaded_chunk,
+            },
+        ))
+        .id();
+    let unloaded_target = app
+        .world_mut()
+        .spawn((
+            object_id(),
+            MapInstanceId::Overworld,
+            ChunkEntityRef {
+                map_entity,
+                chunk_pos: unloaded_chunk,
+            },
+        ))
+        .id();
+
+    assert_eq!(
+        validate_in_world(
+            &mut app,
+            foreign_target,
+            map_entity,
+            MapInstanceId::Overworld
+        )
+        .unwrap_err(),
+        WorldObjectEditRejectReason::ForeignMap
+    );
+    assert_eq!(
+        validate_in_world(
+            &mut app,
+            unloaded_target,
+            map_entity,
+            MapInstanceId::Overworld
+        )
+        .unwrap_err(),
+        WorldObjectEditRejectReason::ChunkUnavailable
+    );
+}
+
+#[test]
+fn delete_save_writes_empty_chunk_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FsChunkEntitiesStore {
+        map_dir: Arc::new(dir.path().to_path_buf()),
+    };
+    let chunk_pos = IVec3::ZERO;
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    let map_entity = app
+        .world_mut()
+        .spawn((
+            StoreBackend::new(store.clone()),
+            PendingStoreOps::<IVec3, Vec<WorldObjectSpawn>>::default(),
+        ))
+        .id();
+    let deleted = app
+        .world_mut()
+        .spawn((
+            ChunkEntityRef {
+                map_entity,
+                chunk_pos,
+            },
+            object_id(),
+            Position(Vec3::new(1.0, 2.0, 3.0).into()),
+        ))
+        .id();
+
+    app.world_mut()
+        .run_system_once(
+            move |entity_query: Query<(
+                Entity,
+                &ChunkEntityRef,
+                &WorldObjectId,
+                &Position,
+                Option<&protocol::world_object::ActiveTransformation>,
+                Option<&protocol::Health>,
+            )>,
+                  mut store_query: Query<(
+                &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
+                &mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>,
+            )>| {
+                server::chunk_entities::save_chunk_entities_now_or_queue(
+                    map_entity,
+                    chunk_pos,
+                    Some(deleted),
+                    &entity_query,
+                    &mut store_query,
+                );
+                let (_, mut ops) = store_query.get_mut(map_entity).unwrap();
+                ops.flush();
+            },
+        )
+        .unwrap();
+
+    let loaded = store.load(&chunk_pos).unwrap().expect("empty file exists");
+    assert!(loaded.is_empty());
+}
