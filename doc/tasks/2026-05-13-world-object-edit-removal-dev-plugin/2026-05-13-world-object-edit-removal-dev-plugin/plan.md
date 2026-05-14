@@ -1616,7 +1616,7 @@ Extend `WorldObjectSelectionUi`:
 
 ```rust
 pub selection_source: Option<WorldObjectSelectionSource>,
-pub cursor_pick_requested: bool,
+pub cursor_pick_armed: bool,
 pub delete_requested: bool,
 ```
 
@@ -1670,9 +1670,9 @@ pub fn current_world_object_pick(
 
 Add `handle_world_object_cursor_pick_input`:
 
-- Consume `cursor_pick_requested` or a key/mouse shortcut only when spawn panel is active.
-- Set `selection.selected` and `selection.selection_source = Some(Cursor)`.
-- `trace!` if no pick found.
+- When `cursor_pick_armed` is true and spawn panel is active, consume the in-game click/PlaceVoxel action.
+- Set `selection.selected` and `selection.selection_source = Some(Cursor)`, then disarm cursor picking.
+- `trace!` if no pick found and stay armed so the user can retry or cancel.
 
 Update nearby selection to set `selection_source = Some(NearbyList)`.
 
@@ -1759,32 +1759,33 @@ Update the existing “Dev Inspector” paragraph to include final behavior:
 ```markdown
 Press `F4` to toggle the dev inspector root menu. With the spawn panel enabled, press `F6` or use the root menu to open
 it. Def-driven world-object placement is server-authoritative: select an object, arm placement, preview the terrain
-target, then click terrain in-game. The same panel can select existing replicated world objects by cursor pick or nearby
-list and request authoritative delete, move, or yaw rotation edits that persist across chunk reloads. Free-form spawning
-remains client-local.
+target, then click terrain in-game. The same panel can select existing replicated world objects by arming cursor pick
+and clicking in-game or by nearby list, then request authoritative delete, move, or yaw rotation edits that persist
+across chunk reloads. Free-form spawning remains client-local.
 ```
 
 ### Verification
 
 #### Automated
 
-- [ ] Confirm no cargo build/check/test is running:
+- [x] Confirm no cargo build/check/test is running:
       `pgrep -af 'cargo (build|check|test|make|server|client)|rustc|rustdoc' || true`
-- [ ] `cargo check-all` passes
-- [ ] Confirm no cargo build/check/test is running again
-- [ ] `cargo test-all` passes
-- [ ] Confirm no cargo build/check/test is running again
-- [ ] `cargo test -p client --features spawn-panel --test plugin cursor_pick` passes if not already covered by
+- [x] `cargo check-all` passes
+- [x] Confirm no cargo build/check/test is running again
+- [x] `cargo test-all` passes
+- [x] Confirm no cargo build/check/test is running again
+- [x] `cargo test -p client --features spawn-panel --test plugin cursor_pick` passes if not already covered by
       `cargo test-all`
-- [ ] Confirm no cargo build/check/test is running again
-- [ ] `cargo test -p client --features spawn-panel --test plugin cleanup` passes if not already covered by
+- [x] Confirm no cargo build/check/test is running again
+- [x] `cargo test -p client --features spawn-panel --test plugin cleanup` passes if not already covered by
       `cargo test-all`
 
 #### Manual
 
 - [ ] Run `cargo server` and `cargo client`.
 - [ ] Press `F4`, then `F6`.
-- [ ] Select by nearby list and by cursor pick; confirm UI records the correct selection source.
+- [ ] Select by nearby list and by arming cursor pick then clicking an object in-game; confirm UI records the correct
+      selection source.
 - [ ] Delete selected object; confirm despawn replicates and deleted object stays gone after chunk reload.
 - [ ] Move selected object within the same chunk; confirm preview cleanup and persisted reload.
 - [ ] Move selected object across chunks; confirm source/destination persistence after both chunks reload.

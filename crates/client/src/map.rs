@@ -1,13 +1,15 @@
 #[cfg(feature = "spawn-panel")]
 use crate::world_object::{preview_visual_from_def, DefaultVoxModelMaterial};
 #[cfg(feature = "spawn-panel")]
-use avian3d::prelude::{Position, Rotation};
+use avian3d::prelude::{Position, Rotation, SpatialQuery, SpatialQueryFilter};
 use bevy::{prelude::*, window::PrimaryWindow};
 #[cfg(feature = "spawn-panel")]
 use dev::panels::spawn::{
     PendingWorldObjectDelete, PendingWorldObjectMove, PendingWorldObjectPlacement,
-    PendingWorldObjectRotation, SpawnPanelUi,
+    PendingWorldObjectRotation, SpawnPanelUi, WorldObjectSelectionSource,
 };
+#[cfg(feature = "spawn-panel")]
+use dev::DevInspectorState;
 use leafwing_input_manager::prelude::*;
 #[cfg(feature = "spawn-panel")]
 use lightyear::prelude::Replicated;
@@ -160,6 +162,8 @@ impl Plugin for ClientMapPlugin {
                     #[cfg(feature = "spawn-panel")]
                     update_world_object_nearby_selection,
                     #[cfg(feature = "spawn-panel")]
+                    handle_world_object_cursor_pick_input,
+                    #[cfg(feature = "spawn-panel")]
                     handle_world_object_delete_input,
                     #[cfg(feature = "spawn-panel")]
                     handle_world_object_move_input,
@@ -169,6 +173,8 @@ impl Plugin for ClientMapPlugin {
                     handle_world_object_placement_input,
                     #[cfg(feature = "spawn-panel")]
                     update_world_object_placement_preview,
+                    #[cfg(feature = "spawn-panel")]
+                    cleanup_stale_world_object_edit_previews,
                     #[cfg(feature = "spawn-panel")]
                     update_world_object_edit_preview,
                     #[cfg(feature = "spawn-panel")]
@@ -351,10 +357,9 @@ fn handle_voxel_input(
     #[cfg(feature = "spawn-panel")] placement_ui: Option<Res<SpawnPanelUi>>,
 ) {
     #[cfg(feature = "spawn-panel")]
-    if placement_ui
-        .as_ref()
-        .is_some_and(|ui| ui.placement.armed || ui.selection.selected.is_some())
-    {
+    if placement_ui.as_ref().is_some_and(|ui| {
+        ui.placement.armed || ui.selection.cursor_pick_armed || ui.selection.selected.is_some()
+    }) {
         trace!("handle_voxel_input: world object edit/placement active; skipping voxel input");
         return;
     }
@@ -542,6 +547,40 @@ pub fn nearest_world_object_in_radius(
 }
 
 #[cfg(feature = "spawn-panel")]
+/// Returns the nearest replicated world object under the cursor ray.
+pub fn current_world_object_pick(
+    camera_query: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    window_query: &Query<&Window, With<PrimaryWindow>>,
+    object_query: &Query<(), (With<WorldObjectId>, With<Replicated>)>,
+    spatial_query: &SpatialQuery,
+) -> Option<Entity> {
+    let Some(ray) = camera_ray(camera_query, window_query) else {
+        trace!("current_world_object_pick: no camera ray");
+        return None;
+    };
+    pick_world_object_collider_from_ray(ray, object_query, spatial_query)
+}
+
+#[cfg(feature = "spawn-panel")]
+/// Picks the closest replicated world-object collider under the cursor ray.
+pub fn pick_world_object_collider_from_ray(
+    ray: Ray3d,
+    object_query: &Query<(), (With<WorldObjectId>, With<Replicated>)>,
+    spatial_query: &SpatialQuery,
+) -> Option<Entity> {
+    spatial_query
+        .cast_ray_predicate(
+            ray.origin,
+            ray.direction,
+            RAYCAST_MAX_DISTANCE,
+            true,
+            &SpatialQueryFilter::default(),
+            &|entity| object_query.contains(entity),
+        )
+        .map(|hit| hit.entity)
+}
+
+#[cfg(feature = "spawn-panel")]
 fn update_world_object_nearby_selection(
     mut ui_state: ResMut<SpawnPanelUi>,
     player_query: Query<
@@ -553,6 +592,12 @@ fn update_world_object_nearby_selection(
         (With<WorldObjectId>, With<Replicated>),
     >,
 ) {
+    if ui_state.selection.cursor_pick_armed {
+        trace!(
+            "update_world_object_nearby_selection: cursor pick armed; skipping nearby selection"
+        );
+        return;
+    }
     let Ok((player_position, player_map)) = player_query.single() else {
         trace!("update_world_object_nearby_selection: no predicted controlled player position");
         return;
@@ -571,6 +616,50 @@ fn update_world_object_nearby_selection(
         &object_query,
         Some(player_map),
     );
+    if ui_state.selection.selected.is_some() {
+        ui_state.selection.selection_source = Some(WorldObjectSelectionSource::NearbyList);
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+fn handle_world_object_cursor_pick_input(
+    mut ui_state: ResMut<SpawnPanelUi>,
+    inspector_state: Option<Res<DevInspectorState>>,
+    action_query: Query<&ActionState<PlayerActions>, With<Controlled>>,
+    camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    object_query: Query<(), (With<WorldObjectId>, With<Replicated>)>,
+    spatial_query: SpatialQuery,
+) {
+    if !ui_state.selection.cursor_pick_armed {
+        trace!("handle_world_object_cursor_pick_input: cursor pick is not armed");
+        return;
+    }
+    let Some(inspector_state) = inspector_state else {
+        trace!("handle_world_object_cursor_pick_input: dev inspector state missing");
+        return;
+    };
+    if !inspector_state.enabled || !inspector_state.panels.spawn_panel {
+        trace!("handle_world_object_cursor_pick_input: spawn panel is not active");
+        return;
+    }
+    let Ok(action_state) = action_query.single() else {
+        trace!("handle_world_object_cursor_pick_input: no controlled action state");
+        return;
+    };
+    if !action_state.just_pressed(&PlayerActions::PlaceVoxel) {
+        trace!("handle_world_object_cursor_pick_input: place action not pressed");
+        return;
+    }
+    let Some(picked) =
+        current_world_object_pick(&camera_query, &window_query, &object_query, &spatial_query)
+    else {
+        trace!("handle_world_object_cursor_pick_input: no world object under cursor");
+        return;
+    };
+    ui_state.selection.cursor_pick_armed = false;
+    ui_state.selection.selected = Some(picked);
+    ui_state.selection.selection_source = Some(WorldObjectSelectionSource::Cursor);
 }
 
 #[cfg(feature = "spawn-panel")]
@@ -579,8 +668,11 @@ fn handle_world_object_delete_input(
     mut ui_state: ResMut<SpawnPanelUi>,
     mut message_sender: Query<&mut MessageSender<WorldObjectDeleteRequest>>,
 ) {
-    if !keys.just_pressed(KeyCode::Delete) {
-        trace!("handle_world_object_delete_input: delete key not pressed");
+    let delete_requested =
+        keys.just_pressed(KeyCode::Delete) || ui_state.selection.delete_requested;
+    ui_state.selection.delete_requested = false;
+    if !delete_requested {
+        trace!("handle_world_object_delete_input: delete was not requested");
         return;
     }
     let Some(target) = ui_state.selection.selected else {
@@ -988,6 +1080,40 @@ fn update_world_object_placement_preview(
 }
 
 #[cfg(feature = "spawn-panel")]
+/// Removes stale local edit previews whose target or pending request no longer exists.
+pub fn cleanup_stale_world_object_edit_previews(
+    mut commands: Commands,
+    ui_state: Res<SpawnPanelUi>,
+    target_query: Query<Entity, (With<WorldObjectId>, With<Replicated>)>,
+    preview_query: Query<(Entity, &WorldObjectEditPreview)>,
+) {
+    for (preview_entity, preview) in &preview_query {
+        let target_exists = target_query.get(preview.target).is_ok();
+        let pending_move = preview.sequence.is_some_and(|sequence| {
+            ui_state
+                .selection
+                .pending_moves
+                .iter()
+                .any(|pending| pending.sequence == sequence)
+        });
+        let pending_rotation = preview.sequence.is_some_and(|sequence| {
+            ui_state
+                .selection
+                .pending_rotations
+                .iter()
+                .any(|pending| pending.sequence == sequence)
+        });
+        let hover = preview.sequence.is_none() && ui_state.selection.move_armed;
+        if !target_exists || (!pending_move && !pending_rotation && !hover) {
+            trace!(
+                "cleanup_stale_world_object_edit_previews: despawning stale preview {preview_entity:?}"
+            );
+            commands.entity(preview_entity).despawn();
+        }
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
 /// Maintains hover and pending local edit previews from spawn-panel move state.
 #[allow(clippy::too_many_arguments)]
 fn update_world_object_edit_preview(
@@ -1304,19 +1430,18 @@ fn handle_world_object_placement_ack(
 ) {
     for mut receiver in &mut receivers {
         for ack in receiver.receive() {
-            let Some(pending) = ui_state
+            let previous_len = ui_state.placement.pending.len();
+            ui_state
                 .placement
                 .pending
-                .iter_mut()
-                .find(|pending| pending.sequence == ack.sequence)
-            else {
+                .retain(|pending| pending.sequence != ack.sequence);
+            if ui_state.placement.pending.len() == previous_len {
                 trace!(
                     "handle_world_object_placement_ack: ack seq={} had no pending placement",
                     ack.sequence
                 );
                 continue;
-            };
-            pending.accepted_final_position = Some(ack.final_position);
+            }
             ui_state.placement.last_reject = None;
         }
     }
@@ -1350,20 +1475,19 @@ fn handle_world_object_delete_ack(
 ) {
     for mut receiver in &mut receivers {
         for ack in receiver.receive() {
-            if let Some(pending) = ui_state
+            let previous_len = ui_state.selection.pending_deletes.len();
+            ui_state
                 .selection
                 .pending_deletes
-                .iter_mut()
-                .find(|pending| pending.sequence == ack.sequence)
-            {
-                pending.accepted = true;
-                ui_state.selection.last_reject = None;
-            } else {
+                .retain(|pending| pending.sequence != ack.sequence);
+            if ui_state.selection.pending_deletes.len() == previous_len {
                 trace!(
                     "handle_world_object_delete_ack: ack seq={} had no pending delete",
                     ack.sequence
                 );
+                continue;
             }
+            ui_state.selection.last_reject = None;
         }
     }
 }
@@ -1375,22 +1499,20 @@ fn handle_world_object_move_ack(
 ) {
     for mut receiver in &mut receivers {
         for ack in receiver.receive() {
-            if let Some(pending) = ui_state
+            let previous_len = ui_state.selection.pending_moves.len();
+            ui_state
                 .selection
                 .pending_moves
-                .iter_mut()
-                .find(|pending| pending.sequence == ack.sequence)
-            {
-                pending.accepted = true;
-                pending.final_position = ack.final_position;
-                ui_state.selection.last_reject = None;
-                ui_state.selection.move_armed = false;
-            } else {
+                .retain(|pending| pending.sequence != ack.sequence);
+            if ui_state.selection.pending_moves.len() == previous_len {
                 trace!(
                     "handle_world_object_move_ack: ack seq={} had no pending move",
                     ack.sequence
                 );
+                continue;
             }
+            ui_state.selection.last_reject = None;
+            ui_state.selection.move_armed = false;
         }
     }
 }
@@ -1402,21 +1524,19 @@ fn handle_world_object_rotate_ack(
 ) {
     for mut receiver in &mut receivers {
         for ack in receiver.receive() {
-            if let Some(pending) = ui_state
+            let previous_len = ui_state.selection.pending_rotations.len();
+            ui_state
                 .selection
                 .pending_rotations
-                .iter_mut()
-                .find(|pending| pending.sequence == ack.sequence)
-            {
-                pending.accepted = true;
-                pending.rotation = ack.rotation;
-                ui_state.selection.last_reject = None;
-            } else {
+                .retain(|pending| pending.sequence != ack.sequence);
+            if ui_state.selection.pending_rotations.len() == previous_len {
                 trace!(
                     "handle_world_object_rotate_ack: ack seq={} had no pending rotation",
                     ack.sequence
                 );
+                continue;
             }
+            ui_state.selection.last_reject = None;
         }
     }
 }

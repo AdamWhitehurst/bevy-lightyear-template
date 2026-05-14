@@ -6,7 +6,7 @@ use lightyear::prelude::*;
 use lightyear::webtransport::client::WebTransportClientIo;
 use protocol::*;
 use wasm_bindgen_test::*;
-use web::network::WebClientPlugin;
+use web::WebClientPlugin;
 
 wasm_bindgen_test_configure!(run_in_browser);
 

@@ -64,16 +64,26 @@ impl WorldObjectPlacementUi {
     }
 }
 
+/// Source used to select the current world object.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorldObjectSelectionSource {
+    Cursor,
+    NearbyList,
+}
+
 /// Client-owned world-object selection and edit request state shown by the spawn panel.
 pub struct WorldObjectSelectionUi {
     pub selected: Option<Entity>,
+    pub selection_source: Option<WorldObjectSelectionSource>,
     pub nearby_radius: f32,
     pub next_sequence: u32,
     pub pending_deletes: Vec<PendingWorldObjectDelete>,
     pub pending_moves: Vec<PendingWorldObjectMove>,
     pub pending_rotations: Vec<PendingWorldObjectRotation>,
     pub move_armed: bool,
+    pub cursor_pick_armed: bool,
     pub rotation_degrees_y: f32,
+    pub delete_requested: bool,
     pub rotate_requested: bool,
     pub last_reject: Option<WorldObjectEditRejectReason>,
 }
@@ -110,13 +120,16 @@ impl Default for WorldObjectSelectionUi {
     fn default() -> Self {
         Self {
             selected: None,
+            selection_source: None,
             nearby_radius: 12.0,
             next_sequence: 0,
             pending_deletes: Vec::new(),
             pending_moves: Vec::new(),
             pending_rotations: Vec::new(),
             move_armed: false,
+            cursor_pick_armed: false,
             rotation_degrees_y: 0.0,
+            delete_requested: false,
             rotate_requested: false,
             last_reject: None,
         }
@@ -247,70 +260,104 @@ fn draw_def_tab(
         }
 
         ui.separator();
-        ui.label("Existing World Object");
-        ui.label(match ui_state.selection.selected {
-            Some(entity) => format!("Selected: {entity:?}"),
-            None => "Selected: (none)".to_string(),
-        });
-        ui.add(
-            egui::Slider::new(&mut ui_state.selection.nearby_radius, 1.0..=64.0)
-                .text("Nearby radius"),
-        );
-        ui.label("Press Delete to delete selected.");
-        if ui
-            .add_enabled(
-                ui_state.selection.selected.is_some() && !ui_state.selection.move_armed,
-                egui::Button::new("Arm move"),
-            )
-            .clicked()
-        {
-            ui_state.selection.move_armed = true;
-            ui_state.selection.last_reject = None;
-        }
-        if ui_state.selection.move_armed && ui.button("Cancel move").clicked() {
-            ui_state.selection.move_armed = false;
-        }
-        ui.label(if ui_state.selection.move_armed {
-            "Move armed: click terrain to request server move."
-        } else {
-            "Arm move to preview moving the selected object."
-        });
-        ui.label(format!(
-            "Pending delete requests: {}",
-            ui_state.selection.pending_deletes.len()
-        ));
-        ui.add(
-            egui::Slider::new(&mut ui_state.selection.rotation_degrees_y, -180.0..=180.0)
-                .text("Yaw"),
-        );
-        if ui
-            .add_enabled(
-                ui_state.selection.selected.is_some(),
-                egui::Button::new("Rotate selected"),
-            )
-            .clicked()
-        {
-            ui_state.selection.rotate_requested = true;
-            ui_state.selection.last_reject = None;
-        }
-        ui.label(format!(
-            "Pending move requests: {}",
-            ui_state.selection.pending_moves.len()
-        ));
-        for pending in &ui_state.selection.pending_moves {
-            if let (Some(old), Some(new)) = (pending.old_chunk_pos, pending.new_chunk_pos) {
-                ui.label(format!("Move {}: {old:?} -> {new:?}", pending.sequence));
-            }
-        }
-        ui.label(format!(
-            "Pending rotation requests: {}",
-            ui_state.selection.pending_rotations.len()
-        ));
-        if let Some(reason) = &ui_state.selection.last_reject {
-            ui.label(format!("Last edit rejected: {reason:?}"));
-        }
+        draw_world_object_edit_tab(ui, ui_state);
     } else {
         ui.label("(WorldObjectDefRegistry not yet loaded)");
+    }
+}
+
+fn draw_world_object_edit_tab(ui: &mut egui::Ui, ui_state: &mut SpawnPanelUi) {
+    ui.label("Existing World Object");
+    ui.label(match ui_state.selection.selected {
+        Some(entity) => format!("Selected: {entity:?}"),
+        None => "Selected: (none)".to_string(),
+    });
+    ui.label(match ui_state.selection.selection_source {
+        Some(source) => format!("Selection source: {source:?}"),
+        None => "Selection source: (none)".to_string(),
+    });
+    if ui
+        .add_enabled(
+            !ui_state.selection.cursor_pick_armed,
+            egui::Button::new("Arm cursor pick"),
+        )
+        .clicked()
+    {
+        ui_state.selection.cursor_pick_armed = true;
+        ui_state.selection.last_reject = None;
+    }
+    if ui_state.selection.cursor_pick_armed && ui.button("Cancel cursor pick").clicked() {
+        ui_state.selection.cursor_pick_armed = false;
+    }
+    ui.label(if ui_state.selection.cursor_pick_armed {
+        "Cursor pick armed: click an existing world object in-game."
+    } else {
+        "Arm cursor pick, then click an existing world object in-game."
+    });
+    ui.add(
+        egui::Slider::new(&mut ui_state.selection.nearby_radius, 1.0..=64.0).text("Nearby radius"),
+    );
+    if ui
+        .add_enabled(
+            ui_state.selection.selected.is_some(),
+            egui::Button::new("Delete selected"),
+        )
+        .clicked()
+    {
+        ui_state.selection.delete_requested = true;
+        ui_state.selection.last_reject = None;
+    }
+    ui.label("Press Delete to delete selected.");
+    if ui
+        .add_enabled(
+            ui_state.selection.selected.is_some() && !ui_state.selection.move_armed,
+            egui::Button::new("Arm move"),
+        )
+        .clicked()
+    {
+        ui_state.selection.move_armed = true;
+        ui_state.selection.last_reject = None;
+    }
+    if ui_state.selection.move_armed && ui.button("Cancel move").clicked() {
+        ui_state.selection.move_armed = false;
+    }
+    ui.label(if ui_state.selection.move_armed {
+        "Move armed: click terrain to request server move."
+    } else {
+        "Arm move to preview moving the selected object."
+    });
+    ui.label(format!(
+        "Pending delete requests: {}",
+        ui_state.selection.pending_deletes.len()
+    ));
+    ui.add(
+        egui::Slider::new(&mut ui_state.selection.rotation_degrees_y, -180.0..=180.0).text("Yaw"),
+    );
+    if ui
+        .add_enabled(
+            ui_state.selection.selected.is_some(),
+            egui::Button::new("Rotate selected"),
+        )
+        .clicked()
+    {
+        ui_state.selection.rotate_requested = true;
+        ui_state.selection.last_reject = None;
+    }
+    ui.label(format!(
+        "Pending move requests: {}",
+        ui_state.selection.pending_moves.len()
+    ));
+    for pending in &ui_state.selection.pending_moves {
+        if let (Some(old), Some(new)) = (pending.old_chunk_pos, pending.new_chunk_pos) {
+            ui.label(format!("Move {}: {old:?} -> {new:?}", pending.sequence));
+        }
+    }
+    ui.label(format!(
+        "Pending rotation requests: {}",
+        ui_state.selection.pending_rotations.len()
+    ));
+    if let Some(reason) = &ui_state.selection.last_reject {
+        ui.label(format!("Last edit rejected: {reason:?}"));
     }
 }
 
