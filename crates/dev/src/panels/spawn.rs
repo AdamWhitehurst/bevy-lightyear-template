@@ -1,11 +1,11 @@
-//! Spawn panel. Selects between terrain editing, authoritative definition-driven
-//! world-object placement, free-form client-local spawning, and existing world-object
-//! selection/editing.
+//! Spawn panel. Selects the active `EditingMode` for terrain editing, authoritative
+//! definition-driven world-object placement, free-form client-local spawning, and
+//! existing world-object selection/editing.
 //!
 //! Free-form spawns are client-local (no `Replicate`) at the world origin and
 //! carry a `DevSpawned` marker.
 
-use crate::state::DevInspectorState;
+use crate::state::{DevInspectorState, EditingMode};
 use bevy::ecs::reflect::ReflectComponent;
 use bevy::prelude::ReflectDefault;
 use bevy::prelude::*;
@@ -20,18 +20,8 @@ use protocol::world_object::{
 #[derive(Component)]
 pub struct DevSpawned;
 
-#[derive(Default, PartialEq, Eq)]
-enum SpawnPanelMode {
-    #[default]
-    Terrain,
-    PlaceDefinition,
-    PlaceFreeForm,
-    SelectEdit,
-}
-
 #[derive(Resource, Default)]
 pub struct SpawnPanelUi {
-    mode: SpawnPanelMode,
     pub selected_object: Option<WorldObjectId>,
     pub placement: WorldObjectPlacementUi,
     pub selection: WorldObjectSelectionUi,
@@ -163,6 +153,7 @@ pub struct SpawnPanelPlugin;
 impl Plugin for SpawnPanelPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SpawnPanelUi>()
+            .init_resource::<EditingMode>()
             .add_systems(Update, toggle_spawn_panel)
             .add_systems(
                 EguiPrimaryContextPass,
@@ -184,6 +175,7 @@ fn toggle_spawn_panel(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<DevInsp
 fn draw_spawn_panel(
     mut contexts: EguiContexts,
     mut ui_state: ResMut<SpawnPanelUi>,
+    mut editing_mode: ResMut<EditingMode>,
     // Optional because definitions load during startup; the panel renders a loading label until ready.
     world_objects: Option<Res<WorldObjectDefRegistry>>,
     type_registry: Res<AppTypeRegistry>,
@@ -196,29 +188,29 @@ fn draw_spawn_panel(
     egui::Window::new("▧ World Objects")
         .default_width(130.0)
         .show(ctx, |ui| {
-            draw_primary_tabs(ui, &mut ui_state.mode);
+            draw_primary_tabs(ui, &mut editing_mode);
             ui.add_space(4.0);
-            match ui_state.mode {
-                SpawnPanelMode::Terrain => draw_terrain_tab(ui),
-                SpawnPanelMode::PlaceDefinition => {
+            match *editing_mode {
+                EditingMode::Terrain => draw_terrain_tab(ui),
+                EditingMode::PlaceDefinition => {
                     draw_definition_placement(ui, &mut ui_state, world_objects.as_deref())
                 }
-                SpawnPanelMode::PlaceFreeForm => {
+                EditingMode::PlaceFreeForm => {
                     draw_freeform_tab(ui, &mut ui_state, &type_registry, &mut commands)
                 }
-                SpawnPanelMode::SelectEdit => draw_world_object_edit_tab(ui, &mut ui_state),
+                EditingMode::SelectEdit => draw_world_object_edit_tab(ui, &mut ui_state),
             }
             ui.add_space(4.0);
             draw_status_section(ui, &ui_state);
         });
 }
 
-fn draw_primary_tabs(ui: &mut egui::Ui, mode: &mut SpawnPanelMode) {
+fn draw_primary_tabs(ui: &mut egui::Ui, editing_mode: &mut EditingMode) {
     ui.horizontal(|ui| {
-        ui.selectable_value(mode, SpawnPanelMode::Terrain, "▦  Terrain");
-        ui.selectable_value(mode, SpawnPanelMode::PlaceDefinition, "▧  Place");
-        ui.selectable_value(mode, SpawnPanelMode::PlaceFreeForm, "□  Free");
-        ui.selectable_value(mode, SpawnPanelMode::SelectEdit, "↖  Edit");
+        ui.selectable_value(editing_mode, EditingMode::Terrain, "▦  Terrain");
+        ui.selectable_value(editing_mode, EditingMode::PlaceDefinition, "▧  Place");
+        ui.selectable_value(editing_mode, EditingMode::PlaceFreeForm, "□  Free");
+        ui.selectable_value(editing_mode, EditingMode::SelectEdit, "↖  Edit");
     });
 }
 

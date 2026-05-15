@@ -6,7 +6,7 @@ use bevy::gizmos::config::GizmoConfigStore;
 use bevy::prelude::*;
 
 mod state;
-pub use state::{DevInspectorState, PanelFlags};
+pub use state::{DevInspectorState, EditingMode, PanelFlags};
 
 #[cfg(feature = "inspector")]
 pub mod panels;
@@ -18,6 +18,7 @@ impl Plugin for DevPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(PhysicsDebugPlugin::default())
             .init_resource::<DevInspectorState>()
+            .init_resource::<EditingMode>()
             .add_systems(Startup, hide_physics_debug)
             .add_systems(Update, (toggle_physics_debug, toggle_dev_inspector));
 

@@ -2,6 +2,16 @@
 
 use bevy::prelude::*;
 
+/// Active dev editing mode used to route terrain and world-object input.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EditingMode {
+    #[default]
+    Terrain,
+    PlaceDefinition,
+    PlaceFreeForm,
+    SelectEdit,
+}
+
 /// Master toggle + per-panel toggles. F4 flips `enabled`; per-panel F-keys
 /// flip the matching field in `panels`.
 #[derive(Resource, Default)]

@@ -11,6 +11,7 @@ use dev::panels::spawn::{
 };
 #[cfg(feature = "spawn-panel")]
 use dev::DevInspectorState;
+use dev::EditingMode;
 use leafwing_input_manager::prelude::*;
 #[cfg(feature = "spawn-panel")]
 use lightyear::prelude::Replicated;
@@ -36,6 +37,10 @@ use voxel_map_engine::prelude::{
 };
 
 const RAYCAST_MAX_DISTANCE: f32 = 100.0;
+
+fn in_editing_mode(mode: EditingMode) -> impl Fn(Res<EditingMode>) -> bool + Clone {
+    move |current_mode: Res<EditingMode>| *current_mode == mode
+}
 
 #[cfg(feature = "spawn-panel")]
 /// Marker for local-only world-object placement preview entities.
@@ -129,6 +134,7 @@ impl Plugin for ClientMapPlugin {
         app.add_plugins(VoxelPlugin)
             .init_resource::<MapRegistry>()
             .init_resource::<VoxelPredictionState>()
+            .init_resource::<EditingMode>()
             // handle_chunk_data_sync, handle_unload_column,
             // attach_chunk_ticket_to_player, and attach_chunk_colliders are
             // registered in ClientTransitionPlugin's chain (after
@@ -159,25 +165,33 @@ impl Plugin for ClientMapPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    handle_voxel_input,
+                    handle_voxel_input.run_if(in_editing_mode(EditingMode::Terrain)),
                     #[cfg(feature = "spawn-panel")]
-                    update_world_object_nearby_selection,
+                    update_world_object_nearby_selection
+                        .run_if(in_editing_mode(EditingMode::SelectEdit)),
                     #[cfg(feature = "spawn-panel")]
-                    handle_world_object_cursor_pick_input,
+                    handle_world_object_cursor_pick_input
+                        .run_if(in_editing_mode(EditingMode::SelectEdit)),
                     #[cfg(feature = "spawn-panel")]
-                    handle_world_object_delete_input,
+                    handle_world_object_delete_input
+                        .run_if(in_editing_mode(EditingMode::SelectEdit)),
                     #[cfg(feature = "spawn-panel")]
-                    handle_world_object_move_input,
+                    handle_world_object_move_input.run_if(in_editing_mode(EditingMode::SelectEdit)),
                     #[cfg(feature = "spawn-panel")]
-                    handle_world_object_rotate_input,
+                    handle_world_object_rotate_input
+                        .run_if(in_editing_mode(EditingMode::SelectEdit)),
                     #[cfg(feature = "spawn-panel")]
-                    handle_world_object_placement_input,
+                    handle_world_object_placement_input
+                        .run_if(in_editing_mode(EditingMode::PlaceDefinition)),
                     #[cfg(feature = "spawn-panel")]
-                    update_world_object_placement_preview,
+                    update_world_object_placement_preview
+                        .run_if(in_editing_mode(EditingMode::PlaceDefinition)),
                     #[cfg(feature = "spawn-panel")]
-                    cleanup_stale_world_object_edit_previews,
+                    cleanup_stale_world_object_edit_previews
+                        .run_if(in_editing_mode(EditingMode::SelectEdit)),
                     #[cfg(feature = "spawn-panel")]
-                    update_world_object_edit_preview,
+                    update_world_object_edit_preview
+                        .run_if(in_editing_mode(EditingMode::SelectEdit)),
                     #[cfg(feature = "spawn-panel")]
                     reconcile_placement_preview_on_replication,
                     #[cfg(feature = "spawn-panel")]
@@ -355,16 +369,7 @@ fn handle_voxel_input(
     action_query: Query<&ActionState<PlayerActions>, With<Controlled>>,
     mut message_sender: Query<&mut MessageSender<VoxelEditRequest>>,
     mut prediction_state: ResMut<VoxelPredictionState>,
-    #[cfg(feature = "spawn-panel")] placement_ui: Option<Res<SpawnPanelUi>>,
 ) {
-    #[cfg(feature = "spawn-panel")]
-    if placement_ui.as_ref().is_some_and(|ui| {
-        ui.placement.armed || ui.selection.cursor_pick_armed || ui.selection.selected.is_some()
-    }) {
-        trace!("handle_voxel_input: world object edit/placement active; skipping voxel input");
-        return;
-    }
-
     let Ok(chunk_ticket) = player_query.single() else {
         trace!("handle_voxel_input: no predicted player with ChunkTicket");
         return;
