@@ -34,13 +34,24 @@ fn world_object_placement_ui_sequences_and_pending_ack() {
 #[cfg(feature = "spawn-panel")]
 #[test]
 fn world_object_selection_ui_sequences_and_pending_delete_ack() {
-    use dev::panels::spawn::{PendingWorldObjectDelete, WorldObjectSelectionUi};
+    use dev::panels::spawn::{NearbyWorldObject, PendingWorldObjectDelete, WorldObjectSelectionUi};
+    use protocol::world_object::WorldObjectId;
 
     let mut ui = WorldObjectSelectionUi::default();
     let target = Entity::from_raw_u32(42).expect("test entity id should be valid");
     assert!(!ui.cursor_pick_armed);
+    assert!(!ui.nearby_scan_requested);
+    assert!(ui.nearby_objects.is_empty());
     ui.cursor_pick_armed = true;
+    ui.nearby_scan_requested = true;
+    ui.nearby_objects.push(NearbyWorldObject {
+        entity: target,
+        object_id: WorldObjectId("near".to_string()),
+        distance: 2.0,
+    });
     assert!(ui.cursor_pick_armed);
+    assert!(ui.nearby_scan_requested);
+    assert_eq!(ui.nearby_objects[0].entity, target);
     assert_eq!(ui.next_sequence(), 0);
     assert_eq!(ui.next_sequence(), 1);
     ui.pending_deletes.push(PendingWorldObjectDelete {
@@ -54,15 +65,15 @@ fn world_object_selection_ui_sequences_and_pending_delete_ack() {
 
 #[cfg(feature = "spawn-panel")]
 #[test]
-fn nearest_world_object_in_radius_chooses_closest_replicated_object() {
+fn nearby_world_objects_in_radius_lists_replicated_objects_by_distance() {
+    use ::client::map::nearby_world_objects_in_radius;
     use avian3d::prelude::Position;
-    use ::client::map::nearest_world_object_in_radius;
     use protocol::world_object::WorldObjectId;
 
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     let receiver = app.world_mut().spawn_empty().id();
-    let far = app
+    let _far = app
         .world_mut()
         .spawn((
             WorldObjectId("far".to_string()),
@@ -81,14 +92,14 @@ fn nearest_world_object_in_radius_chooses_closest_replicated_object() {
         ))
         .id();
 
-    let selected = app
+    let nearby = app
         .world_mut()
         .run_system_once(
             |query: Query<
-                (Entity, &Position, Option<&MapInstanceId>),
+                (Entity, &WorldObjectId, &Position, Option<&MapInstanceId>),
                 (With<WorldObjectId>, With<Replicated>),
             >| {
-                nearest_world_object_in_radius(
+                nearby_world_objects_in_radius(
                     Vec3::ZERO,
                     6.0,
                     &query,
@@ -97,16 +108,18 @@ fn nearest_world_object_in_radius_chooses_closest_replicated_object() {
             },
         )
         .expect("selection system should run");
-    assert_eq!(selected, Some(near));
-    assert_ne!(Some(far), Some(near));
+    assert_eq!(nearby.len(), 2);
+    assert_eq!(nearby[0].entity, near);
+    assert_eq!(nearby[0].object_id, WorldObjectId("near".to_string()));
+    assert!(nearby[0].distance < nearby[1].distance);
 }
 
 #[cfg(feature = "spawn-panel")]
 #[test]
 fn placement_preview_entities_are_visual_only() {
-    use avian3d::prelude::{Collider, Position};
     use ::client::map::{spawn_world_object_placement_preview, WorldObjectPlacementPreview};
     use ::client::world_object::DefaultVoxModelMaterial;
+    use avian3d::prelude::{Collider, Position};
     use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
     use protocol::world_object::{WorldObjectDef, WorldObjectId};
     use std::collections::HashMap;
@@ -161,8 +174,8 @@ fn placement_preview_entities_are_visual_only() {
 #[cfg(feature = "spawn-panel")]
 #[test]
 fn replicated_object_reconciles_matching_preview_only() {
-    use avian3d::prelude::Position;
     use ::client::map::{reconcile_placement_preview_on_replication, WorldObjectPlacementPreview};
+    use avian3d::prelude::Position;
     use dev::panels::spawn::{PendingWorldObjectPlacement, SpawnPanelUi};
     use protocol::world_object::WorldObjectId;
 
@@ -243,9 +256,9 @@ fn edit_preview_transform_applies_placement_offset() {
 #[cfg(feature = "spawn-panel")]
 #[test]
 fn edit_preview_entities_are_visual_only() {
-    use avian3d::prelude::{Collider, Position};
     use ::client::map::{spawn_world_object_edit_preview, WorldObjectEditPreview};
     use ::client::world_object::DefaultVoxModelMaterial;
+    use avian3d::prelude::{Collider, Position};
     use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
     use protocol::world_object::{WorldObjectDef, WorldObjectId};
     use std::collections::HashMap;
@@ -302,8 +315,8 @@ fn edit_preview_entities_are_visual_only() {
 #[cfg(feature = "spawn-panel")]
 #[test]
 fn edit_preview_reconciles_when_replicated_rotation_matches_accepted_rotate() {
-    use avian3d::prelude::Rotation;
     use ::client::map::{reconcile_edit_preview_on_transform_replication, WorldObjectEditPreview};
+    use avian3d::prelude::Rotation;
     use dev::panels::spawn::{PendingWorldObjectRotation, SpawnPanelUi};
     use protocol::world_object::WorldObjectId;
 
@@ -363,10 +376,10 @@ fn edit_preview_reconciles_when_replicated_rotation_matches_accepted_rotate() {
 #[cfg(feature = "spawn-panel")]
 #[test]
 fn cursor_pick_prefers_nearest_object_along_ray() {
+    use ::client::map::pick_world_object_collider_from_ray;
     use avian3d::prelude::{
         Collider, CollisionLayers, PhysicsPlugins, Position, RigidBody, Rotation, SpatialQuery,
     };
-    use ::client::map::pick_world_object_collider_from_ray;
     use protocol::physics::MapCollisionHooks;
     use protocol::world_object::WorldObjectId;
 
@@ -455,8 +468,8 @@ fn cleanup_stale_edit_preview_is_removed_when_target_despawns() {
 #[cfg(feature = "spawn-panel")]
 #[test]
 fn edit_preview_reconciles_when_replicated_transform_matches_accepted_move() {
-    use avian3d::prelude::Position;
     use ::client::map::{reconcile_edit_preview_on_transform_replication, WorldObjectEditPreview};
+    use avian3d::prelude::Position;
     use dev::panels::spawn::{PendingWorldObjectMove, SpawnPanelUi};
     use protocol::world_object::WorldObjectId;
 

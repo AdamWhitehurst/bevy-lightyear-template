@@ -5,8 +5,9 @@ use avian3d::prelude::{Position, Rotation, SpatialQuery, SpatialQueryFilter};
 use bevy::{prelude::*, window::PrimaryWindow};
 #[cfg(feature = "spawn-panel")]
 use dev::panels::spawn::{
-    PendingWorldObjectDelete, PendingWorldObjectMove, PendingWorldObjectPlacement,
-    PendingWorldObjectRotation, SpawnPanelUi, WorldObjectSelectionSource,
+    NearbyWorldObject, PendingWorldObjectDelete, PendingWorldObjectMove,
+    PendingWorldObjectPlacement, PendingWorldObjectRotation, SpawnPanelUi,
+    WorldObjectSelectionSource,
 };
 #[cfg(feature = "spawn-panel")]
 use dev::DevInspectorState;
@@ -521,29 +522,34 @@ pub fn spawn_world_object_edit_preview(
 }
 
 #[cfg(feature = "spawn-panel")]
-/// Returns the nearest replicated world object in radius on the current map.
-pub fn nearest_world_object_in_radius(
+/// Returns replicated world objects in radius on the current map sorted by distance.
+pub fn nearby_world_objects_in_radius(
     origin: Vec3,
     radius: f32,
     objects: &Query<
-        (Entity, &Position, Option<&MapInstanceId>),
+        (Entity, &WorldObjectId, &Position, Option<&MapInstanceId>),
         (With<WorldObjectId>, With<Replicated>),
     >,
     current_map: Option<&MapInstanceId>,
-) -> Option<Entity> {
+) -> Vec<NearbyWorldObject> {
     let radius_sq = radius * radius;
-    objects
+    let mut nearby: Vec<NearbyWorldObject> = objects
         .iter()
-        .filter(|(_, _, object_map)| match (current_map, object_map) {
+        .filter(|(_, _, _, object_map)| match (current_map, object_map) {
             (Some(current), Some(object_map)) => *object_map == current,
             _ => true,
         })
-        .filter_map(|(entity, position, _)| {
+        .filter_map(|(entity, object_id, position, _)| {
             let dist_sq = position.0.distance_squared(origin);
-            (dist_sq <= radius_sq).then_some((entity, dist_sq))
+            (dist_sq <= radius_sq).then(|| NearbyWorldObject {
+                entity,
+                object_id: object_id.clone(),
+                distance: dist_sq.sqrt(),
+            })
         })
-        .min_by(|(_, a), (_, b)| a.total_cmp(b))
-        .map(|(entity, _)| entity)
+        .collect();
+    nearby.sort_by(|a, b| a.distance.total_cmp(&b.distance));
+    nearby
 }
 
 #[cfg(feature = "spawn-panel")]
@@ -588,37 +594,26 @@ fn update_world_object_nearby_selection(
         (With<Predicted>, With<Controlled>, With<CharacterMarker>),
     >,
     object_query: Query<
-        (Entity, &Position, Option<&MapInstanceId>),
+        (Entity, &WorldObjectId, &Position, Option<&MapInstanceId>),
         (With<WorldObjectId>, With<Replicated>),
     >,
 ) {
-    if ui_state.selection.cursor_pick_armed {
-        trace!(
-            "update_world_object_nearby_selection: cursor pick armed; skipping nearby selection"
-        );
+    if !ui_state.selection.nearby_scan_requested {
+        trace!("update_world_object_nearby_selection: scan not requested");
         return;
     }
+    ui_state.selection.nearby_scan_requested = false;
     let Ok((player_position, player_map)) = player_query.single() else {
         trace!("update_world_object_nearby_selection: no predicted controlled player position");
+        ui_state.selection.nearby_objects.clear();
         return;
     };
-    if ui_state
-        .selection
-        .selected
-        .is_some_and(|entity| object_query.get(entity).is_ok())
-    {
-        trace!("update_world_object_nearby_selection: selected object still exists");
-        return;
-    }
-    ui_state.selection.selected = nearest_world_object_in_radius(
+    ui_state.selection.nearby_objects = nearby_world_objects_in_radius(
         player_position.0,
         ui_state.selection.nearby_radius,
         &object_query,
         Some(player_map),
     );
-    if ui_state.selection.selected.is_some() {
-        ui_state.selection.selection_source = Some(WorldObjectSelectionSource::NearbyList);
-    }
 }
 
 #[cfg(feature = "spawn-panel")]

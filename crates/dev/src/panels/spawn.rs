@@ -1,8 +1,7 @@
-//! Spawn panel. Two tabs:
-//!   * **Def-driven**: pick a registered `WorldObjectId` and arm authoritative
-//!     server placement from client terrain input.
-//!   * **Free-form**: pick any reflected `Component` from the `AppTypeRegistry` and
-//!     instantiate client-locally via `ReflectDefault`.
+//! Spawn panel. Selects between terrain editing, authoritative definition-driven
+//! world-object placement, free-form client-local spawning, and existing world-object
+//! selection/editing.
+//!
 //! Free-form spawns are client-local (no `Replicate`) at the world origin and
 //! carry a `DevSpawned` marker.
 
@@ -22,15 +21,17 @@ use protocol::world_object::{
 pub struct DevSpawned;
 
 #[derive(Default, PartialEq, Eq)]
-pub enum SpawnTab {
+enum SpawnPanelMode {
     #[default]
-    DefDriven,
-    FreeForm,
+    Terrain,
+    PlaceDefinition,
+    PlaceFreeForm,
+    SelectEdit,
 }
 
 #[derive(Resource, Default)]
 pub struct SpawnPanelUi {
-    tab: SpawnTab,
+    mode: SpawnPanelMode,
     pub selected_object: Option<WorldObjectId>,
     pub placement: WorldObjectPlacementUi,
     pub selection: WorldObjectSelectionUi,
@@ -76,6 +77,8 @@ pub struct WorldObjectSelectionUi {
     pub selected: Option<Entity>,
     pub selection_source: Option<WorldObjectSelectionSource>,
     pub nearby_radius: f32,
+    pub nearby_scan_requested: bool,
+    pub nearby_objects: Vec<NearbyWorldObject>,
     pub next_sequence: u32,
     pub pending_deletes: Vec<PendingWorldObjectDelete>,
     pub pending_moves: Vec<PendingWorldObjectMove>,
@@ -94,6 +97,14 @@ pub struct PendingWorldObjectDelete {
     pub sequence: u32,
     pub target: Entity,
     pub accepted: bool,
+}
+
+/// A nearby world object entry shown by the selection UI.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NearbyWorldObject {
+    pub entity: Entity,
+    pub object_id: WorldObjectId,
+    pub distance: f32,
 }
 
 /// A pending authoritative world-object move request.
@@ -121,7 +132,9 @@ impl Default for WorldObjectSelectionUi {
         Self {
             selected: None,
             selection_source: None,
-            nearby_radius: 12.0,
+            nearby_radius: 64.0,
+            nearby_scan_requested: false,
+            nearby_objects: Vec::new(),
             next_sequence: 0,
             pending_deletes: Vec::new(),
             pending_moves: Vec::new(),
@@ -180,185 +193,263 @@ fn draw_spawn_panel(
         trace!("draw_spawn_panel: EguiContexts not ready, skipping frame");
         return;
     };
-    egui::Window::new("Spawn").show(ctx, |ui| {
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut ui_state.tab, SpawnTab::DefDriven, "Def-driven");
-            ui.selectable_value(&mut ui_state.tab, SpawnTab::FreeForm, "Free-form");
+    egui::Window::new("▧ World Objects")
+        .default_width(130.0)
+        .show(ctx, |ui| {
+            draw_primary_tabs(ui, &mut ui_state.mode);
+            ui.add_space(4.0);
+            match ui_state.mode {
+                SpawnPanelMode::Terrain => draw_terrain_tab(ui),
+                SpawnPanelMode::PlaceDefinition => {
+                    draw_definition_placement(ui, &mut ui_state, world_objects.as_deref())
+                }
+                SpawnPanelMode::PlaceFreeForm => {
+                    draw_freeform_tab(ui, &mut ui_state, &type_registry, &mut commands)
+                }
+                SpawnPanelMode::SelectEdit => draw_world_object_edit_tab(ui, &mut ui_state),
+            }
+            ui.add_space(4.0);
+            draw_status_section(ui, &ui_state);
         });
-        ui.separator();
-        ui.label(
-            "Def-driven placement is server-authoritative; free-form spawning is client-local.",
-        );
-        ui.separator();
-        match ui_state.tab {
-            SpawnTab::DefDriven => draw_def_tab(ui, &mut ui_state, world_objects.as_deref()),
-            SpawnTab::FreeForm => {
-                draw_freeform_tab(ui, &mut ui_state, &type_registry, &mut commands)
+}
+
+fn draw_primary_tabs(ui: &mut egui::Ui, mode: &mut SpawnPanelMode) {
+    ui.horizontal(|ui| {
+        ui.selectable_value(mode, SpawnPanelMode::Terrain, "▦  Terrain");
+        ui.selectable_value(mode, SpawnPanelMode::PlaceDefinition, "▧  Place");
+        ui.selectable_value(mode, SpawnPanelMode::PlaceFreeForm, "□  Free");
+        ui.selectable_value(mode, SpawnPanelMode::SelectEdit, "↖  Edit");
+    });
+}
+
+fn draw_section(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.vertical(|ui| {
+            ui.label(egui::RichText::new(title).strong());
+            ui.add_space(3.0);
+            add_contents(ui);
+        });
+    });
+}
+
+fn draw_terrain_tab(ui: &mut egui::Ui) {
+    draw_section(ui, "TERRAIN", |_| {});
+}
+
+fn draw_definition_placement(
+    ui: &mut egui::Ui,
+    ui_state: &mut SpawnPanelUi,
+    world_objects: Option<&WorldObjectDefRegistry>,
+) {
+    let Some(reg) = world_objects else {
+        ui.label("World object definitions are still loading.");
+        return;
+    };
+
+    egui::Grid::new("definition_placement_grid")
+        .num_columns(2)
+        .spacing([4.0, 2.0])
+        .show(ui, |ui| {
+            ui.label("Object Type");
+            egui::ComboBox::from_id_salt("world_object_picker")
+                .width(70.0)
+                .selected_text(
+                    ui_state
+                        .selected_object
+                        .as_ref()
+                        .map(|i| i.0.as_str())
+                        .unwrap_or("(pick)"),
+                )
+                .show_ui(ui, |ui| {
+                    let mut ids: Vec<&WorldObjectId> = reg.objects.keys().collect();
+                    ids.sort_by(|a, b| a.0.cmp(&b.0));
+                    for id in ids {
+                        ui.selectable_value(&mut ui_state.selected_object, Some(id.clone()), &id.0);
+                    }
+                });
+            ui.end_row();
+        });
+
+    ui.add_space(4.0);
+    let has_selection = ui_state.selected_object.is_some();
+    let button_label = if ui_state.placement.armed {
+        "Cancel Placement"
+    } else {
+        "⌖  Place Object"
+    };
+    if ui
+        .add_enabled(
+            has_selection,
+            egui::Button::new(button_label).min_size(egui::vec2(55.0, 7.0)),
+        )
+        .clicked()
+    {
+        ui_state.placement.armed = !ui_state.placement.armed;
+        ui_state.placement.last_reject = None;
+    }
+    if let Some(reason) = &ui_state.placement.last_reject {
+        ui.label(format!("Last placement rejected: {reason:?}"));
+    }
+}
+
+fn draw_world_object_edit_tab(ui: &mut egui::Ui, ui_state: &mut SpawnPanelUi) {
+    draw_section(ui, "SELECTION", |ui| {
+        ui.horizontal(|ui| {
+            ui.group(|ui| {
+                ui.label("Selected Object");
+                ui.label(match ui_state.selection.selected {
+                    Some(entity) => format!("{entity:?}"),
+                    None => "(none)".to_string(),
+                });
+                ui.label(match ui_state.selection.selection_source {
+                    Some(source) => format!("↖  Source: {source:?}"),
+                    None => "↖  Source: (none)".to_string(),
+                });
+            });
+            ui.vertical(|ui| {
+                let pick_label = if ui_state.selection.cursor_pick_armed {
+                    "Cancel Pick"
+                } else {
+                    "⌖  Pick from Scene"
+                };
+                if ui
+                    .add(egui::Button::new(pick_label).min_size(egui::vec2(55.0, 7.0)))
+                    .clicked()
+                {
+                    ui_state.selection.cursor_pick_armed = !ui_state.selection.cursor_pick_armed;
+                    ui_state.selection.last_reject = None;
+                }
+                ui.horizontal(|ui| {
+                    let has_selection = ui_state.selection.selected.is_some();
+                    let move_label = if ui_state.selection.move_armed {
+                        "Cancel Move"
+                    } else {
+                        "↔  Move"
+                    };
+                    if ui
+                        .add_enabled(has_selection, egui::Button::new(move_label))
+                        .clicked()
+                    {
+                        ui_state.selection.move_armed = !ui_state.selection.move_armed;
+                        ui_state.selection.last_reject = None;
+                    }
+                    if ui
+                        .add_enabled(has_selection, egui::Button::new("⟳  Rotate"))
+                        .clicked()
+                    {
+                        ui_state.selection.rotate_requested = true;
+                        ui_state.selection.last_reject = None;
+                    }
+                    if ui
+                        .add_enabled(has_selection, egui::Button::new("🗑  Delete"))
+                        .clicked()
+                    {
+                        ui_state.selection.delete_requested = true;
+                        ui_state.selection.last_reject = None;
+                    }
+                });
+            });
+        });
+        ui.horizontal(|ui| {
+            ui.label(format!(
+                "Nearby Objects ({})",
+                ui_state.selection.nearby_objects.len()
+            ));
+            if ui.button("⟳").clicked() {
+                ui_state.selection.nearby_scan_requested = true;
+            }
+        });
+        egui::ScrollArea::vertical()
+            .max_height(80.0)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                for nearby in &ui_state.selection.nearby_objects {
+                    let selected = ui_state.selection.selected == Some(nearby.entity);
+                    let label = format!(
+                        "{}  {}  {:.1}m",
+                        nearby.entity, nearby.object_id.0, nearby.distance
+                    );
+                    if ui
+                        .add_sized(
+                            [ui.available_width(), ui.spacing().interact_size.y],
+                            egui::Button::new(label).selected(selected),
+                        )
+                        .clicked()
+                    {
+                        ui_state.selection.selected = Some(nearby.entity);
+                        ui_state.selection.selection_source =
+                            Some(WorldObjectSelectionSource::NearbyList);
+                    }
+                }
+            });
+        if let Some(reason) = &ui_state.selection.last_reject {
+            ui.label(format!("Last edit rejected: {reason:?}"));
+        }
+    });
+
+    ui.add_space(4.0);
+    draw_section(ui, "TRANSFORM", |ui| {
+        ui.label("⟳  Yaw");
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::Slider::new(&mut ui_state.selection.rotation_degrees_y, -180.0..=180.0)
+                    .show_value(false),
+            );
+            ui.label(format!("{:.0}°", ui_state.selection.rotation_degrees_y));
+        });
+        for pending in &ui_state.selection.pending_moves {
+            if let (Some(old), Some(new)) = (pending.old_chunk_pos, pending.new_chunk_pos) {
+                ui.label(format!("Move {}: {old:?} -> {new:?}", pending.sequence));
             }
         }
     });
 }
 
-fn draw_def_tab(
-    ui: &mut egui::Ui,
-    ui_state: &mut SpawnPanelUi,
-    world_objects: Option<&WorldObjectDefRegistry>,
-) {
-    ui.label("World Object");
-    if let Some(reg) = world_objects {
-        egui::ComboBox::from_id_salt("world_object_picker")
-            .selected_text(
-                ui_state
-                    .selected_object
-                    .as_ref()
-                    .map(|i| i.0.as_str())
-                    .unwrap_or("(pick)"),
-            )
-            .show_ui(ui, |ui| {
-                let mut ids: Vec<&WorldObjectId> = reg.objects.keys().collect();
-                ids.sort_by(|a, b| a.0.cmp(&b.0));
-                for id in ids {
-                    ui.selectable_value(&mut ui_state.selected_object, Some(id.clone()), &id.0);
-                }
-            });
-        let has_selection = ui_state.selected_object.is_some();
-        if ui
-            .add_enabled(
-                has_selection && !ui_state.placement.armed,
-                egui::Button::new("Arm placement"),
-            )
-            .clicked()
-        {
-            ui_state.placement.armed = true;
-            ui_state.placement.last_reject = None;
-        }
-
-        if ui_state.placement.armed && ui.button("Cancel placement").clicked() {
-            ui_state.placement.armed = false;
-        }
-
-        ui.label(if ui_state.placement.armed {
-            "Placement armed: click terrain to request server placement."
-        } else {
-            "Select an object and arm placement."
+fn draw_status_section(ui: &mut egui::Ui, ui_state: &SpawnPanelUi) {
+    egui::CollapsingHeader::new("STATUS")
+        .default_open(false)
+        .show(ui, |ui| {
+            egui::Grid::new("world_object_status_grid")
+                .num_columns(4)
+                .spacing([2.0, 1.5])
+                .show(ui, |ui| {
+                    draw_status_item(
+                        ui,
+                        "↧  Pending placement requests",
+                        ui_state.placement.pending.len(),
+                    );
+                    draw_status_item(
+                        ui,
+                        "↔  Pending move requests",
+                        ui_state.selection.pending_moves.len(),
+                    );
+                    ui.end_row();
+                    let accepted = ui_state
+                        .placement
+                        .pending
+                        .iter()
+                        .filter(|pending| pending.accepted_final_position.is_some())
+                        .count();
+                    draw_status_item(ui, "✓  Accepted awaiting replication", accepted);
+                    draw_status_item(
+                        ui,
+                        "⟳  Pending rotation requests",
+                        ui_state.selection.pending_rotations.len(),
+                    );
+                    ui.end_row();
+                    draw_status_item(
+                        ui,
+                        "🗑  Pending delete requests",
+                        ui_state.selection.pending_deletes.len(),
+                    );
+                    ui.end_row();
+                });
         });
-        ui.label(format!(
-            "Pending placement requests: {}",
-            ui_state.placement.pending.len()
-        ));
-        let accepted = ui_state
-            .placement
-            .pending
-            .iter()
-            .filter(|pending| pending.accepted_final_position.is_some())
-            .count();
-        ui.label(format!(
-            "Accepted placements awaiting replication: {accepted}"
-        ));
-        if let Some(reason) = &ui_state.placement.last_reject {
-            ui.label(format!("Last placement rejected: {reason:?}"));
-        }
-
-        ui.separator();
-        draw_world_object_edit_tab(ui, ui_state);
-    } else {
-        ui.label("(WorldObjectDefRegistry not yet loaded)");
-    }
 }
 
-fn draw_world_object_edit_tab(ui: &mut egui::Ui, ui_state: &mut SpawnPanelUi) {
-    ui.label("Existing World Object");
-    ui.label(match ui_state.selection.selected {
-        Some(entity) => format!("Selected: {entity:?}"),
-        None => "Selected: (none)".to_string(),
-    });
-    ui.label(match ui_state.selection.selection_source {
-        Some(source) => format!("Selection source: {source:?}"),
-        None => "Selection source: (none)".to_string(),
-    });
-    if ui
-        .add_enabled(
-            !ui_state.selection.cursor_pick_armed,
-            egui::Button::new("Arm cursor pick"),
-        )
-        .clicked()
-    {
-        ui_state.selection.cursor_pick_armed = true;
-        ui_state.selection.last_reject = None;
-    }
-    if ui_state.selection.cursor_pick_armed && ui.button("Cancel cursor pick").clicked() {
-        ui_state.selection.cursor_pick_armed = false;
-    }
-    ui.label(if ui_state.selection.cursor_pick_armed {
-        "Cursor pick armed: click an existing world object in-game."
-    } else {
-        "Arm cursor pick, then click an existing world object in-game."
-    });
-    ui.add(
-        egui::Slider::new(&mut ui_state.selection.nearby_radius, 1.0..=64.0).text("Nearby radius"),
-    );
-    if ui
-        .add_enabled(
-            ui_state.selection.selected.is_some(),
-            egui::Button::new("Delete selected"),
-        )
-        .clicked()
-    {
-        ui_state.selection.delete_requested = true;
-        ui_state.selection.last_reject = None;
-    }
-    ui.label("Press Delete to delete selected.");
-    if ui
-        .add_enabled(
-            ui_state.selection.selected.is_some() && !ui_state.selection.move_armed,
-            egui::Button::new("Arm move"),
-        )
-        .clicked()
-    {
-        ui_state.selection.move_armed = true;
-        ui_state.selection.last_reject = None;
-    }
-    if ui_state.selection.move_armed && ui.button("Cancel move").clicked() {
-        ui_state.selection.move_armed = false;
-    }
-    ui.label(if ui_state.selection.move_armed {
-        "Move armed: click terrain to request server move."
-    } else {
-        "Arm move to preview moving the selected object."
-    });
-    ui.label(format!(
-        "Pending delete requests: {}",
-        ui_state.selection.pending_deletes.len()
-    ));
-    ui.add(
-        egui::Slider::new(&mut ui_state.selection.rotation_degrees_y, -180.0..=180.0).text("Yaw"),
-    );
-    if ui
-        .add_enabled(
-            ui_state.selection.selected.is_some(),
-            egui::Button::new("Rotate selected"),
-        )
-        .clicked()
-    {
-        ui_state.selection.rotate_requested = true;
-        ui_state.selection.last_reject = None;
-    }
-    ui.label(format!(
-        "Pending move requests: {}",
-        ui_state.selection.pending_moves.len()
-    ));
-    for pending in &ui_state.selection.pending_moves {
-        if let (Some(old), Some(new)) = (pending.old_chunk_pos, pending.new_chunk_pos) {
-            ui.label(format!("Move {}: {old:?} -> {new:?}", pending.sequence));
-        }
-    }
-    ui.label(format!(
-        "Pending rotation requests: {}",
-        ui_state.selection.pending_rotations.len()
-    ));
-    if let Some(reason) = &ui_state.selection.last_reject {
-        ui.label(format!("Last edit rejected: {reason:?}"));
-    }
+fn draw_status_item(ui: &mut egui::Ui, label: &str, value: usize) {
+    ui.label(label);
+    ui.label(value.to_string());
 }
 
 fn draw_freeform_tab(
