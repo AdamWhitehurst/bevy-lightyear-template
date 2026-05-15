@@ -40,6 +40,7 @@ impl Plugin for RenderPlugin {
                 camera::handle_camera_rotation_input,
                 camera::update_camera_orbit,
                 camera::follow_player,
+                camera::center_background_sphere,
                 camera::update_light_position,
                 health_bar::update_health_bars,
             )
@@ -100,5 +101,5 @@ fn add_health_bars(
             .entity(entity)
             .insert(protocol::transform_from_physics(pos, rot));
     }
-    health_bar::spawn_health_bar(&mut commands, entity, &mut *meshes, &mut *materials);
+    health_bar::spawn_health_bar(&mut commands, entity, &mut meshes, &mut materials);
 }
