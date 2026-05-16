@@ -2,6 +2,16 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use voxel_map_engine::prelude::{TerrainBrushMode, TerrainBrushShape};
 
+/// How held terrain brush input repeats while the pointer is down.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Reflect)]
+pub enum TerrainBrushStrokeMode {
+    /// Apply once per screen-space pointer movement during a held stroke.
+    #[default]
+    Discrete,
+    /// Re-apply while held at a configurable frame interval.
+    Continuous,
+}
+
 /// User-selected terrain brush settings shared by dev UI and client terrain input.
 #[derive(Resource, Clone, Debug, Reflect)]
 #[reflect(Resource)]
@@ -12,6 +22,8 @@ pub struct TerrainBrushSettings {
     pub height: u32,
     pub material: u8,
     pub mode: TerrainBrushMode,
+    pub stroke_mode: TerrainBrushStrokeMode,
+    pub continuous_every_n_frames: u32,
 }
 
 impl Default for TerrainBrushSettings {
@@ -23,6 +35,8 @@ impl Default for TerrainBrushSettings {
             height: 1,
             material: 0,
             mode: TerrainBrushMode::FillAir,
+            stroke_mode: TerrainBrushStrokeMode::Discrete,
+            continuous_every_n_frames: 6,
         }
     }
 }
@@ -79,6 +93,35 @@ pub fn draw_terrain_controls(ui: &mut egui::Ui, settings: &mut TerrainBrushSetti
                         );
                     });
                 ui.end_row();
+
+                ui.label("Stroke");
+                egui::ComboBox::from_id_salt("terrain_brush_stroke_mode")
+                    .selected_text(format!("{:?}", settings.stroke_mode))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut settings.stroke_mode,
+                            TerrainBrushStrokeMode::Discrete,
+                            "Discrete",
+                        );
+                        ui.selectable_value(
+                            &mut settings.stroke_mode,
+                            TerrainBrushStrokeMode::Continuous,
+                            "Continuous",
+                        );
+                    });
+                ui.end_row();
+
+                if settings.stroke_mode == TerrainBrushStrokeMode::Continuous {
+                    ui.label("Every N frames");
+                    draw_u32_stepper(
+                        ui,
+                        "terrain_brush_continuous_frames",
+                        &mut settings.continuous_every_n_frames,
+                        1,
+                        120,
+                    );
+                    ui.end_row();
+                }
 
                 ui.label("Width");
                 draw_u32_stepper(ui, "terrain_brush_width", &mut settings.width, 1, 16);

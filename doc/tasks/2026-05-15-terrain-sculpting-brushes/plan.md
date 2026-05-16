@@ -365,6 +365,12 @@ fn update_terrain_brush_preview(
 
 ## Phase 2: Multi-Voxel Fill-Air/Remove Operation
 
+### Implemented Deviation Notes
+
+- Held terrain brush input now supports `Discrete` and `Continuous` stroke modes. `Discrete` ignores brush preview/anchor
+  movement caused by newly placed voxels and only sends another request after screen-space cursor movement.
+  `Continuous` repeats while held at a configurable `Every N frames` interval, defaulting to `6` frames.
+
 ### Changes
 
 #### 1. Protocol brush request and concrete change shapes
@@ -728,7 +734,12 @@ registered.
 - [ ] Run `cargo server` and two `cargo client` instances.
 - [ ] Select Fill Air, width/height > 1, click once; expected: multiple voxels are added through server authority.
 - [ ] Select Remove, width/height > 1, click once; expected: multiple solid voxels are removed through server authority.
-- [ ] Click-drag across different anchors; expected: repeated brush applications occur only when anchor changes.
+- [ ] In Discrete stroke mode, press and hold without moving the cursor; expected: only one brush request is applied even
+      if the preview anchor moves because newly placed voxels are closer to the camera.
+- [ ] In Discrete stroke mode, click-drag across the screen; expected: repeated brush applications occur only after
+      screen-space cursor movement.
+- [ ] In Continuous stroke mode, press and hold; expected: brush applications repeat according to `Every N frames`, and
+      increasing the value slows the repeat rate.
 - [ ] Drag across a chunk boundary; expected: both chunks visually remesh and later persist after server save debounce.
 - [ ] Observe second client; expected: it receives the same terrain updates, with same-chunk multi-edits arriving
       through batched section updates.

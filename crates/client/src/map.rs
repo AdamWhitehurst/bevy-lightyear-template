@@ -13,7 +13,7 @@ use dev::panels::spawn::{
 use dev::DevInspectorState;
 use dev::EditingMode;
 #[cfg(feature = "spawn-panel")]
-use dev::TerrainBrushSettings;
+use dev::{TerrainBrushSettings, TerrainBrushStrokeMode};
 use leafwing_input_manager::prelude::*;
 #[cfg(feature = "spawn-panel")]
 use lightyear::prelude::Replicated;
@@ -111,11 +111,13 @@ pub struct TerrainBrushPreview {
     pub positions: Vec<IVec3>,
 }
 
-/// Tracks held brush strokes and suppresses duplicate applications at one anchor.
+/// Tracks held brush strokes and repeat gating.
 #[derive(Resource, Default)]
 pub struct TerrainBrushStrokeState {
     pub active: bool,
     pub last_anchor: Option<IVec3>,
+    pub last_cursor_position: Option<Vec2>,
+    pub frames_since_last_application: u32,
 }
 
 /// Buffers ChunkDataSync messages that arrive before the client player is ready.
@@ -501,20 +503,17 @@ fn handle_terrain_brush_input(
 ) {
     if !settings.active {
         trace!("handle_terrain_brush_input: terrain brush inactive");
-        stroke_state.active = false;
-        stroke_state.last_anchor = None;
+        reset_brush_stroke_state(&mut stroke_state);
         return;
     }
     let Ok(chunk_ticket) = player_query.single() else {
         trace!("handle_terrain_brush_input: no predicted player with ChunkTicket");
-        stroke_state.active = false;
-        stroke_state.last_anchor = None;
+        reset_brush_stroke_state(&mut stroke_state);
         return;
     };
     let Ok(action_state) = action_query.single() else {
         trace!("handle_terrain_brush_input: no entity with ActionState + Controlled");
-        stroke_state.active = false;
-        stroke_state.last_anchor = None;
+        reset_brush_stroke_state(&mut stroke_state);
         return;
     };
 
@@ -526,15 +525,23 @@ fn handle_terrain_brush_input(
                 "handle_terrain_brush_input: mode {:?} is added in Phase 3",
                 settings.mode
             );
-            stroke_state.active = false;
-            stroke_state.last_anchor = None;
+            reset_brush_stroke_state(&mut stroke_state);
             return;
         }
     };
     if !pressed {
         trace!("handle_terrain_brush_input: no terrain brush action held");
-        stroke_state.active = false;
-        stroke_state.last_anchor = None;
+        reset_brush_stroke_state(&mut stroke_state);
+        return;
+    }
+
+    let Some(cursor_position) = cursor_screen_position(&window_query) else {
+        trace!("handle_terrain_brush_input: no cursor position");
+        reset_brush_stroke_state(&mut stroke_state);
+        return;
+    };
+    if should_suppress_brush_repeat(&settings, &mut stroke_state, cursor_position) {
+        trace!("handle_terrain_brush_input: stroke repeat suppressed");
         return;
     }
 
@@ -545,24 +552,15 @@ fn handle_terrain_brush_input(
         &window_query,
         settings.mode,
     ) else {
-        stroke_state.active = false;
-        stroke_state.last_anchor = None;
+        reset_brush_stroke_state(&mut stroke_state);
         return;
     };
-    if stroke_state.active && stroke_state.last_anchor == Some(anchor) {
-        trace!(
-            "handle_terrain_brush_input: anchor {:?} already handled in active stroke",
-            anchor
-        );
-        return;
-    }
 
     let sequence = prediction_state.next();
     let changes = predict_brush_changes(chunk_ticket.map_entity, &voxel_world, anchor, &settings);
     if changes.is_empty() {
         trace!("handle_terrain_brush_input: brush produced no changes");
-        stroke_state.active = true;
-        stroke_state.last_anchor = Some(anchor);
+        mark_brush_application(&mut stroke_state, anchor, cursor_position);
         return;
     }
 
@@ -587,8 +585,49 @@ fn handle_terrain_brush_input(
             material: settings.material,
         });
     }
+    mark_brush_application(&mut stroke_state, anchor, cursor_position);
+}
+
+#[cfg(feature = "spawn-panel")]
+fn should_suppress_brush_repeat(
+    settings: &TerrainBrushSettings,
+    stroke_state: &mut TerrainBrushStrokeState,
+    cursor_position: Vec2,
+) -> bool {
+    if !stroke_state.active {
+        return false;
+    }
+
+    match settings.stroke_mode {
+        TerrainBrushStrokeMode::Discrete => stroke_state
+            .last_cursor_position
+            .is_some_and(|last| last.distance_squared(cursor_position) < 0.25),
+        TerrainBrushStrokeMode::Continuous => {
+            stroke_state.frames_since_last_application =
+                stroke_state.frames_since_last_application.saturating_add(1);
+            stroke_state.frames_since_last_application < settings.continuous_every_n_frames.max(1)
+        }
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+fn mark_brush_application(
+    stroke_state: &mut TerrainBrushStrokeState,
+    anchor: IVec3,
+    cursor_position: Vec2,
+) {
     stroke_state.active = true;
     stroke_state.last_anchor = Some(anchor);
+    stroke_state.last_cursor_position = Some(cursor_position);
+    stroke_state.frames_since_last_application = 0;
+}
+
+#[cfg(feature = "spawn-panel")]
+fn reset_brush_stroke_state(stroke_state: &mut TerrainBrushStrokeState) {
+    stroke_state.active = false;
+    stroke_state.last_anchor = None;
+    stroke_state.last_cursor_position = None;
+    stroke_state.frames_since_last_application = 0;
 }
 
 #[cfg(not(feature = "spawn-panel"))]
@@ -1638,13 +1677,16 @@ pub fn rotations_match(a: Quat, b: Quat) -> bool {
     a.dot(b).abs() >= 1.0 - 0.0001
 }
 
+fn cursor_screen_position(window_query: &Query<&Window, With<PrimaryWindow>>) -> Option<Vec2> {
+    window_query.single().ok()?.cursor_position()
+}
+
 fn camera_ray(
     camera_query: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: &Query<&Window, With<PrimaryWindow>>,
 ) -> Option<Ray3d> {
     let (camera, camera_transform) = camera_query.single().ok()?;
-    let window = window_query.single().ok()?;
-    let cursor_pos = window.cursor_position()?;
+    let cursor_pos = cursor_screen_position(window_query)?;
     let viewport_pos = if let Some(rect) = camera.logical_viewport_rect() {
         cursor_pos - rect.min
     } else {
