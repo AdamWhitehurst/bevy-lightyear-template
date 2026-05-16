@@ -120,7 +120,7 @@ pub fn init_default_material(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let handle = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.5, 0.7, 0.3),
+        base_color: Color::WHITE,
         perceptual_roughness: 0.9,
         ..default()
     });

@@ -2,7 +2,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::log::info_span;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
-use block_mesh::{GreedyQuadsBuffer, RIGHT_HANDED_Y_UP_CONFIG, greedy_quads};
+use block_mesh::{greedy_quads, GreedyQuadsBuffer, RIGHT_HANDED_Y_UP_CONFIG};
 use ndshape::Shape;
 
 use crate::types::WorldVoxel;
@@ -36,9 +36,11 @@ pub fn mesh_chunk_greedy<S: Shape<3, Coord = u32>>(
     let mut normals = Vec::with_capacity(num_vertices);
     let mut indices = Vec::with_capacity(num_indices);
     let mut tex_coords = Vec::with_capacity(num_vertices);
+    let mut colors = Vec::with_capacity(num_vertices);
 
     for (group, face) in buffer.quads.groups.iter().zip(faces.iter()) {
         for quad in group.iter() {
+            let color = voxel_color_for_quad(quad, voxels, shape);
             indices.extend_from_slice(&face.quad_mesh_indices(positions.len() as u32));
             positions.extend_from_slice(&face.quad_mesh_positions(quad, 1.0));
             normals.extend_from_slice(&face.quad_mesh_normals());
@@ -47,6 +49,7 @@ pub fn mesh_chunk_greedy<S: Shape<3, Coord = u32>>(
                 true,
                 quad,
             ));
+            colors.extend_from_slice(&[color; 4]);
         }
     }
 
@@ -60,9 +63,57 @@ pub fn mesh_chunk_greedy<S: Shape<3, Coord = u32>>(
         .expect("valid normal attribute");
     mesh.try_insert_attribute(Mesh::ATTRIBUTE_UV_0, tex_coords)
         .expect("valid uv attribute");
+    mesh.try_insert_attribute(Mesh::ATTRIBUTE_COLOR, colors)
+        .expect("valid color attribute");
     mesh.try_insert_indices(Indices::U32(indices))
         .expect("valid indices");
     Some(mesh)
+}
+
+/// Look up the material color for a greedy quad by reading the voxel at `quad.minimum`.
+fn voxel_color_for_quad<S: Shape<3, Coord = u32>>(
+    quad: &block_mesh::UnorientedQuad,
+    voxels: &[WorldVoxel],
+    shape: &S,
+) -> [f32; 4] {
+    let linear = shape.linearize(quad.minimum) as usize;
+    let material = match voxels[linear] {
+        WorldVoxel::Solid(material) => material,
+        WorldVoxel::Air | WorldVoxel::Unset => {
+            debug_assert!(false, "quad minimum voxel must be solid");
+            0
+        }
+    };
+    terrain_material_color(material)
+}
+
+/// Return the terrain material color as linear RGBA.
+fn terrain_material_color(material: u8) -> [f32; 4] {
+    match material {
+        1 => srgb_color_to_linear(139, 90, 43, 255),
+        2 => srgb_color_to_linear(128, 128, 128, 255),
+        _ => srgb_color_to_linear(128, 179, 77, 255),
+    }
+}
+
+/// Convert an sRGB u8 channel value to linear f32.
+fn srgb_channel_to_linear(value: u8) -> f32 {
+    let s = value as f32 / 255.0;
+    if s <= 0.04045 {
+        s / 12.92
+    } else {
+        ((s + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Convert sRGB u8 RGBA to linear f32 RGBA.
+fn srgb_color_to_linear(r: u8, g: u8, b: u8, a: u8) -> [f32; 4] {
+    [
+        srgb_channel_to_linear(r),
+        srgb_channel_to_linear(g),
+        srgb_channel_to_linear(b),
+        a as f32 / 255.0,
+    ]
 }
 
 /// Generate voxels for flat terrain at y=0.
@@ -86,6 +137,7 @@ pub fn flat_terrain_voxels<S: Shape<3, Coord = u32>>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::mesh::VertexAttributeValues;
     use ndshape::RuntimeShape;
 
     fn padded_shape() -> RuntimeShape<u32, 3> {
@@ -133,6 +185,40 @@ mod tests {
         assert!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
         assert!(mesh.attribute(Mesh::ATTRIBUTE_NORMAL).is_some());
         assert!(mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_some());
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_COLOR).is_some());
         assert!(mesh.indices().is_some());
+    }
+
+    #[test]
+    fn terrain_material_indices_have_distinct_colors() {
+        assert_eq!(
+            terrain_material_color(1),
+            srgb_color_to_linear(139, 90, 43, 255)
+        );
+        assert_eq!(
+            terrain_material_color(2),
+            srgb_color_to_linear(128, 128, 128, 255)
+        );
+        assert_ne!(terrain_material_color(1), terrain_material_color(2));
+    }
+
+    #[test]
+    fn mesh_uses_vertex_color_for_solid_material() {
+        let shape = RuntimeShape::<u32, 3>::new([4, 4, 4]);
+        let mut voxels = vec![WorldVoxel::Air; shape.usize()];
+        let solid_index = shape.linearize([1, 1, 1]) as usize;
+        voxels[solid_index] = WorldVoxel::Solid(1);
+
+        let mesh = mesh_chunk_greedy(&voxels, &shape).expect("solid voxel should produce mesh");
+        let colors = mesh
+            .attribute(Mesh::ATTRIBUTE_COLOR)
+            .expect("mesh should have vertex colors");
+        let VertexAttributeValues::Float32x4(colors) = colors else {
+            panic!("terrain mesh colors should be Float32x4");
+        };
+
+        assert!(colors
+            .iter()
+            .all(|color| *color == terrain_material_color(1)));
     }
 }

@@ -141,7 +141,7 @@ and clicking in-game or by nearby list, then request authoritative delete, move,
 across chunk reloads. Free-form spawning remains client-local. The Terrain tab provides activatable brush sculpting
 controls, rectangular width/height settings, mode-applied left-click brush strokes, discrete/continuous stroke modes
 with continuous frame-rate throttling, initial-hit-face stroke locking, UI-click suppression, a voxel footprint preview,
-and server-authoritative Fill Air/Remove/Paint Existing/Replace All brush strokes while in Terrain editing mode.
+and server-authoritative Fill Air/Remove/Paint Existing/Replace All brush strokes while in Terrain editing mode; material 1 renders brown and material 2 renders grey.
 
 ### Certificate Regeneration
 
