@@ -9,30 +9,27 @@
     - [ ] nostr saving of maps using editable nostr event + blossom blob storage
     - [ ] nostr prefetching, caching of chunks into fs
       - NostrBackend queries nearby
-- [ ] NostrClient for clients and server
-  - [ ] manages keys
-  - [ ] manages nostr relays
-  - [ ] can read/post/update/delete events
+- [x] NostrClient for clients and server
+  - [ ] not requiring `--nostr-identity` flag
+  - [ ] user sign-up, set user info on updatable nostr event
+    - [ ] Display name
+  - [x] manages keys
+  - [x] manages nostr relays
+  - [ ] read events
+  - [x] post events
+  - [ ] update events
+  - [ ] delete events
   - [ ] login + ui
   - [ ] new keys + ui
   - [ ] server discovery + ui
   - [ ] map ownership tied to nostr identities. Overworld = server's, Homebase = client's
-  - [ ] chat messaging, includes map id 
+  - [ ] chat messaging, includes map id
 - [ ] Nostr Node/Relay? May not be needed if can just use publicly available ones
 
 - [ ] Singleplayer
   - [ ] Persistence
 
-- [ ] bevi-inspector-egui
-  - [ ] DevPlugin
-  - [ ] World inspector
-  - [ ] Chunk debugger (with force-load/evict controls)
-  - [ ] Live RON editors for ability and world-object definitions with hot-reload
-  - [ ] Network entity viewer exposing Lightyear replication and interest-management state
-  - [ ] Reflected-registry-driven spawn panel
-
 ---
-
 
 ## Considering
 
