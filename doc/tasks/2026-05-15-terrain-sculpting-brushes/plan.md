@@ -739,25 +739,25 @@ registered.
 
 #### Manual
 
-- [ ] Run `cargo server` and two `cargo client` instances.
-- [ ] Select Fill Air, width/height > 1, click once; expected: multiple voxels are added through server authority.
-- [ ] Select Remove, width/height > 1, left-click once; expected: multiple solid voxels are removed through server
+- [x] Run `cargo server` and two `cargo client` instances.
+- [x] Select Fill Air, width/height > 1, click once; expected: multiple voxels are added through server authority.
+- [x] Select Remove, width/height > 1, left-click once; expected: multiple solid voxels are removed through server
       authority.
-- [ ] In Discrete stroke mode, press and hold without moving the cursor; expected: only one brush request is applied
+- [x] In Discrete stroke mode, press and hold without moving the cursor; expected: only one brush request is applied
       even if the preview anchor moves because newly placed voxels are closer to the camera.
-- [ ] In Discrete stroke mode, click-drag across the screen; expected: repeated brush applications occur only after
+- [x] In Discrete stroke mode, click-drag across the screen; expected: repeated brush applications occur only after
       screen-space cursor movement.
-- [ ] In Continuous stroke mode, press and hold; expected: brush applications repeat according to `Every N frames`
+- [x] In Continuous stroke mode, press and hold; expected: brush applications repeat according to `Every N frames`
       (default `20`), and increasing the value slows the repeat rate. Fill Air grows outward along the initial hit-face
       normal and Remove digs inward along the opposite normal while the cursor remains still.
-- [ ] Start strokes from a top face and from side faces; expected: held-stroke movement follows the initial hit face
+- [x] Start strokes from a top face and from side faces; expected: held-stroke movement follows the initial hit face
       instead of flipping between vertical and horizontal planes mid-stroke.
-- [ ] Hold or drag Fill Air from an oblique camera angle; expected: the stroke follows the initial hit-face plane
+- [x] Hold or drag Fill Air from an oblique camera angle; expected: the stroke follows the initial hit-face plane
       instead of stepping diagonally toward the camera as new voxels are placed.
-- [ ] Click and drag controls in the dev panel while terrain editing and Brush active are enabled; expected: UI controls
+- [x] Click and drag controls in the dev panel while terrain editing and Brush active are enabled; expected: UI controls
       respond, but no terrain brush edits are sent behind the panel.
-- [ ] Drag across a chunk boundary; expected: both chunks visually remesh and later persist after server save debounce.
-- [ ] Observe second client; expected: it receives the same terrain updates, with same-chunk multi-edits arriving
+- [x] Drag across a chunk boundary; expected: both chunks visually remesh and later persist after server save debounce.
+- [x] Observe second client; expected: it receives the same terrain updates, with same-chunk multi-edits arriving
       through batched section updates.
 
 ---
