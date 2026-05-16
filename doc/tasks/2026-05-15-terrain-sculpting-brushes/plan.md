@@ -1089,11 +1089,11 @@ Register it in the server map plugin next to the brush request handler.
 
 #### Manual
 
-- [ ] Run `cargo server` and two `cargo client` instances.
-- [ ] Make FillAir, Remove, PaintExisting, and ReplaceAll strokes; expected: each acknowledged edit enables Undo.
-- [ ] Undo each edit; expected: terrain reverts only after server ack and other clients observe the revert.
-- [ ] Redo each edit; expected: terrain reapplies only after server ack and other clients observe the reapply.
-- [ ] Make a new edit after undo; expected: redo stack clears.
+- [x] Run `cargo server` and two `cargo client` instances.
+- [x] Make FillAir, Remove, PaintExisting, and ReplaceAll strokes; expected: each acknowledged edit enables Undo.
+- [x] Undo each edit; expected: terrain reverts only after server ack and other clients observe the revert.
+- [x] Redo each edit; expected: terrain reapplies only after server ack and other clients observe the reapply.
+- [x] Make a new edit after undo; expected: redo stack clears.
 
 ---
 
