@@ -367,9 +367,11 @@ fn update_terrain_brush_preview(
 
 ### Implemented Deviation Notes
 
-- Held terrain brush input now supports `Discrete` and `Continuous` stroke modes. `Discrete` ignores brush preview/anchor
-  movement caused by newly placed voxels and only sends another request after screen-space cursor movement.
-  `Continuous` repeats while held at a configurable `Every N frames` interval, defaulting to `6` frames.
+- Held terrain brush input now supports `Discrete` and `Continuous` stroke modes. `Discrete` ignores brush
+  preview/anchor movement caused by newly placed voxels and only sends another request after screen-space cursor
+  movement. `Continuous` repeats while held at a configurable `Every N frames` interval, defaulting to `6` frames.
+- Held brush strokes lock to the initial hit plane and project later cursor rays onto that plane. This prevents Fill Air
+  strokes from diagonally climbing toward the camera by raycasting against newly placed voxels during the same stroke.
 
 ### Changes
 
@@ -734,12 +736,14 @@ registered.
 - [ ] Run `cargo server` and two `cargo client` instances.
 - [ ] Select Fill Air, width/height > 1, click once; expected: multiple voxels are added through server authority.
 - [ ] Select Remove, width/height > 1, click once; expected: multiple solid voxels are removed through server authority.
-- [ ] In Discrete stroke mode, press and hold without moving the cursor; expected: only one brush request is applied even
-      if the preview anchor moves because newly placed voxels are closer to the camera.
+- [ ] In Discrete stroke mode, press and hold without moving the cursor; expected: only one brush request is applied
+      even if the preview anchor moves because newly placed voxels are closer to the camera.
 - [ ] In Discrete stroke mode, click-drag across the screen; expected: repeated brush applications occur only after
       screen-space cursor movement.
 - [ ] In Continuous stroke mode, press and hold; expected: brush applications repeat according to `Every N frames`, and
       increasing the value slows the repeat rate.
+- [ ] Hold or drag Fill Air from an oblique camera angle; expected: the stroke follows the initial hit plane instead of
+      stepping diagonally toward the camera as new voxels are placed.
 - [ ] Drag across a chunk boundary; expected: both chunks visually remesh and later persist after server save debounce.
 - [ ] Observe second client; expected: it receives the same terrain updates, with same-chunk multi-edits arriving
       through batched section updates.

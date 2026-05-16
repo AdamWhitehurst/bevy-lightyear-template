@@ -111,6 +111,13 @@ pub struct TerrainBrushPreview {
     pub positions: Vec<IVec3>,
 }
 
+/// Plane captured at stroke start so brush drags ignore terrain created during the stroke.
+#[derive(Clone, Copy)]
+pub struct TerrainBrushPlaneLock {
+    pub point: Vec3,
+    pub normal: Vec3,
+}
+
 /// Tracks held brush strokes and repeat gating.
 #[derive(Resource, Default)]
 pub struct TerrainBrushStrokeState {
@@ -118,6 +125,7 @@ pub struct TerrainBrushStrokeState {
     pub last_anchor: Option<IVec3>,
     pub last_cursor_position: Option<Vec2>,
     pub frames_since_last_application: u32,
+    pub plane_lock: Option<TerrainBrushPlaneLock>,
 }
 
 /// Buffers ChunkDataSync messages that arrive before the client player is ready.
@@ -398,28 +406,83 @@ fn has_pending_prediction_at(prediction_state: &VoxelPredictionState, position: 
         .any(|change| change.position == position)
 }
 
-fn current_terrain_brush_anchor(
+#[cfg(feature = "spawn-panel")]
+fn raycast_terrain_brush_anchor(
     chunk_ticket: &ChunkTicket,
     voxel_world: &VoxelWorld,
     camera_query: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: &Query<&Window, With<PrimaryWindow>>,
     mode: TerrainBrushMode,
-) -> Option<IVec3> {
+) -> Option<(IVec3, TerrainBrushPlaneLock)> {
     let Some(ray) = camera_ray(camera_query, window_query) else {
-        trace!("current_terrain_brush_anchor: no camera ray");
+        trace!("raycast_terrain_brush_anchor: no camera ray");
         return None;
     };
     let Some(hit) = voxel_world.raycast(chunk_ticket.map_entity, ray, RAYCAST_MAX_DISTANCE, |v| {
         matches!(v, WorldVoxel::Solid(_))
     }) else {
-        trace!("current_terrain_brush_anchor: raycast hit nothing");
+        trace!("raycast_terrain_brush_anchor: raycast hit nothing");
         return None;
     };
     let Some(anchor) = brush_anchor(&hit, mode) else {
-        trace!("current_terrain_brush_anchor: hit has no usable brush anchor");
+        trace!("raycast_terrain_brush_anchor: hit has no usable brush anchor");
         return None;
     };
-    Some(anchor)
+    let Some(normal) = hit.normal else {
+        trace!("raycast_terrain_brush_anchor: hit has no usable plane normal");
+        return None;
+    };
+    Some((
+        anchor,
+        TerrainBrushPlaneLock {
+            point: ray.origin + *ray.direction * RAYCAST_MAX_DISTANCE * hit.t,
+            normal,
+        },
+    ))
+}
+
+#[cfg(feature = "spawn-panel")]
+fn projected_terrain_brush_anchor(
+    plane_lock: TerrainBrushPlaneLock,
+    camera_query: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    window_query: &Query<&Window, With<PrimaryWindow>>,
+    mode: TerrainBrushMode,
+) -> Option<IVec3> {
+    let Some(ray) = camera_ray(camera_query, window_query) else {
+        trace!("projected_terrain_brush_anchor: no camera ray");
+        return None;
+    };
+    let denominator = plane_lock.normal.dot(*ray.direction);
+    if denominator.abs() <= f32::EPSILON {
+        trace!("projected_terrain_brush_anchor: ray is parallel to stroke plane");
+        return None;
+    }
+    let distance = (plane_lock.point - ray.origin).dot(plane_lock.normal) / denominator;
+    if distance < 0.0 {
+        trace!("projected_terrain_brush_anchor: projected point is behind camera");
+        return None;
+    }
+    Some(anchor_from_projected_plane_point(
+        ray.origin + *ray.direction * distance,
+        plane_lock.normal,
+        mode,
+    ))
+}
+
+#[cfg(feature = "spawn-panel")]
+fn anchor_from_projected_plane_point(point: Vec3, normal: Vec3, mode: TerrainBrushMode) -> IVec3 {
+    let mut anchor = point.floor().as_ivec3();
+    let normal = normal.as_ivec3();
+    for axis in 0..3 {
+        if normal[axis] > 0 {
+            if mode != TerrainBrushMode::FillAir {
+                anchor[axis] -= 1;
+            }
+        } else if normal[axis] < 0 && mode == TerrainBrushMode::FillAir {
+            anchor[axis] -= 1;
+        }
+    }
+    anchor
 }
 
 #[cfg(feature = "spawn-panel")]
@@ -429,6 +492,7 @@ fn update_terrain_brush_preview(
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     settings: Res<TerrainBrushSettings>,
+    stroke_state: Res<TerrainBrushStrokeState>,
     mut preview: ResMut<TerrainBrushPreview>,
     mut gizmos: Gizmos,
 ) {
@@ -442,13 +506,19 @@ fn update_terrain_brush_preview(
         preview.positions.clear();
         return;
     };
-    let Some(anchor) = current_terrain_brush_anchor(
-        chunk_ticket,
-        &voxel_world,
-        &camera_query,
-        &window_query,
-        settings.mode,
-    ) else {
+    let anchor = if let Some(plane_lock) = stroke_state.plane_lock {
+        projected_terrain_brush_anchor(plane_lock, &camera_query, &window_query, settings.mode)
+    } else {
+        raycast_terrain_brush_anchor(
+            chunk_ticket,
+            &voxel_world,
+            &camera_query,
+            &window_query,
+            settings.mode,
+        )
+        .map(|(anchor, _)| anchor)
+    };
+    let Some(anchor) = anchor else {
         preview.positions.clear();
         return;
     };
@@ -545,12 +615,13 @@ fn handle_terrain_brush_input(
         return;
     }
 
-    let Some(anchor) = current_terrain_brush_anchor(
+    let Some((anchor, plane_lock)) = current_stroke_anchor(
         chunk_ticket,
         &voxel_world,
         &camera_query,
         &window_query,
         settings.mode,
+        &stroke_state,
     ) else {
         reset_brush_stroke_state(&mut stroke_state);
         return;
@@ -560,7 +631,7 @@ fn handle_terrain_brush_input(
     let changes = predict_brush_changes(chunk_ticket.map_entity, &voxel_world, anchor, &settings);
     if changes.is_empty() {
         trace!("handle_terrain_brush_input: brush produced no changes");
-        mark_brush_application(&mut stroke_state, anchor, cursor_position);
+        mark_brush_application(&mut stroke_state, anchor, cursor_position, plane_lock);
         return;
     }
 
@@ -585,7 +656,23 @@ fn handle_terrain_brush_input(
             material: settings.material,
         });
     }
-    mark_brush_application(&mut stroke_state, anchor, cursor_position);
+    mark_brush_application(&mut stroke_state, anchor, cursor_position, plane_lock);
+}
+
+#[cfg(feature = "spawn-panel")]
+fn current_stroke_anchor(
+    chunk_ticket: &ChunkTicket,
+    voxel_world: &VoxelWorld,
+    camera_query: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    window_query: &Query<&Window, With<PrimaryWindow>>,
+    mode: TerrainBrushMode,
+    stroke_state: &TerrainBrushStrokeState,
+) -> Option<(IVec3, TerrainBrushPlaneLock)> {
+    if let Some(plane_lock) = stroke_state.plane_lock {
+        return projected_terrain_brush_anchor(plane_lock, camera_query, window_query, mode)
+            .map(|anchor| (anchor, plane_lock));
+    }
+    raycast_terrain_brush_anchor(chunk_ticket, voxel_world, camera_query, window_query, mode)
 }
 
 #[cfg(feature = "spawn-panel")]
@@ -615,11 +702,13 @@ fn mark_brush_application(
     stroke_state: &mut TerrainBrushStrokeState,
     anchor: IVec3,
     cursor_position: Vec2,
+    plane_lock: TerrainBrushPlaneLock,
 ) {
     stroke_state.active = true;
     stroke_state.last_anchor = Some(anchor);
     stroke_state.last_cursor_position = Some(cursor_position);
     stroke_state.frames_since_last_application = 0;
+    stroke_state.plane_lock = Some(plane_lock);
 }
 
 #[cfg(feature = "spawn-panel")]
@@ -628,6 +717,7 @@ fn reset_brush_stroke_state(stroke_state: &mut TerrainBrushStrokeState) {
     stroke_state.last_anchor = None;
     stroke_state.last_cursor_position = None;
     stroke_state.frames_since_last_application = 0;
+    stroke_state.plane_lock = None;
 }
 
 #[cfg(not(feature = "spawn-panel"))]
@@ -1937,6 +2027,50 @@ mod tests {
 
         assert!(has_pending_prediction_at(&state, IVec3::new(6, 10, 15)));
         assert!(!has_pending_prediction_at(&state, IVec3::new(1, 2, 3)));
+    }
+
+    #[test]
+    fn projected_plane_fill_air_keeps_positive_face_anchor() {
+        assert_eq!(
+            anchor_from_projected_plane_point(
+                Vec3::new(4.0, 2.8, 3.2),
+                Vec3::X,
+                TerrainBrushMode::FillAir,
+            ),
+            IVec3::new(4, 2, 3)
+        );
+    }
+
+    #[test]
+    fn projected_plane_fill_air_keeps_negative_face_anchor() {
+        assert_eq!(
+            anchor_from_projected_plane_point(
+                Vec3::new(4.0, 2.8, 3.2),
+                -Vec3::X,
+                TerrainBrushMode::FillAir,
+            ),
+            IVec3::new(3, 2, 3)
+        );
+    }
+
+    #[test]
+    fn projected_plane_remove_keeps_solid_side_anchor() {
+        assert_eq!(
+            anchor_from_projected_plane_point(
+                Vec3::new(4.0, 2.8, 3.2),
+                Vec3::X,
+                TerrainBrushMode::Remove,
+            ),
+            IVec3::new(3, 2, 3)
+        );
+        assert_eq!(
+            anchor_from_projected_plane_point(
+                Vec3::new(4.0, 2.8, 3.2),
+                -Vec3::X,
+                TerrainBrushMode::Remove,
+            ),
+            IVec3::new(4, 2, 3)
+        );
     }
 
     #[test]
