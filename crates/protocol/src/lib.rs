@@ -49,8 +49,8 @@ pub use map::{
     MapSaveTarget, MapSwitchTarget, MapTransitionEnd, MapTransitionReady, MapTransitionStart,
     Owner, PendingTransition, PlayerMapSwitchRequest, SavedEntity, SavedEntityKind,
     SectionBlocksUpdate, TransitionReadySent, UnloadColumn, VoxelBrushEditRequest, VoxelChange,
-    VoxelChannel, VoxelChunk, VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest,
-    VoxelType,
+    VoxelChannel, VoxelChunk, VoxelConcreteEditRequest, VoxelEditAck, VoxelEditBroadcast,
+    VoxelEditReject, VoxelEditRequest, VoxelType,
 };
 pub use terrain::{TerrainDefRegistry, TerrainPlugin};
 pub use transition::{MapTransitionEntity, TransitionPlugin};
@@ -122,6 +122,8 @@ impl Plugin for ProtocolPlugin {
         app.register_message::<VoxelEditRequest>()
             .add_direction(NetworkDirection::ClientToServer);
         app.register_message::<VoxelBrushEditRequest>()
+            .add_direction(NetworkDirection::ClientToServer);
+        app.register_message::<VoxelConcreteEditRequest>()
             .add_direction(NetworkDirection::ClientToServer);
         app.register_message::<VoxelEditBroadcast>()
             .add_direction(NetworkDirection::ServerToClient);

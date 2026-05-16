@@ -1078,14 +1078,14 @@ Register it in the server map plugin next to the brush request handler.
 
 #### Automated
 
-- [ ] `pgrep -af 'cargo (build|check|test)' || true` shows no active cargo build/check/test before running tests.
-- [ ] `cargo test -p client prediction` passes after adding history/ack tests.
-- [ ] `cargo test -p client undo` passes after adding inverse/reapply tests.
-- [ ] `cargo test -p server concrete` passes after adding concrete request tests.
-- [ ] `cargo check -p protocol` passes.
-- [ ] `cargo check -p dev --features inspector,spawn-panel` passes.
-- [ ] `cargo check -p client` passes.
-- [ ] `cargo check -p server` passes.
+- [x] `pgrep -af 'cargo (build|check|test)' || true` shows no active cargo build/check/test before running tests.
+- [x] `cargo test -p client prediction` passes after adding history/ack tests.
+- [x] `cargo test -p client undo` passes after adding inverse/reapply tests.
+- [x] `cargo test -p server concrete` passes after adding concrete request tests.
+- [x] `cargo check -p protocol` passes.
+- [x] `cargo check -p dev --features inspector,spawn-panel` passes.
+- [x] `cargo check -p client` passes.
+- [x] `cargo check -p server` passes.
 
 #### Manual
 

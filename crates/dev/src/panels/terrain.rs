@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
-use voxel_map_engine::prelude::{TerrainBrushMode, TerrainBrushShape};
+use voxel_map_engine::prelude::{TerrainBrushMode, TerrainBrushShape, VoxelType};
 
 /// How held terrain brush input repeats while the pointer is down.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Reflect)]
@@ -26,6 +26,29 @@ pub struct TerrainBrushSettings {
     pub continuous_every_n_frames: u32,
 }
 
+/// Client-side history of acknowledged terrain edits.
+#[derive(Resource, Default, Clone, Debug)]
+pub struct TerrainEditHistory {
+    pub undo: Vec<TerrainEditRecord>,
+    pub redo: Vec<TerrainEditRecord>,
+    pub undo_requested: bool,
+    pub redo_requested: bool,
+}
+
+/// One acknowledged terrain operation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TerrainEditRecord {
+    pub changes: Vec<AcknowledgedVoxelChange>,
+}
+
+/// One acknowledged voxel change with old and new values.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AcknowledgedVoxelChange {
+    pub position: IVec3,
+    pub old_voxel: VoxelType,
+    pub new_voxel: VoxelType,
+}
+
 impl Default for TerrainBrushSettings {
     fn default() -> Self {
         Self {
@@ -46,12 +69,31 @@ pub struct TerrainPanelPlugin;
 
 impl Plugin for TerrainPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<TerrainBrushSettings>();
+        app.init_resource::<TerrainBrushSettings>()
+            .init_resource::<TerrainEditHistory>();
     }
 }
 
 /// Draws terrain brush controls inside the world-object panel's terrain tab.
-pub fn draw_terrain_controls(ui: &mut egui::Ui, settings: &mut TerrainBrushSettings) {
+pub fn draw_terrain_controls(
+    ui: &mut egui::Ui,
+    settings: &mut TerrainBrushSettings,
+    history: &mut TerrainEditHistory,
+) {
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(!history.undo.is_empty(), egui::Button::new("Undo"))
+            .clicked()
+        {
+            history.undo_requested = true;
+        }
+        if ui
+            .add_enabled(!history.redo.is_empty(), egui::Button::new("Redo"))
+            .clicked()
+        {
+            history.redo_requested = true;
+        }
+    });
     ui.checkbox(&mut settings.active, "Brush active");
     ui.add_enabled_ui(settings.active, |ui| {
         egui::Grid::new("terrain_brush_grid")

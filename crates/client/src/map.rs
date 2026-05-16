@@ -15,7 +15,10 @@ use dev::panels::spawn::{
 use dev::DevInspectorState;
 use dev::EditingMode;
 #[cfg(feature = "spawn-panel")]
-use dev::{TerrainBrushSettings, TerrainBrushStrokeMode};
+use dev::{
+    AcknowledgedVoxelChange, TerrainBrushSettings, TerrainBrushStrokeMode, TerrainEditHistory,
+    TerrainEditRecord,
+};
 use leafwing_input_manager::prelude::*;
 #[cfg(feature = "spawn-panel")]
 use lightyear::prelude::Replicated;
@@ -34,8 +37,8 @@ use protocol::world_object::{
 use protocol::VoxelEditRequest;
 use protocol::{
     CharacterMarker, ChunkDataSync, MapInstanceId, MapRegistry, PlayerActions, SectionBlocksUpdate,
-    UnloadColumn, VoxelBrushEditRequest, VoxelChannel, VoxelEditAck, VoxelEditBroadcast,
-    VoxelEditReject, VoxelType,
+    UnloadColumn, VoxelBrushEditRequest, VoxelChange, VoxelChannel, VoxelConcreteEditRequest,
+    VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelType,
 };
 use voxel_map_engine::prelude::{
     brush_anchor, brush_footprint, chunk_to_column, column_to_chunks, ChunkData, ChunkStatus,
@@ -144,6 +147,15 @@ pub struct VoxelPredictionState {
 pub struct VoxelPrediction {
     pub sequence: u32,
     pub changes: Vec<PredictedVoxelChange>,
+    pub kind: TerrainPredictionKind,
+}
+
+/// Source operation for a pending terrain edit prediction.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerrainPredictionKind {
+    NewEdit,
+    Undo,
+    Redo,
 }
 
 /// One locally predicted voxel change.
@@ -207,6 +219,8 @@ impl Plugin for ClientMapPlugin {
                     update_terrain_brush_preview.run_if(in_editing_mode(EditingMode::Terrain)),
                     #[cfg(feature = "spawn-panel")]
                     handle_terrain_brush_input.run_if(in_editing_mode(EditingMode::Terrain)),
+                    #[cfg(feature = "spawn-panel")]
+                    handle_terrain_undo_redo_input.run_if(in_editing_mode(EditingMode::Terrain)),
                     #[cfg(not(feature = "spawn-panel"))]
                     handle_voxel_input.run_if(in_editing_mode(EditingMode::Terrain)),
                     #[cfg(feature = "spawn-panel")]
@@ -670,9 +684,11 @@ fn handle_terrain_brush_input(
             .iter()
             .map(|change| (change.position, WorldVoxel::from(change.new_voxel))),
     );
-    prediction_state
-        .pending
-        .push(VoxelPrediction { sequence, changes });
+    prediction_state.pending.push(VoxelPrediction {
+        sequence,
+        changes,
+        kind: TerrainPredictionKind::NewEdit,
+    });
 
     for mut sender in message_sender.iter_mut() {
         sender.send::<VoxelChannel>(VoxelBrushEditRequest {
@@ -859,6 +875,7 @@ fn handle_voxel_input(
             old_voxel,
             new_voxel: voxel,
         }],
+        kind: TerrainPredictionKind::NewEdit,
     });
 
     for mut sender in message_sender.iter_mut() {
@@ -2012,6 +2029,7 @@ fn handle_world_object_edit_reject(
 fn handle_voxel_edit_ack(
     mut receivers: Query<&mut MessageReceiver<VoxelEditAck>>,
     mut prediction_state: ResMut<VoxelPredictionState>,
+    #[cfg(feature = "spawn-panel")] mut history: ResMut<TerrainEditHistory>,
 ) {
     for mut receiver in &mut receivers {
         for ack in receiver.receive() {
@@ -2020,10 +2038,186 @@ fn handle_voxel_edit_ack(
                 ack.sequence,
                 prediction_state.pending.len()
             );
-            prediction_state
+            let Some(index) = prediction_state
                 .pending
-                .retain(|p| p.sequence != ack.sequence);
+                .iter()
+                .position(|p| p.sequence == ack.sequence)
+            else {
+                trace!(
+                    "handle_voxel_edit_ack: ack seq={} had no pending prediction",
+                    ack.sequence
+                );
+                continue;
+            };
+            let prediction = prediction_state.pending.remove(index);
+            #[cfg(feature = "spawn-panel")]
+            record_acknowledged_prediction(&mut history, &prediction);
         }
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+fn record_acknowledged_prediction(history: &mut TerrainEditHistory, prediction: &VoxelPrediction) {
+    match prediction.kind {
+        TerrainPredictionKind::NewEdit => {
+            history.undo.push(acknowledged_record(prediction));
+            history.redo.clear();
+        }
+        TerrainPredictionKind::Undo => history.redo.push(reversed_acknowledged_record(prediction)),
+        TerrainPredictionKind::Redo => history.undo.push(acknowledged_record(prediction)),
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+fn acknowledged_record(prediction: &VoxelPrediction) -> TerrainEditRecord {
+    TerrainEditRecord {
+        changes: prediction
+            .changes
+            .iter()
+            .map(|change| AcknowledgedVoxelChange {
+                position: change.position,
+                old_voxel: change.old_voxel,
+                new_voxel: change.new_voxel,
+            })
+            .collect(),
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+fn reversed_acknowledged_record(prediction: &VoxelPrediction) -> TerrainEditRecord {
+    TerrainEditRecord {
+        changes: prediction
+            .changes
+            .iter()
+            .map(|change| AcknowledgedVoxelChange {
+                position: change.position,
+                old_voxel: change.new_voxel,
+                new_voxel: change.old_voxel,
+            })
+            .collect(),
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+fn inverse_changes(record: &TerrainEditRecord) -> Vec<VoxelChange> {
+    record
+        .changes
+        .iter()
+        .map(|change| VoxelChange {
+            position: change.position,
+            voxel: change.old_voxel,
+        })
+        .collect()
+}
+
+#[cfg(feature = "spawn-panel")]
+fn reapply_changes(record: &TerrainEditRecord) -> Vec<VoxelChange> {
+    record
+        .changes
+        .iter()
+        .map(|change| VoxelChange {
+            position: change.position,
+            voxel: change.new_voxel,
+        })
+        .collect()
+}
+
+#[cfg(feature = "spawn-panel")]
+fn prediction_from_concrete_changes(
+    sequence: u32,
+    record: &TerrainEditRecord,
+    changes: &[VoxelChange],
+    kind: TerrainPredictionKind,
+) -> VoxelPrediction {
+    let predicted = changes
+        .iter()
+        .zip(record.changes.iter())
+        .map(|(change, acknowledged)| PredictedVoxelChange {
+            position: change.position,
+            old_voxel: match kind {
+                TerrainPredictionKind::Undo => acknowledged.new_voxel,
+                TerrainPredictionKind::Redo => acknowledged.old_voxel,
+                TerrainPredictionKind::NewEdit => acknowledged.old_voxel,
+            },
+            new_voxel: change.voxel,
+        })
+        .collect();
+    VoxelPrediction {
+        sequence,
+        changes: predicted,
+        kind,
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+fn handle_terrain_undo_redo_input(
+    mut history: ResMut<TerrainEditHistory>,
+    mut prediction_state: ResMut<VoxelPredictionState>,
+    mut voxel_world: VoxelWorld,
+    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    mut message_sender: Query<&mut MessageSender<VoxelConcreteEditRequest>>,
+) {
+    let operation = if history.undo_requested {
+        history.undo_requested = false;
+        history.undo.pop().map(|record| {
+            let changes = inverse_changes(&record);
+            (TerrainPredictionKind::Undo, record, changes)
+        })
+    } else if history.redo_requested {
+        history.redo_requested = false;
+        history.redo.pop().map(|record| {
+            let changes = reapply_changes(&record);
+            (TerrainPredictionKind::Redo, record, changes)
+        })
+    } else {
+        None
+    };
+
+    let Some((kind, record, changes)) = operation else {
+        trace!("handle_terrain_undo_redo_input: no undo/redo operation requested");
+        return;
+    };
+    if changes.is_empty() {
+        trace!("handle_terrain_undo_redo_input: requested record has no changes");
+        return;
+    }
+    let Ok(chunk_ticket) = player_query.single() else {
+        trace!("handle_terrain_undo_redo_input: no predicted player");
+        restore_unacked_history_record(&mut history, kind, record);
+        return;
+    };
+
+    let sequence = prediction_state.next();
+    voxel_world.set_voxels(
+        chunk_ticket.map_entity,
+        changes
+            .iter()
+            .map(|change| (change.position, WorldVoxel::from(change.voxel))),
+    );
+    prediction_state
+        .pending
+        .push(prediction_from_concrete_changes(
+            sequence, &record, &changes, kind,
+        ));
+
+    for mut sender in message_sender.iter_mut() {
+        sender.send::<VoxelChannel>(VoxelConcreteEditRequest {
+            sequence,
+            changes: changes.clone(),
+        });
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+fn restore_unacked_history_record(
+    history: &mut TerrainEditHistory,
+    kind: TerrainPredictionKind,
+    record: TerrainEditRecord,
+) {
+    match kind {
+        TerrainPredictionKind::Undo => history.undo.push(record),
+        TerrainPredictionKind::Redo => history.redo.push(record),
+        TerrainPredictionKind::NewEdit => history.undo.push(record),
     }
 }
 
@@ -2072,6 +2266,7 @@ mod tests {
                     new_voxel: VoxelType::Solid(1),
                 })
                 .collect(),
+            kind: TerrainPredictionKind::NewEdit,
         }
     }
 
@@ -2133,6 +2328,48 @@ mod tests {
             predicted_voxel_for_brush_mode(WorldVoxel::Solid(2), TerrainBrushMode::ReplaceAll, 9),
             Some(VoxelType::Solid(9))
         );
+    }
+
+    fn terrain_record() -> TerrainEditRecord {
+        TerrainEditRecord {
+            changes: vec![AcknowledgedVoxelChange {
+                position: IVec3::new(1, 2, 3),
+                old_voxel: VoxelType::Air,
+                new_voxel: VoxelType::Solid(4),
+            }],
+        }
+    }
+
+    #[test]
+    fn undo_inverse_changes_restore_old_voxels() {
+        assert_eq!(
+            inverse_changes(&terrain_record()),
+            vec![VoxelChange {
+                position: IVec3::new(1, 2, 3),
+                voxel: VoxelType::Air,
+            }]
+        );
+    }
+
+    #[test]
+    fn undo_reapply_changes_restore_new_voxels() {
+        assert_eq!(
+            reapply_changes(&terrain_record()),
+            vec![VoxelChange {
+                position: IVec3::new(1, 2, 3),
+                voxel: VoxelType::Solid(4),
+            }]
+        );
+    }
+
+    #[test]
+    fn undo_ack_preserves_original_record_for_redo() {
+        let record = terrain_record();
+        let changes = inverse_changes(&record);
+        let prediction =
+            prediction_from_concrete_changes(7, &record, &changes, TerrainPredictionKind::Undo);
+
+        assert_eq!(reversed_acknowledged_record(&prediction), record);
     }
 
     #[test]

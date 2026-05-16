@@ -35,6 +35,14 @@ pub struct VoxelBrushEditRequest {
     pub material: u8,
 }
 
+/// Client requests concrete authoritative voxel edits, used by terrain undo/redo.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
+#[type_path = "protocol::map"]
+pub struct VoxelConcreteEditRequest {
+    pub sequence: u32,
+    pub changes: Vec<VoxelChange>,
+}
+
 /// Server broadcasts voxel edit to all clients.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
 #[type_path = "protocol::map"]

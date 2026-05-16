@@ -13,8 +13,8 @@ use protocol::map::{MapSwitchTarget, MapTransitionStart, PlayerMapSwitchRequest}
 use protocol::{
     CharacterMarker, ChunkChannel, ChunkDataSync, MapInstanceId, MapRegistry, NostrPublicKey,
     PendingTransition, PlayerIdentity, SectionBlocksUpdate, UnloadColumn, VoxelBrushEditRequest,
-    VoxelChange, VoxelChannel, VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest,
-    VoxelType,
+    VoxelChange, VoxelChannel, VoxelConcreteEditRequest, VoxelEditAck, VoxelEditBroadcast,
+    VoxelEditReject, VoxelEditRequest, VoxelType,
 };
 #[allow(unused_imports)]
 use tracy_client::plot;
@@ -647,7 +647,11 @@ impl Plugin for ServerMapPlugin {
                     poll_map_meta.run_if(in_state(AppState::Ready)),
                     poll_map_entities.run_if(in_state(AppState::Ready)),
                     (
-                        (handle_voxel_edit_requests, handle_voxel_brush_edit_requests),
+                        (
+                            handle_voxel_edit_requests,
+                            handle_voxel_brush_edit_requests,
+                            handle_voxel_concrete_edit_requests,
+                        ),
                         flush_voxel_broadcasts,
                     )
                         .chain(),
@@ -1485,6 +1489,67 @@ pub fn handle_voxel_brush_edit_requests(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn handle_voxel_concrete_edit_requests(
+    mut receivers: Query<(Entity, &mut MessageReceiver<VoxelConcreteEditRequest>)>,
+    mut ack_senders: Query<&mut MessageSender<VoxelEditAck>>,
+    mut pending_broadcasts: ResMut<PendingVoxelBroadcasts>,
+    mut dirty_state: ResMut<WorldDirtyState>,
+    time: Res<Time>,
+    mut voxel_world: VoxelWorld,
+    controlled_query: Query<(&ControlledBy, &MapInstanceId), With<CharacterMarker>>,
+    map_registry: Res<MapRegistry>,
+) {
+    for (client_entity, mut receiver) in &mut receivers {
+        for request in receiver.receive() {
+            let Some((map_entity, player_map_id)) =
+                resolve_player_map(client_entity, &controlled_query, &map_registry)
+            else {
+                trace!(
+                    "handle_voxel_concrete_edit_requests: no character for client {client_entity:?}"
+                );
+                continue;
+            };
+            if !validate_voxel_concrete_edit(&request) {
+                warn!(
+                    "handle_voxel_concrete_edit_requests: rejecting invalid concrete request sequence {}",
+                    request.sequence
+                );
+                continue;
+            }
+
+            apply_voxel_changes(
+                &request.changes,
+                map_entity,
+                &mut voxel_world,
+                &mut dirty_state,
+                &time,
+            );
+            send_brush_edit_ack(
+                client_entity,
+                request.sequence,
+                request.changes.clone(),
+                &mut ack_senders,
+            );
+            let chunk_size = voxel_world
+                .chunk_size(map_entity)
+                .expect("map entity has VoxelMapInstance");
+            for change in request.changes {
+                queue_edit_broadcast(
+                    PendingVoxelEdit {
+                        position: change.position,
+                        voxel: change.voxel,
+                        originator: client_entity,
+                        map_id: player_map_id.clone(),
+                    },
+                    chunk_size,
+                    &mut pending_broadcasts,
+                );
+            }
+        }
+    }
+}
+
 fn concrete_brush_changes(
     request: &VoxelBrushEditRequest,
     map_entity: Entity,
@@ -1550,6 +1615,11 @@ fn send_brush_edit_ack(
     } else {
         warn!("send_brush_edit_ack: no ack sender for {client_entity:?}");
     }
+}
+
+/// Validates a concrete voxel edit request. Returns false if the whole request should be rejected.
+fn validate_voxel_concrete_edit(request: &VoxelConcreteEditRequest) -> bool {
+    !request.changes.is_empty()
 }
 
 /// Validates a voxel brush edit request. Returns false if the whole brush should be rejected.
@@ -2149,6 +2219,29 @@ mod tests {
             voxel_for_brush_mode(WorldVoxel::Solid(2), TerrainBrushMode::ReplaceAll, 9),
             Some(VoxelType::Solid(9))
         );
+    }
+
+    #[test]
+    fn concrete_request_validation_rejects_empty_changes() {
+        let request = VoxelConcreteEditRequest {
+            sequence: 42,
+            changes: Vec::new(),
+        };
+
+        assert!(!validate_voxel_concrete_edit(&request));
+    }
+
+    #[test]
+    fn concrete_request_validation_accepts_changes() {
+        let request = VoxelConcreteEditRequest {
+            sequence: 42,
+            changes: vec![VoxelChange {
+                position: IVec3::new(1, 2, 3),
+                voxel: VoxelType::Solid(7),
+            }],
+        };
+
+        assert!(validate_voxel_concrete_edit(&request));
     }
 
     #[test]
