@@ -870,12 +870,12 @@ Use this before computing/applying changes. If false, reject the whole request.
 
 #### Manual
 
-- [ ] Run `cargo server` and `cargo client`.
-- [ ] Select Paint Existing over mixed air/solid terrain; expected: solid voxels change material and air remains air.
-- [ ] Select Replace All over mixed air/solid terrain; expected: every voxel in the footprint becomes the selected
+- [x] Run `cargo server` and `cargo client`.
+- [x] Select Paint Existing over mixed air/solid terrain; expected: solid voxels change material and air remains air.
+- [x] Select Replace All over mixed air/solid terrain; expected: every voxel in the footprint becomes the selected
       material.
-- [ ] Confirm preview footprint is identical to the applied footprint for PaintExisting and ReplaceAll.
-- [ ] Confirm other clients observe PaintExisting and ReplaceAll edits.
+- [x] Confirm preview footprint is identical to the applied footprint for PaintExisting and ReplaceAll.
+- [x] Confirm other clients observe PaintExisting and ReplaceAll edits.
 
 ---
 
