@@ -6,7 +6,7 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use persistence::{PersistenceError, Store};
 
-use super::{chunk_file_path, ChunkFileEnvelope, CHUNK_SAVE_VERSION, ZSTD_COMPRESSION_LEVEL};
+use super::{CHUNK_SAVE_VERSION, ChunkFileEnvelope, ZSTD_COMPRESSION_LEVEL, chunk_file_path};
 
 /// Filesystem-backed store for chunk terrain data.
 ///

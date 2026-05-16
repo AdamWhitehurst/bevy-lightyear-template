@@ -72,7 +72,8 @@ pub fn spawn_terrain_batch(
                                 let _span = info_span!("mesh_chunk").entered();
                                 mesh_chunk_greedy(&voxels, &shape)
                             };
-                            let entity_spawns = load_chunk_entities_from_store(&entity_store, pos).unwrap_or_default();
+                            let entity_spawns = load_chunk_entities_from_store(&entity_store, pos)
+                                .unwrap_or_default();
                             return ChunkGenResult {
                                 position: pos,
                                 mesh,

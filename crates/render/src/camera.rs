@@ -1,14 +1,18 @@
-use avian3d::prelude::Position;
+use avian3d::prelude::{Position, SpatialQuery, SpatialQueryFilter};
 use bevy::image::{ImageAddressMode, ImageLoaderSettings};
 use bevy::light::{NotShadowCaster, NotShadowReceiver};
 use bevy::mesh::Indices;
 use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
 use lightyear::prelude::*;
+use protocol::{MapInstanceId, VoxelChunk, WorldObjectId};
 
 const BASE_OFFSET: Vec3 = Vec3::new(0.0, 18.0, -36.0);
 const BASE_LIGHT_OFFSET: Vec3 = Vec3::new(8.0, 16.0, 8.0);
 const ORBIT_LERP_SPEED: f32 = 20.0;
+const CAMERA_OCCLUSION_PADDING: f32 = 0.75;
+const CAMERA_MIN_DISTANCE: f32 = 6.0;
+const CAMERA_COLLISION_LERP_SPEED: f32 = 18.0;
 const BACKGROUND_IMAGE: &str = "sprites/background.png";
 const BACKGROUND_RADIUS: f32 = 1000.0;
 const BACKGROUND_LATITUDE_SEGMENTS: u32 = 32;
@@ -23,6 +27,8 @@ pub struct CameraOrbitState {
     pub target_angle: f32,
     /// Current angle in radians (lerps toward target)
     pub current_angle: f32,
+    /// Current camera arm length after occlusion avoidance.
+    pub current_distance: f32,
 }
 
 impl Default for CameraOrbitState {
@@ -30,6 +36,7 @@ impl Default for CameraOrbitState {
         Self {
             target_angle: 0.0,
             current_angle: 0.0,
+            current_distance: BASE_OFFSET.length(),
         }
     }
 }
@@ -195,19 +202,83 @@ pub(crate) fn update_camera_orbit(time: Res<Time>, mut query: Query<&mut CameraO
 }
 
 pub(crate) fn follow_player(
-    player_query: Query<&Position, With<Controlled>>,
-    mut camera_query: Query<(&mut Transform, &CameraOrbitState), With<Camera3d>>,
+    time: Res<Time>,
+    spatial_query: SpatialQuery,
+    player_query: Query<(Entity, &Position, Option<&MapInstanceId>), With<Controlled>>,
+    map_ids: Query<&MapInstanceId>,
+    occluders: Query<(), Or<(With<WorldObjectId>, With<VoxelChunk>, With<Mesh3d>)>>,
+    mut camera_query: Query<(&mut Transform, &mut CameraOrbitState), With<Camera3d>>,
 ) {
-    let Ok(player_pos) = player_query.single() else {
+    let Ok((player_entity, player_pos, player_map)) = player_query.single() else {
+        trace!("follow_player: controlled player is not available yet");
         return;
     };
-    let Ok((mut camera_transform, orbit)) = camera_query.single_mut() else {
+    let Ok((mut camera_transform, mut orbit)) = camera_query.single_mut() else {
+        trace!("follow_player: camera is not available yet");
         return;
     };
 
-    let rotated_offset = Quat::from_rotation_y(orbit.current_angle) * BASE_OFFSET;
-    camera_transform.translation = **player_pos + rotated_offset;
-    camera_transform.look_at(**player_pos, Dir3::Y);
+    let desired_offset = Quat::from_rotation_y(orbit.current_angle) * BASE_OFFSET;
+    let desired_distance = desired_offset.length();
+    let desired_direction = Dir3::new(desired_offset.normalize())
+        .expect("BASE_OFFSET must be non-zero so the camera can follow the player");
+    let target_distance = occlusion_adjusted_camera_distance(
+        player_pos.0,
+        player_entity,
+        player_map,
+        desired_direction,
+        desired_distance,
+        &spatial_query,
+        &map_ids,
+        &occluders,
+    );
+
+    let lerp_factor = (CAMERA_COLLISION_LERP_SPEED * time.delta_secs()).min(1.0);
+    orbit.current_distance += (target_distance - orbit.current_distance) * lerp_factor;
+    camera_transform.translation =
+        player_pos.0 + desired_direction.as_vec3() * orbit.current_distance;
+    camera_transform.look_at(player_pos.0, Dir3::Y);
+}
+
+/// Returns the camera arm length clamped in front of the nearest opaque-ish collider.
+fn occlusion_adjusted_camera_distance(
+    player_pos: Vec3,
+    player_entity: Entity,
+    player_map: Option<&MapInstanceId>,
+    desired_direction: Dir3,
+    desired_distance: f32,
+    spatial_query: &SpatialQuery,
+    map_ids: &Query<&MapInstanceId>,
+    occluders: &Query<(), Or<(With<WorldObjectId>, With<VoxelChunk>, With<Mesh3d>)>>,
+) -> f32 {
+    let filter = SpatialQueryFilter::from_excluded_entities([player_entity]);
+    spatial_query
+        .cast_ray_predicate(
+            player_pos,
+            desired_direction,
+            desired_distance,
+            true,
+            &filter,
+            &|entity| is_camera_occluder(entity, player_map, map_ids, occluders),
+        )
+        .map(|hit| (hit.distance - CAMERA_OCCLUSION_PADDING).max(CAMERA_MIN_DISTANCE))
+        .unwrap_or(desired_distance)
+}
+
+/// Treats world objects, voxel chunks, and mesh collider entities as camera occluders.
+fn is_camera_occluder(
+    entity: Entity,
+    player_map: Option<&MapInstanceId>,
+    map_ids: &Query<&MapInstanceId>,
+    occluders: &Query<(), Or<(With<WorldObjectId>, With<VoxelChunk>, With<Mesh3d>)>>,
+) -> bool {
+    if !occluders.contains(entity) {
+        return false;
+    }
+    match (player_map, map_ids.get(entity).ok()) {
+        (Some(player_map), Some(entity_map)) => player_map == entity_map,
+        _ => true,
+    }
 }
 
 /// Centers the spherical background on the camera without copying camera rotation.

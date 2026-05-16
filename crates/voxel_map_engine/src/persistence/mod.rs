@@ -303,7 +303,13 @@ mod tests {
 
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].persisted_components.len(), 1);
-        assert_eq!(loaded[0].persisted_components[0].type_path, rotation_component.type_path);
-        assert_eq!(loaded[0].persisted_components[0].ron_data, rotation_component.ron_data);
+        assert_eq!(
+            loaded[0].persisted_components[0].type_path,
+            rotation_component.type_path
+        );
+        assert_eq!(
+            loaded[0].persisted_components[0].ron_data,
+            rotation_component.ron_data
+        );
     }
 }
