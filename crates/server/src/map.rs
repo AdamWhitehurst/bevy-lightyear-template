@@ -1435,6 +1435,14 @@ pub fn handle_voxel_brush_edit_requests(
                 continue;
             };
 
+            if !validate_voxel_brush_edit(&request, map_entity, &voxel_world) {
+                warn!(
+                    "handle_voxel_brush_edit_requests: rejecting invalid brush request sequence {}",
+                    request.sequence
+                );
+                continue;
+            }
+
             let changes = concrete_brush_changes(&request, map_entity, &voxel_world);
             if changes.is_empty() {
                 trace!(
@@ -1486,16 +1494,28 @@ fn concrete_brush_changes(
         .into_iter()
         .filter_map(|position| {
             let old = voxel_world.get_voxel(map_entity, position);
-            let voxel = match request.mode {
-                TerrainBrushMode::FillAir if matches!(old, WorldVoxel::Air | WorldVoxel::Unset) => {
-                    VoxelType::Solid(request.material)
-                }
-                TerrainBrushMode::Remove if matches!(old, WorldVoxel::Solid(_)) => VoxelType::Air,
-                _ => return None,
-            };
+            let voxel = voxel_for_brush_mode(old, request.mode, request.material)?;
             Some(VoxelChange { position, voxel })
         })
         .collect()
+}
+
+fn voxel_for_brush_mode(
+    old: WorldVoxel,
+    mode: TerrainBrushMode,
+    material: u8,
+) -> Option<VoxelType> {
+    match mode {
+        TerrainBrushMode::FillAir if matches!(old, WorldVoxel::Air | WorldVoxel::Unset) => {
+            Some(VoxelType::Solid(material))
+        }
+        TerrainBrushMode::Remove if matches!(old, WorldVoxel::Solid(_)) => Some(VoxelType::Air),
+        TerrainBrushMode::PaintExisting if matches!(old, WorldVoxel::Solid(_)) => {
+            Some(VoxelType::Solid(material))
+        }
+        TerrainBrushMode::ReplaceAll => Some(VoxelType::Solid(material)),
+        _ => None,
+    }
 }
 
 fn apply_voxel_changes(
@@ -1530,6 +1550,15 @@ fn send_brush_edit_ack(
     } else {
         warn!("send_brush_edit_ack: no ack sender for {client_entity:?}");
     }
+}
+
+/// Validates a voxel brush edit request. Returns false if the whole brush should be rejected.
+fn validate_voxel_brush_edit(
+    request: &VoxelBrushEditRequest,
+    _map_entity: Entity,
+    _voxel_world: &VoxelWorld,
+) -> bool {
+    request.width > 0 && request.height > 0
 }
 
 /// Validates a voxel edit request. Returns false if the edit should be rejected.
@@ -2096,6 +2125,30 @@ mod tests {
         for (_, edits) in pending.per_chunk.drain() {
             assert_eq!(edits.len(), 2, "multi-edit should take batched update path");
         }
+    }
+
+    #[test]
+    fn paint_brush_mode_recolors_only_existing_solids() {
+        assert_eq!(
+            voxel_for_brush_mode(WorldVoxel::Solid(1), TerrainBrushMode::PaintExisting, 7),
+            Some(VoxelType::Solid(7))
+        );
+        assert_eq!(
+            voxel_for_brush_mode(WorldVoxel::Air, TerrainBrushMode::PaintExisting, 7),
+            None
+        );
+    }
+
+    #[test]
+    fn paint_brush_replace_all_writes_air_and_solids() {
+        assert_eq!(
+            voxel_for_brush_mode(WorldVoxel::Air, TerrainBrushMode::ReplaceAll, 9),
+            Some(VoxelType::Solid(9))
+        );
+        assert_eq!(
+            voxel_for_brush_mode(WorldVoxel::Solid(2), TerrainBrushMode::ReplaceAll, 9),
+            Some(VoxelType::Solid(9))
+        );
     }
 
     #[test]

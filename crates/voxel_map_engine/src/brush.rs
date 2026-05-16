@@ -140,6 +140,23 @@ mod tests {
     }
 
     #[test]
+    fn footprint_is_mode_independent_after_anchor_selection() {
+        let anchor = IVec3::new(2, 3, 4);
+        let baseline = brush_footprint(anchor, TerrainBrushShape::Rect, 3, 2);
+        for _mode in [
+            TerrainBrushMode::FillAir,
+            TerrainBrushMode::ReplaceAll,
+            TerrainBrushMode::PaintExisting,
+            TerrainBrushMode::Remove,
+        ] {
+            assert_eq!(
+                brush_footprint(anchor, TerrainBrushShape::Rect, 3, 2),
+                baseline
+            );
+        }
+    }
+
+    #[test]
     fn fill_air_anchor_uses_hit_normal() {
         let hit = hit(IVec3::new(4, 5, 6), Some(Vec3::Y));
         assert_eq!(

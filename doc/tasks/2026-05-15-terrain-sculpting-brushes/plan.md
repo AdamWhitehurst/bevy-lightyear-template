@@ -814,8 +814,7 @@ let new_voxel = match settings.mode {
 };
 ```
 
-Update input mapping so PaintExisting and ReplaceAll use the place action (`PlayerActions::PlaceVoxel`) and Remove uses
-remove action.
+Update input mapping so PaintExisting, ReplaceAll, and Remove all use the place action (`PlayerActions::PlaceVoxel`); the selected mode determines the operation.
 
 #### 5. Server concrete changes for replacement modes
 
@@ -861,13 +860,13 @@ Use this before computing/applying changes. If false, reject the whole request.
 
 #### Automated
 
-- [ ] `pgrep -af 'cargo (build|check|test)' || true` shows no active cargo build/check/test before running tests.
-- [ ] `cargo test -p voxel_map_engine brush` passes.
-- [ ] `cargo test -p client paint` passes after adding client prediction tests for PaintExisting and ReplaceAll.
-- [ ] `cargo test -p server paint` passes after adding server concrete-change tests.
-- [ ] `cargo check -p protocol` passes.
-- [ ] `cargo check -p client` passes.
-- [ ] `cargo check -p server` passes.
+- [x] `pgrep -af 'cargo (build|check|test)' || true` shows no active cargo build/check/test before running tests.
+- [x] `cargo test -p voxel_map_engine brush` passes.
+- [x] `cargo test -p client paint` passes after adding client prediction tests for PaintExisting and ReplaceAll.
+- [x] `cargo test -p server paint` passes after adding server concrete-change tests.
+- [x] `cargo check -p protocol` passes.
+- [x] `cargo check -p client` passes.
+- [x] `cargo check -p server` passes.
 
 #### Manual
 

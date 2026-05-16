@@ -558,13 +558,7 @@ fn predict_brush_changes(
         .into_iter()
         .filter_map(|position| {
             let old = voxel_world.get_voxel(map_entity, position);
-            let new_voxel = match settings.mode {
-                TerrainBrushMode::FillAir if matches!(old, WorldVoxel::Air | WorldVoxel::Unset) => {
-                    VoxelType::Solid(settings.material)
-                }
-                TerrainBrushMode::Remove if matches!(old, WorldVoxel::Solid(_)) => VoxelType::Air,
-                _ => return None,
-            };
+            let new_voxel = predicted_voxel_for_brush_mode(old, settings.mode, settings.material)?;
             Some(PredictedVoxelChange {
                 position,
                 old_voxel: old.into(),
@@ -572,6 +566,25 @@ fn predict_brush_changes(
             })
         })
         .collect()
+}
+
+#[cfg(feature = "spawn-panel")]
+fn predicted_voxel_for_brush_mode(
+    old: WorldVoxel,
+    mode: TerrainBrushMode,
+    material: u8,
+) -> Option<VoxelType> {
+    match mode {
+        TerrainBrushMode::FillAir if matches!(old, WorldVoxel::Air | WorldVoxel::Unset) => {
+            Some(VoxelType::Solid(material))
+        }
+        TerrainBrushMode::Remove if matches!(old, WorldVoxel::Solid(_)) => Some(VoxelType::Air),
+        TerrainBrushMode::PaintExisting if matches!(old, WorldVoxel::Solid(_)) => {
+            Some(VoxelType::Solid(material))
+        }
+        TerrainBrushMode::ReplaceAll => Some(VoxelType::Solid(material)),
+        _ => None,
+    }
 }
 
 #[cfg(feature = "spawn-panel")]
@@ -609,19 +622,7 @@ fn handle_terrain_brush_input(
         return;
     }
 
-    let pressed = match settings.mode {
-        TerrainBrushMode::FillAir | TerrainBrushMode::Remove => {
-            action_state.pressed(&PlayerActions::PlaceVoxel)
-        }
-        TerrainBrushMode::PaintExisting | TerrainBrushMode::ReplaceAll => {
-            trace!(
-                "handle_terrain_brush_input: mode {:?} is added in Phase 3",
-                settings.mode
-            );
-            reset_brush_stroke_state(&mut stroke_state);
-            return;
-        }
-    };
+    let pressed = action_state.pressed(&PlayerActions::PlaceVoxel);
     if !pressed {
         trace!("handle_terrain_brush_input: no terrain brush action held");
         reset_brush_stroke_state(&mut stroke_state);
@@ -725,9 +726,8 @@ fn brush_anchor_with_changes(
 fn continuous_brush_direction(mode: TerrainBrushMode, normal: Vec3) -> Option<IVec3> {
     let normal = normal.as_ivec3();
     match mode {
-        TerrainBrushMode::FillAir => Some(normal),
-        TerrainBrushMode::Remove => Some(-normal),
-        TerrainBrushMode::PaintExisting | TerrainBrushMode::ReplaceAll => None,
+        TerrainBrushMode::FillAir | TerrainBrushMode::ReplaceAll => Some(normal),
+        TerrainBrushMode::Remove | TerrainBrushMode::PaintExisting => Some(-normal),
     }
 }
 
@@ -2108,6 +2108,34 @@ mod tests {
     }
 
     #[test]
+    fn paint_prediction_recolors_only_existing_solids() {
+        assert_eq!(
+            predicted_voxel_for_brush_mode(
+                WorldVoxel::Solid(1),
+                TerrainBrushMode::PaintExisting,
+                7
+            ),
+            Some(VoxelType::Solid(7))
+        );
+        assert_eq!(
+            predicted_voxel_for_brush_mode(WorldVoxel::Air, TerrainBrushMode::PaintExisting, 7),
+            None
+        );
+    }
+
+    #[test]
+    fn paint_prediction_replace_all_writes_air_and_solids() {
+        assert_eq!(
+            predicted_voxel_for_brush_mode(WorldVoxel::Air, TerrainBrushMode::ReplaceAll, 9),
+            Some(VoxelType::Solid(9))
+        );
+        assert_eq!(
+            predicted_voxel_for_brush_mode(WorldVoxel::Solid(2), TerrainBrushMode::ReplaceAll, 9),
+            Some(VoxelType::Solid(9))
+        );
+    }
+
+    #[test]
     fn projected_top_hit_face_preserves_locked_y_anchor() {
         assert_eq!(
             anchor_from_projected_plane_point(
@@ -2138,13 +2166,21 @@ mod tests {
     }
 
     #[test]
-    fn continuous_direction_follows_fill_or_remove_mode() {
+    fn continuous_direction_follows_mode_write_direction() {
         assert_eq!(
             continuous_brush_direction(TerrainBrushMode::FillAir, Vec3::Y),
             Some(IVec3::Y)
         );
         assert_eq!(
+            continuous_brush_direction(TerrainBrushMode::ReplaceAll, Vec3::Y),
+            Some(IVec3::Y)
+        );
+        assert_eq!(
             continuous_brush_direction(TerrainBrushMode::Remove, Vec3::Y),
+            Some(-IVec3::Y)
+        );
+        assert_eq!(
+            continuous_brush_direction(TerrainBrushMode::PaintExisting, Vec3::Y),
             Some(-IVec3::Y)
         );
     }
