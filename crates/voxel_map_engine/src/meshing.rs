@@ -36,6 +36,8 @@ pub fn mesh_chunk_greedy<S: Shape<3, Coord = u32>>(
     let mut normals = Vec::with_capacity(num_vertices);
     let mut indices = Vec::with_capacity(num_indices);
     let mut tex_coords = Vec::with_capacity(num_vertices);
+    // TODO(perf): Float32x4 vertex colors cost 16 bytes per vertex. If terrain mesh memory or
+    // vertex bandwidth becomes a bottleneck, switch this to packed Uint8x4 colors or material indices.
     let mut colors = Vec::with_capacity(num_vertices);
 
     for (group, face) in buffer.quads.groups.iter().zip(faces.iter()) {
