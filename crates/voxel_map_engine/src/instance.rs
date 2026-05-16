@@ -92,6 +92,20 @@ impl VoxelMapInstance {
         self.tree.get_value_mut(relation.child)?.as_mut()
     }
 
+    /// Mutate multiple world-space voxels by reusing single-voxel mutation behavior.
+    pub fn set_voxels(&mut self, edits: impl IntoIterator<Item = (IVec3, WorldVoxel)>) -> usize {
+        let mut written = 0;
+        for (world_pos, voxel) in edits {
+            debug_assert!(
+                voxel != WorldVoxel::Unset,
+                "set_voxels: cannot write Unset (internal sentinel)"
+            );
+            self.set_voxel(world_pos, voxel);
+            written += 1;
+        }
+        written
+    }
+
     /// Mutate a voxel directly in the octree. Marks the chunk dirty and queues
     /// it for async remesh. Also updates neighbor chunk padding for boundary voxels.
     /// If the chunk is not loaded, the edit is silently dropped.

@@ -28,10 +28,12 @@ use protocol::world_object::{
     WorldObjectPlacementChannel, WorldObjectPlacementReject, WorldObjectPlacementRequest,
     WorldObjectRotateAck, WorldObjectRotateRequest,
 };
+#[cfg(not(feature = "spawn-panel"))]
+use protocol::VoxelEditRequest;
 use protocol::{
     CharacterMarker, ChunkDataSync, MapInstanceId, MapRegistry, PlayerActions, SectionBlocksUpdate,
-    UnloadColumn, VoxelChannel, VoxelEditAck, VoxelEditBroadcast, VoxelEditReject,
-    VoxelEditRequest, VoxelType,
+    UnloadColumn, VoxelBrushEditRequest, VoxelChannel, VoxelEditAck, VoxelEditBroadcast,
+    VoxelEditReject, VoxelType,
 };
 use voxel_map_engine::prelude::{
     brush_anchor, brush_footprint, chunk_to_column, column_to_chunks, ChunkData, ChunkStatus,
@@ -125,9 +127,14 @@ pub struct VoxelPredictionState {
     pub pending: Vec<VoxelPrediction>,
 }
 
-/// A single pending block edit prediction awaiting server acknowledgment.
+/// A pending terrain edit prediction awaiting server acknowledgment.
 pub struct VoxelPrediction {
     pub sequence: u32,
+    pub changes: Vec<PredictedVoxelChange>,
+}
+
+/// One locally predicted voxel change.
+pub struct PredictedVoxelChange {
     pub position: IVec3,
     pub old_voxel: VoxelType,
     pub new_voxel: VoxelType,
@@ -186,7 +193,8 @@ impl Plugin for ClientMapPlugin {
                     #[cfg(feature = "spawn-panel")]
                     update_terrain_brush_preview.run_if(in_editing_mode(EditingMode::Terrain)),
                     #[cfg(feature = "spawn-panel")]
-                    update_terrain_brush_stroke_state.run_if(in_editing_mode(EditingMode::Terrain)),
+                    handle_terrain_brush_input.run_if(in_editing_mode(EditingMode::Terrain)),
+                    #[cfg(not(feature = "spawn-panel"))]
                     handle_voxel_input.run_if(in_editing_mode(EditingMode::Terrain)),
                     #[cfg(feature = "spawn-panel")]
                     update_world_object_nearby_selection
@@ -328,10 +336,8 @@ fn handle_voxel_broadcasts(
     };
     for mut message_receiver in receiver.iter_mut() {
         for broadcast in message_receiver.receive() {
-            let has_pending_prediction = prediction_state
-                .pending
-                .iter()
-                .any(|p| p.position == broadcast.position);
+            let has_pending_prediction =
+                has_pending_prediction_at(&prediction_state, broadcast.position);
             if has_pending_prediction {
                 trace!(
                     "handle_voxel_broadcasts: skipping broadcast at {:?} (pending prediction)",
@@ -368,8 +374,7 @@ fn handle_section_blocks_update(
     for mut receiver in receivers.iter_mut() {
         for update in receiver.receive() {
             for (pos, voxel) in &update.changes {
-                let has_pending_prediction =
-                    prediction_state.pending.iter().any(|p| p.position == *pos);
+                let has_pending_prediction = has_pending_prediction_at(&prediction_state, *pos);
                 if has_pending_prediction {
                     trace!(
                         "handle_section_blocks_update: skipping change at {:?} (pending prediction)",
@@ -381,6 +386,14 @@ fn handle_section_blocks_update(
             }
         }
     }
+}
+
+fn has_pending_prediction_at(prediction_state: &VoxelPredictionState, position: IVec3) -> bool {
+    prediction_state
+        .pending
+        .iter()
+        .flat_map(|prediction| prediction.changes.iter())
+        .any(|change| change.position == position)
 }
 
 fn current_terrain_brush_anchor(
@@ -448,45 +461,83 @@ fn update_terrain_brush_preview(
 }
 
 #[cfg(feature = "spawn-panel")]
-fn update_terrain_brush_stroke_state(
+fn predict_brush_changes(
+    map_entity: Entity,
+    voxel_world: &VoxelWorld,
+    anchor: IVec3,
+    settings: &TerrainBrushSettings,
+) -> Vec<PredictedVoxelChange> {
+    brush_footprint(anchor, settings.shape, settings.width, settings.height)
+        .into_iter()
+        .filter_map(|position| {
+            let old = voxel_world.get_voxel(map_entity, position);
+            let new_voxel = match settings.mode {
+                TerrainBrushMode::FillAir if matches!(old, WorldVoxel::Air | WorldVoxel::Unset) => {
+                    VoxelType::Solid(settings.material)
+                }
+                TerrainBrushMode::Remove if matches!(old, WorldVoxel::Solid(_)) => VoxelType::Air,
+                _ => return None,
+            };
+            Some(PredictedVoxelChange {
+                position,
+                old_voxel: old.into(),
+                new_voxel,
+            })
+        })
+        .collect()
+}
+
+#[cfg(feature = "spawn-panel")]
+fn handle_terrain_brush_input(
     player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
-    voxel_world: VoxelWorld,
+    mut voxel_world: VoxelWorld,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     action_query: Query<&ActionState<PlayerActions>, With<Controlled>>,
     settings: Res<TerrainBrushSettings>,
     mut stroke_state: ResMut<TerrainBrushStrokeState>,
+    mut message_sender: Query<&mut MessageSender<VoxelBrushEditRequest>>,
+    mut prediction_state: ResMut<VoxelPredictionState>,
 ) {
     if !settings.active {
-        trace!("update_terrain_brush_stroke_state: terrain brush inactive");
-        stroke_state.active = false;
-        stroke_state.last_anchor = None;
-        return;
-    }
-    let Ok(action_state) = action_query.single() else {
-        trace!("update_terrain_brush_stroke_state: no entity with ActionState + Controlled");
-        stroke_state.active = false;
-        stroke_state.last_anchor = None;
-        return;
-    };
-    let pressed = match settings.mode {
-        TerrainBrushMode::Remove => action_state.pressed(&PlayerActions::RemoveVoxel),
-        TerrainBrushMode::FillAir
-        | TerrainBrushMode::PaintExisting
-        | TerrainBrushMode::ReplaceAll => action_state.pressed(&PlayerActions::PlaceVoxel),
-    };
-    if !pressed {
-        trace!("update_terrain_brush_stroke_state: no terrain brush action held");
+        trace!("handle_terrain_brush_input: terrain brush inactive");
         stroke_state.active = false;
         stroke_state.last_anchor = None;
         return;
     }
     let Ok(chunk_ticket) = player_query.single() else {
-        trace!("update_terrain_brush_stroke_state: no predicted player with ChunkTicket");
+        trace!("handle_terrain_brush_input: no predicted player with ChunkTicket");
         stroke_state.active = false;
         stroke_state.last_anchor = None;
         return;
     };
+    let Ok(action_state) = action_query.single() else {
+        trace!("handle_terrain_brush_input: no entity with ActionState + Controlled");
+        stroke_state.active = false;
+        stroke_state.last_anchor = None;
+        return;
+    };
+
+    let pressed = match settings.mode {
+        TerrainBrushMode::FillAir => action_state.pressed(&PlayerActions::PlaceVoxel),
+        TerrainBrushMode::Remove => action_state.pressed(&PlayerActions::RemoveVoxel),
+        TerrainBrushMode::PaintExisting | TerrainBrushMode::ReplaceAll => {
+            trace!(
+                "handle_terrain_brush_input: mode {:?} is added in Phase 3",
+                settings.mode
+            );
+            stroke_state.active = false;
+            stroke_state.last_anchor = None;
+            return;
+        }
+    };
+    if !pressed {
+        trace!("handle_terrain_brush_input: no terrain brush action held");
+        stroke_state.active = false;
+        stroke_state.last_anchor = None;
+        return;
+    }
+
     let Some(anchor) = current_terrain_brush_anchor(
         chunk_ticket,
         &voxel_world,
@@ -498,10 +549,49 @@ fn update_terrain_brush_stroke_state(
         stroke_state.last_anchor = None;
         return;
     };
+    if stroke_state.active && stroke_state.last_anchor == Some(anchor) {
+        trace!(
+            "handle_terrain_brush_input: anchor {:?} already handled in active stroke",
+            anchor
+        );
+        return;
+    }
+
+    let sequence = prediction_state.next();
+    let changes = predict_brush_changes(chunk_ticket.map_entity, &voxel_world, anchor, &settings);
+    if changes.is_empty() {
+        trace!("handle_terrain_brush_input: brush produced no changes");
+        stroke_state.active = true;
+        stroke_state.last_anchor = Some(anchor);
+        return;
+    }
+
+    voxel_world.set_voxels(
+        chunk_ticket.map_entity,
+        changes
+            .iter()
+            .map(|change| (change.position, WorldVoxel::from(change.new_voxel))),
+    );
+    prediction_state
+        .pending
+        .push(VoxelPrediction { sequence, changes });
+
+    for mut sender in message_sender.iter_mut() {
+        sender.send::<VoxelChannel>(VoxelBrushEditRequest {
+            sequence,
+            anchor,
+            shape: settings.shape,
+            width: settings.width,
+            height: settings.height,
+            mode: settings.mode,
+            material: settings.material,
+        });
+    }
     stroke_state.active = true;
     stroke_state.last_anchor = Some(anchor);
 }
 
+#[cfg(not(feature = "spawn-panel"))]
 fn handle_voxel_input(
     player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
     mut voxel_world: VoxelWorld,
@@ -557,9 +647,11 @@ fn handle_voxel_input(
 
     prediction_state.pending.push(VoxelPrediction {
         sequence,
-        position,
-        old_voxel,
-        new_voxel: voxel,
+        changes: vec![PredictedVoxelChange {
+            position,
+            old_voxel,
+            new_voxel: voxel,
+        }],
     });
 
     for mut sender in message_sender.iter_mut() {
@@ -1720,7 +1812,7 @@ fn handle_voxel_edit_ack(
             );
             prediction_state
                 .pending
-                .retain(|p| p.sequence > ack.sequence);
+                .retain(|p| p.sequence != ack.sequence);
         }
     }
 }
@@ -1759,6 +1851,20 @@ fn handle_voxel_edit_reject(
 mod tests {
     use super::*;
 
+    fn prediction(sequence: u32, positions: impl IntoIterator<Item = IVec3>) -> VoxelPrediction {
+        VoxelPrediction {
+            sequence,
+            changes: positions
+                .into_iter()
+                .map(|position| PredictedVoxelChange {
+                    position,
+                    old_voxel: VoxelType::Air,
+                    new_voxel: VoxelType::Solid(1),
+                })
+                .collect(),
+        }
+    }
+
     #[test]
     fn prediction_state_sequence_increments() {
         let mut state = VoxelPredictionState::default();
@@ -1768,82 +1874,46 @@ mod tests {
     }
 
     #[test]
-    fn ack_clears_predictions_up_to_sequence() {
+    fn ack_clears_matching_prediction_sequence() {
         let mut state = VoxelPredictionState::default();
         for i in 0..5 {
-            state.pending.push(VoxelPrediction {
-                sequence: i,
-                position: IVec3::ZERO,
-                old_voxel: VoxelType::Air,
-                new_voxel: VoxelType::Solid(1),
-            });
+            state.pending.push(prediction(i, [IVec3::ZERO]));
         }
-        // Ack sequence 2 — clears 0, 1, 2
-        state.pending.retain(|p| p.sequence > 2);
-        assert_eq!(state.pending.len(), 2);
-        assert_eq!(state.pending[0].sequence, 3);
+        state.pending.retain(|p| p.sequence != 2);
+        assert_eq!(state.pending.len(), 4);
+        assert!(state.pending.iter().all(|p| p.sequence != 2));
+        assert!(state.pending.iter().any(|p| p.sequence == 0));
     }
 
     #[test]
-    fn broadcast_skipped_for_pending_prediction_position() {
+    fn broadcast_skipped_for_any_pending_prediction_position() {
         let mut state = VoxelPredictionState::default();
-        state.pending.push(VoxelPrediction {
-            sequence: 0,
-            position: IVec3::new(5, 10, 15),
-            old_voxel: VoxelType::Solid(1),
-            new_voxel: VoxelType::Air,
-        });
+        state.pending.push(prediction(
+            0,
+            [IVec3::new(5, 10, 15), IVec3::new(6, 10, 15)],
+        ));
 
-        let broadcast_pos = IVec3::new(5, 10, 15);
-        let has_pending = state.pending.iter().any(|p| p.position == broadcast_pos);
-        assert!(
-            has_pending,
-            "broadcast at pending prediction position should be filtered"
-        );
-
-        let other_pos = IVec3::new(1, 2, 3);
-        let has_pending_other = state.pending.iter().any(|p| p.position == other_pos);
-        assert!(
-            !has_pending_other,
-            "broadcast at non-pending position should not be filtered"
-        );
+        assert!(has_pending_prediction_at(&state, IVec3::new(6, 10, 15)));
+        assert!(!has_pending_prediction_at(&state, IVec3::new(1, 2, 3)));
     }
 
     #[test]
     fn reject_removes_specific_prediction() {
         let mut state = VoxelPredictionState::default();
         for i in 0..5 {
-            state.pending.push(VoxelPrediction {
-                sequence: i,
-                position: IVec3::new(i as i32, 0, 0),
-                old_voxel: VoxelType::Air,
-                new_voxel: VoxelType::Solid(1),
-            });
+            state
+                .pending
+                .push(prediction(i, [IVec3::new(i as i32, 0, 0)]));
         }
 
         let rejected_seq = 2u32;
         state.pending.retain(|p| p.sequence != rejected_seq);
 
         assert_eq!(state.pending.len(), 4);
-        assert!(
-            state.pending.iter().all(|p| p.sequence != 2),
-            "rejected prediction should be removed"
-        );
-        assert!(
-            state.pending.iter().any(|p| p.sequence == 0),
-            "other predictions should remain"
-        );
-        assert!(
-            state.pending.iter().any(|p| p.sequence == 1),
-            "other predictions should remain"
-        );
-        assert!(
-            state.pending.iter().any(|p| p.sequence == 3),
-            "other predictions should remain"
-        );
-        assert!(
-            state.pending.iter().any(|p| p.sequence == 4),
-            "other predictions should remain"
-        );
+        assert!(state.pending.iter().all(|p| p.sequence != 2));
+        assert!(state.pending.iter().any(|p| p.sequence == 0));
+        assert!(state.pending.iter().any(|p| p.sequence == 1));
+        assert!(state.pending.iter().any(|p| p.sequence == 3));
+        assert!(state.pending.iter().any(|p| p.sequence == 4));
     }
 }

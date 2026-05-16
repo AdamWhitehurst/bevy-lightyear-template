@@ -2,11 +2,15 @@
 
 ## Overview
 
-The Dev plugin will expose a dedicated terrain sculpting interface for brush-based voxel editing, preview, server-authoritative application, and acknowledged undo/redo. One logical brush operation will be represented as world-space voxel changes while `voxel_map_engine` remains responsible for chunk lookup, dirty marking, padding updates, and remeshing.
+The Dev plugin will expose a dedicated terrain sculpting interface for brush-based voxel editing, preview,
+server-authoritative application, and acknowledged undo/redo. One logical brush operation will be represented as
+world-space voxel changes while `voxel_map_engine` remains responsible for chunk lookup, dirty marking, padding updates,
+and remeshing.
 
 ## Global Verification Rule
 
-Before running any `cargo build`, `cargo check`, or `cargo test` command, first verify that no other cargo build/check/test is already running:
+Before running any `cargo build`, `cargo check`, or `cargo test` command, first verify that no other cargo
+build/check/test is already running:
 
 ```bash
 pgrep -af 'cargo (build|check|test)' || true
@@ -18,9 +22,14 @@ If this prints an active build/check/test, wait for it to finish or stop it befo
 
 ### Implemented Deviation Notes
 
-- Terrain brush controls are integrated into the existing `▧ World Objects` panel's Terrain tab instead of a separate `▦ Terrain` window. This prevents a second panel from forcing `EditingMode::Terrain` every frame and keeps mode switching local to the tab selector.
-- Brush preview/stroke state is gated by a `Brush active` checkbox; the wireframe does not follow the cursor unless the brush is active.
-- The rectangular brush shape is named `Rect`, not `Cube`, and exposes separate `width` and `height` controls. Width applies across horizontal X/Z; height applies across Y. A width of `2` covers `2x2` horizontally, `3` covers `3x3`, etc.
+- Terrain brush controls are integrated into the existing `▧ World Objects` panel's Terrain tab instead of a separate
+  `▦ Terrain` window. This prevents a second panel from forcing `EditingMode::Terrain` every frame and keeps mode
+  switching local to the tab selector.
+- Brush preview/stroke state is gated by a `Brush active` checkbox; the wireframe does not follow the cursor unless the
+  brush is active.
+- The rectangular brush shape is named `Rect`, not `Cube`, and exposes separate `width` and `height` controls. Width
+  applies across horizontal X/Z; height applies across Y. A width of `2` covers `2x2` horizontally, `3` covers `3x3`,
+  etc.
 - Width, height, and material use decrement/input/increment controls (`- [value] +`) rather than bare drag inputs.
 
 ### Changes
@@ -30,7 +39,8 @@ If this prints an active build/check/test, wait for it to finish or stop it befo
 **File**: `crates/voxel_map_engine/src/brush.rs`  
 **Action**: create
 
-Add shared brush types and deterministic footprint helpers. Keep this module free of ECS state so client preview, client prediction, and server application can use identical logic.
+Add shared brush types and deterministic footprint helpers. Keep this module free of ECS state so client preview, client
+prediction, and server application can use identical logic.
 
 ```rust
 use bevy::prelude::*;
@@ -118,7 +128,9 @@ pub use crate::brush::*;
 **File**: `crates/dev/src/panels/terrain.rs`  
 **Action**: create
 
-Create terrain brush settings and controls integrated into the existing World Objects panel Terrain tab. The terrain plugin only initializes the settings resource; it must not open a second window or force `EditingMode::Terrain` every frame.
+Create terrain brush settings and controls integrated into the existing World Objects panel Terrain tab. The terrain
+plugin only initializes the settings resource; it must not open a second window or force `EditingMode::Terrain` every
+frame.
 
 ```rust
 use crate::state::{DevInspectorState, EditingMode};
@@ -206,7 +218,8 @@ app.add_plugins(panels::terrain::TerrainPanelPlugin);
 **File**: `crates/dev/src/panels/spawn.rs`  
 **Action**: modify
 
-Keep the primary tab selector and render `draw_terrain_controls` in the Terrain tab, using `TerrainBrushSettings` as panel state.
+Keep the primary tab selector and render `draw_terrain_controls` in the Terrain tab, using `TerrainBrushSettings` as
+panel state.
 
 ```rust
 fn draw_terrain_tab(ui: &mut egui::Ui, settings: &mut TerrainBrushSettings) {
@@ -337,12 +350,16 @@ fn update_terrain_brush_preview(
 
 - [x] Run `cargo server` and `cargo client` in separate terminals.
 - [x] Press `F4`, open dev panels, and confirm terrain controls appear inside the World Objects panel's Terrain tab.
-- [x] Adjust shape, width, height, material, and mode; expected: controls update without affecting object placement tabs.
-- [x] Use the `- [value] +` controls for width, height, and material; expected: decrement/increment buttons clamp at their min/max.
+- [x] Adjust shape, width, height, material, and mode; expected: controls update without affecting object placement
+      tabs.
+- [x] Use the `- [value] +` controls for width, height, and material; expected: decrement/increment buttons clamp at
+      their min/max.
 - [x] Toggle Brush active off and move over terrain; expected: no wireframe footprint follows the cursor.
 - [x] Toggle Brush active on and move over terrain; expected: wireframe footprint follows the cursor.
-- [x] Switch between Fill Air and Remove; expected: Fill Air preview anchors adjacent to the hit face, Remove/Paint/Replace anchor on the hit voxel.
-- [x] Hold edit input and drag; expected: stroke state updates as the anchor changes and does not repeatedly mark the same anchor.
+- [x] Switch between Fill Air and Remove; expected: Fill Air preview anchors adjacent to the hit face,
+      Remove/Paint/Replace anchor on the hit voxel.
+- [x] Hold edit input and drag; expected: stroke state updates as the anchor changes and does not repeatedly mark the
+      same anchor.
 
 ---
 
@@ -355,7 +372,8 @@ fn update_terrain_brush_preview(
 **File**: `crates/protocol/src/map/voxel.rs`  
 **Action**: modify
 
-Add logical brush request and concrete change structs. Keep existing `VoxelEditRequest` for backward compatibility during the transition.
+Add logical brush request and concrete change structs. Keep existing `VoxelEditRequest` for backward compatibility
+during the transition.
 
 ```rust
 use voxel_map_engine::prelude::{TerrainBrushMode, TerrainBrushShape, VoxelType};
@@ -687,21 +705,23 @@ fn send_edit_ack(
 }
 ```
 
-For each accepted `VoxelChange`, call existing `queue_edit_broadcast(PendingVoxelEdit { ... })`; existing `flush_voxel_broadcasts` will batch by chunk.
+For each accepted `VoxelChange`, call existing `queue_edit_broadcast(PendingVoxelEdit { ... })`; existing
+`flush_voxel_broadcasts` will batch by chunk.
 
-Register `handle_voxel_brush_edit_requests` in the server map plugin wherever `handle_voxel_edit_requests` is registered.
+Register `handle_voxel_brush_edit_requests` in the server map plugin wherever `handle_voxel_edit_requests` is
+registered.
 
 ### Verification
 
 #### Automated
 
-- [ ] `pgrep -af 'cargo (build|check|test)' || true` shows no active cargo build/check/test before running tests.
-- [ ] `cargo test -p voxel_map_engine api` passes.
-- [ ] `cargo test -p client prediction` passes after updating prediction tests for multi-change predictions.
-- [ ] `cargo test -p server different_chunks_produce_separate_entries` passes.
-- [ ] `cargo check -p protocol` passes.
-- [ ] `cargo check -p client` passes.
-- [ ] `cargo check -p server` passes.
+- [x] `pgrep -af 'cargo (build|check|test)' || true` shows no active cargo build/check/test before running tests.
+- [x] `cargo test -p voxel_map_engine api` passes.
+- [x] `cargo test -p client prediction` passes after updating prediction tests for multi-change predictions.
+- [x] `cargo test -p server different_chunks_produce_separate_entries` passes.
+- [x] `cargo check -p protocol` passes.
+- [x] `cargo check -p client` passes.
+- [x] `cargo check -p server` passes.
 
 #### Manual
 
@@ -710,7 +730,8 @@ Register `handle_voxel_brush_edit_requests` in the server map plugin wherever `h
 - [ ] Select Remove, width/height > 1, click once; expected: multiple solid voxels are removed through server authority.
 - [ ] Click-drag across different anchors; expected: repeated brush applications occur only when anchor changes.
 - [ ] Drag across a chunk boundary; expected: both chunks visually remesh and later persist after server save debounce.
-- [ ] Observe second client; expected: it receives the same terrain updates, with same-chunk multi-edits arriving through batched section updates.
+- [ ] Observe second client; expected: it receives the same terrain updates, with same-chunk multi-edits arriving
+      through batched section updates.
 
 ---
 
@@ -730,7 +751,8 @@ Ensure `PaintExisting` and `ReplaceAll` controls are enabled, not placeholder-di
 **File**: `crates/protocol/src/map/voxel.rs`  
 **Action**: modify
 
-No new structs are needed if Phase 2 derives serde/reflect for `TerrainBrushMode`. Add tests if protocol tests exist; otherwise rely on `cargo check -p protocol`.
+No new structs are needed if Phase 2 derives serde/reflect for `TerrainBrushMode`. Add tests if protocol tests exist;
+otherwise rely on `cargo check -p protocol`.
 
 #### 3. Shared footprint semantics stay unchanged
 
@@ -765,7 +787,8 @@ let new_voxel = match settings.mode {
 };
 ```
 
-Update input mapping so PaintExisting and ReplaceAll use the place action (`PlayerActions::PlaceVoxel`) and Remove uses remove action.
+Update input mapping so PaintExisting and ReplaceAll use the place action (`PlayerActions::PlaceVoxel`) and Remove uses
+remove action.
 
 #### 5. Server concrete changes for replacement modes
 
@@ -823,7 +846,8 @@ Use this before computing/applying changes. If false, reject the whole request.
 
 - [ ] Run `cargo server` and `cargo client`.
 - [ ] Select Paint Existing over mixed air/solid terrain; expected: solid voxels change material and air remains air.
-- [ ] Select Replace All over mixed air/solid terrain; expected: every voxel in the footprint becomes the selected material.
+- [ ] Select Replace All over mixed air/solid terrain; expected: every voxel in the footprint becomes the selected
+      material.
 - [ ] Confirm preview footprint is identical to the applied footprint for PaintExisting and ReplaceAll.
 - [ ] Confirm other clients observe PaintExisting and ReplaceAll edits.
 
@@ -870,7 +894,8 @@ Export `VoxelConcreteEditRequest`.
 **File**: `crates/dev/src/panels/terrain.rs`  
 **Action**: modify
 
-Add client-dev terrain edit history resource and button request flags. This resource is globally unique dev UI state, so ECS `Resource` is appropriate.
+Add client-dev terrain edit history resource and button request flags. This resource is globally unique dev UI state, so
+ECS `Resource` is appropriate.
 
 ```rust
 /// Client-side history of acknowledged terrain edits.
@@ -996,14 +1021,16 @@ fn reapply_changes(record: &TerrainEditRecord) -> Vec<VoxelChange> {
 }
 ```
 
-Register `handle_terrain_undo_redo_input.run_if(in_editing_mode(EditingMode::Terrain))` in the terrain `PostUpdate` chain.
+Register `handle_terrain_undo_redo_input.run_if(in_editing_mode(EditingMode::Terrain))` in the terrain `PostUpdate`
+chain.
 
 #### 5. Server concrete request handling
 
 **File**: `crates/server/src/map.rs`  
 **Action**: modify
 
-Add handler for `VoxelConcreteEditRequest`. It should resolve the active player map, validate all changes, apply them through `apply_voxel_changes`, ack with the exact accepted changes, and queue broadcasts for every change.
+Add handler for `VoxelConcreteEditRequest`. It should resolve the active player map, validate all changes, apply them
+through `apply_voxel_changes`, ack with the exact accepted changes, and queue broadcasts for every change.
 
 ```rust
 pub fn handle_voxel_concrete_edit_requests(
@@ -1105,7 +1132,8 @@ fn reject_brush_edit(
 }
 ```
 
-Keep applying `reject.correct_voxel` for old single-edit compatibility only if needed, but brush/concrete predictions should roll back all predicted changes by sequence.
+Keep applying `reject.correct_voxel` for old single-edit compatibility only if needed, but brush/concrete predictions
+should roll back all predicted changes by sequence.
 
 #### 3. Client duplicate-suppression tests
 
@@ -1154,10 +1182,12 @@ Add tests under the existing test module for:
 **File**: `README.md`  
 **Action**: modify if needed
 
-Update the Dev Inspector section only if the implemented UI changes documented user workflow. Add a concise sentence such as:
+Update the Dev Inspector section only if the implemented UI changes documented user workflow. Add a concise sentence
+such as:
 
 ```markdown
-The Terrain tab provides dev/admin brush sculpting controls for Fill Air, Remove, Paint Existing, Replace All, preview, and acknowledged undo/redo while in Terrain editing mode.
+The Terrain tab provides dev/admin brush sculpting controls for Fill Air, Remove, Paint Existing, Replace All, preview,
+and acknowledged undo/redo while in Terrain editing mode.
 ```
 
 ### Verification
@@ -1181,6 +1211,9 @@ The Terrain tab provides dev/admin brush sculpting controls for Fill Air, Remove
 - [ ] Remove click-drag across a chunk boundary; expected: all affected chunks remesh, persist, and broadcast.
 - [ ] PaintExisting over mixed air/solid voxels; expected: air remains air.
 - [ ] ReplaceAll over mixed air/solid voxels; expected: all footprint voxels become selected material.
-- [ ] Undo and redo each mode; expected: changes route through server authority and second client observes both operations.
-- [ ] Try an oversized brush if UI allows it; expected: server rejects, client rolls back predicted changes, and no partial terrain edit remains.
-- [ ] Inspect server/client logs; expected: no unexpected warnings beyond intentional reject tests, and dirty/remesh/broadcast traces align with edited chunks.
+- [ ] Undo and redo each mode; expected: changes route through server authority and second client observes both
+      operations.
+- [ ] Try an oversized brush if UI allows it; expected: server rejects, client rolls back predicted changes, and no
+      partial terrain edit remains.
+- [ ] Inspect server/client logs; expected: no unexpected warnings beyond intentional reject tests, and
+      dirty/remesh/broadcast traces align with edited chunks.

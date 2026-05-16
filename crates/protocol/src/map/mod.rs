@@ -26,8 +26,8 @@ pub struct Owner(pub NostrPublicKey);
 
 pub use types::{MapInstanceId, MapRegistry, MapSwitchTarget};
 pub use voxel::{
-    SectionBlocksUpdate, VoxelChannel, VoxelEditAck, VoxelEditBroadcast, VoxelEditReject,
-    VoxelEditRequest,
+    SectionBlocksUpdate, VoxelBrushEditRequest, VoxelChange, VoxelChannel, VoxelEditAck,
+    VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest,
 };
 
 /// Tags an entity as belonging to a specific chunk on a specific map.

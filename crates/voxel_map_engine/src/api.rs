@@ -4,7 +4,7 @@ use ndshape::Shape;
 
 use crate::config::VoxelGenerator;
 use crate::instance::VoxelMapInstance;
-use crate::raycast::{VoxelRaycastResult, voxel_line_traversal};
+use crate::raycast::{voxel_line_traversal, VoxelRaycastResult};
 use crate::types::WorldVoxel;
 
 /// SystemParam for reading/writing voxels on any map instance.
@@ -47,6 +47,19 @@ impl VoxelWorld<'_, '_> {
             .get(map)
             .ok()
             .map(|(instance, _)| instance.chunk_size)
+    }
+
+    /// Mutate multiple world-space voxels on one map. Returns the number of loaded voxels written.
+    pub fn set_voxels(
+        &mut self,
+        map: Entity,
+        edits: impl IntoIterator<Item = (IVec3, WorldVoxel)>,
+    ) -> usize {
+        let Ok((mut instance, _)) = self.maps.get_mut(map) else {
+            warn!("set_voxels: entity {map:?} has no VoxelMapInstance");
+            return 0;
+        };
+        instance.set_voxels(edits)
     }
 
     /// Mutate a voxel directly in the octree. Marks the chunk dirty and queues remesh.

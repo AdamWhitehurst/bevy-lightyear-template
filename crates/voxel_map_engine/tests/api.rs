@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
+use ndshape::Shape;
 use voxel_map_engine::prelude::*;
 
 fn test_app() -> App {
@@ -372,4 +373,84 @@ fn raycast_isolated_between_instances() {
             );
         })
         .unwrap();
+}
+
+/// Test: set_voxels marks every touched loaded chunk dirty and queued for remesh.
+#[test]
+fn api_set_voxels_marks_each_touched_chunk_dirty_and_for_remesh() {
+    let mut app = test_app();
+    let map = spawn_map(&mut app, 1);
+    spawn_ticket(&mut app, map, Vec3::ZERO, 1);
+
+    tick_until(&mut app, |app| {
+        has_loaded_chunk(app, map, IVec3::ZERO) && has_loaded_chunk(app, map, IVec3::X)
+    });
+
+    app.world_mut()
+        .run_system_once(move |mut vw: VoxelWorld| {
+            assert_eq!(
+                vw.set_voxels(
+                    map,
+                    [
+                        (IVec3::new(1, 2, 3), WorldVoxel::Solid(11)),
+                        (IVec3::new(16, 2, 3), WorldVoxel::Solid(12)),
+                    ],
+                ),
+                2
+            );
+        })
+        .unwrap();
+
+    let instance = app.world().get::<VoxelMapInstance>(map).unwrap();
+    assert!(instance.dirty_chunks.contains(&IVec3::ZERO));
+    assert!(instance.dirty_chunks.contains(&IVec3::X));
+    assert!(instance.chunks_needing_remesh.contains(&IVec3::ZERO));
+    assert!(instance.chunks_needing_remesh.contains(&IVec3::X));
+}
+
+/// Test: set_voxels updates neighbor padding and queues neighbor remesh at chunk boundaries.
+#[test]
+fn api_set_voxels_updates_boundary_padding_for_neighbor_chunks() {
+    let mut app = test_app();
+    let map = spawn_map(&mut app, 1);
+    spawn_ticket(&mut app, map, Vec3::ZERO, 1);
+
+    tick_until(&mut app, |app| {
+        has_loaded_chunk(app, map, IVec3::ZERO) && has_loaded_chunk(app, map, IVec3::X)
+    });
+
+    app.world_mut()
+        .run_system_once(move |mut vw: VoxelWorld| {
+            vw.set_voxels(map, [(IVec3::new(15, 2, 3), WorldVoxel::Solid(77))]);
+        })
+        .unwrap();
+
+    let instance = app.world().get::<VoxelMapInstance>(map).unwrap();
+    assert!(instance.chunks_needing_remesh.contains(&IVec3::X));
+    let neighbor = instance.get_chunk_data(IVec3::X).unwrap();
+    let index = instance.shape.linearize([0, 3, 4]) as usize;
+    assert_eq!(neighbor.voxels.get(index), WorldVoxel::Solid(77));
+}
+
+/// Test: set_voxels handles negative coordinates through euclidean chunk mapping.
+#[test]
+fn api_set_voxels_handles_negative_world_coordinates() {
+    let mut app = test_app();
+    let map = spawn_map(&mut app, 1);
+    spawn_ticket(&mut app, map, Vec3::ZERO, 1);
+
+    tick_until(&mut app, |app| has_loaded_chunk(app, map, -IVec3::X));
+
+    app.world_mut()
+        .run_system_once(move |mut vw: VoxelWorld| {
+            assert_eq!(
+                vw.set_voxels(map, [(IVec3::new(-1, 2, 3), WorldVoxel::Solid(88))]),
+                1
+            );
+        })
+        .unwrap();
+
+    let instance = app.world().get::<VoxelMapInstance>(map).unwrap();
+    assert!(instance.dirty_chunks.contains(&-IVec3::X));
+    assert!(instance.chunks_needing_remesh.contains(&-IVec3::X));
 }

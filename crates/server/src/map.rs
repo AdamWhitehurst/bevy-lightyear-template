@@ -12,16 +12,18 @@ use lightyear::prelude::{
 use protocol::map::{MapSwitchTarget, MapTransitionStart, PlayerMapSwitchRequest};
 use protocol::{
     CharacterMarker, ChunkChannel, ChunkDataSync, MapInstanceId, MapRegistry, NostrPublicKey,
-    PendingTransition, PlayerIdentity, SectionBlocksUpdate, UnloadColumn, VoxelChannel,
-    VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
+    PendingTransition, PlayerIdentity, SectionBlocksUpdate, UnloadColumn, VoxelBrushEditRequest,
+    VoxelChange, VoxelChannel, VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest,
+    VoxelType,
 };
 #[allow(unused_imports)]
 use tracy_client::plot;
 use voxel_map_engine::lifecycle::{self, PendingSaves};
 use voxel_map_engine::prelude::{
-    bounds_to_spawning_distance, build_generator_from_components, BiomeRules, ChunkTicket,
-    HeightMap, Homebase, MapDimensions, MoistureMap, PlacementRules, RuntimeShape, VoxelGenerator,
-    VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
+    bounds_to_spawning_distance, brush_footprint, build_generator_from_components, BiomeRules,
+    ChunkTicket, HeightMap, Homebase, MapDimensions, MoistureMap, PlacementRules, RuntimeShape,
+    TerrainBrushMode, VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld,
+    WorldVoxel,
 };
 
 use crate::persistence::fs_map_entities::FsMapEntitiesStore;
@@ -644,7 +646,11 @@ impl Plugin for ServerMapPlugin {
                 (
                     poll_map_meta.run_if(in_state(AppState::Ready)),
                     poll_map_entities.run_if(in_state(AppState::Ready)),
-                    (handle_voxel_edit_requests, flush_voxel_broadcasts).chain(),
+                    (
+                        (handle_voxel_edit_requests, handle_voxel_brush_edit_requests),
+                        flush_voxel_broadcasts,
+                    )
+                        .chain(),
                     handle_world_object_placement_requests.run_if(
                         resource_exists::<WorldObjectDefRegistry>
                             .and(resource_exists::<VoxModelRegistry>),
@@ -742,7 +748,10 @@ fn send_edit_ack(
     ack_senders: &mut Query<&mut MessageSender<VoxelEditAck>>,
 ) {
     if let Ok(mut sender) = ack_senders.get_mut(client_entity) {
-        sender.send::<VoxelChannel>(VoxelEditAck { sequence });
+        sender.send::<VoxelChannel>(VoxelEditAck {
+            sequence,
+            changes: Vec::new(),
+        });
     } else {
         warn!("send_edit_ack: no ack sender for {client_entity:?}");
     }
@@ -1401,6 +1410,125 @@ pub fn handle_voxel_edit_requests(
                 &mut pending_broadcasts,
             );
         }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn handle_voxel_brush_edit_requests(
+    mut receivers: Query<(Entity, &mut MessageReceiver<VoxelBrushEditRequest>)>,
+    mut ack_senders: Query<&mut MessageSender<VoxelEditAck>>,
+    mut pending_broadcasts: ResMut<PendingVoxelBroadcasts>,
+    mut dirty_state: ResMut<WorldDirtyState>,
+    time: Res<Time>,
+    mut voxel_world: VoxelWorld,
+    controlled_query: Query<(&ControlledBy, &MapInstanceId), With<CharacterMarker>>,
+    map_registry: Res<MapRegistry>,
+) {
+    for (client_entity, mut receiver) in &mut receivers {
+        for request in receiver.receive() {
+            let Some((map_entity, player_map_id)) =
+                resolve_player_map(client_entity, &controlled_query, &map_registry)
+            else {
+                trace!(
+                    "handle_voxel_brush_edit_requests: no character for client {client_entity:?}"
+                );
+                continue;
+            };
+
+            let changes = concrete_brush_changes(&request, map_entity, &voxel_world);
+            if changes.is_empty() {
+                trace!(
+                    "handle_voxel_brush_edit_requests: sequence {} produced no concrete changes",
+                    request.sequence
+                );
+                send_brush_edit_ack(client_entity, request.sequence, changes, &mut ack_senders);
+                continue;
+            }
+
+            apply_voxel_changes(
+                &changes,
+                map_entity,
+                &mut voxel_world,
+                &mut dirty_state,
+                &time,
+            );
+            send_brush_edit_ack(
+                client_entity,
+                request.sequence,
+                changes.clone(),
+                &mut ack_senders,
+            );
+            let chunk_size = voxel_world
+                .chunk_size(map_entity)
+                .expect("map entity has VoxelMapInstance");
+            for change in changes {
+                queue_edit_broadcast(
+                    PendingVoxelEdit {
+                        position: change.position,
+                        voxel: change.voxel,
+                        originator: client_entity,
+                        map_id: player_map_id.clone(),
+                    },
+                    chunk_size,
+                    &mut pending_broadcasts,
+                );
+            }
+        }
+    }
+}
+
+fn concrete_brush_changes(
+    request: &VoxelBrushEditRequest,
+    map_entity: Entity,
+    voxel_world: &VoxelWorld,
+) -> Vec<VoxelChange> {
+    brush_footprint(request.anchor, request.shape, request.width, request.height)
+        .into_iter()
+        .filter_map(|position| {
+            let old = voxel_world.get_voxel(map_entity, position);
+            let voxel = match request.mode {
+                TerrainBrushMode::FillAir if matches!(old, WorldVoxel::Air | WorldVoxel::Unset) => {
+                    VoxelType::Solid(request.material)
+                }
+                TerrainBrushMode::Remove if matches!(old, WorldVoxel::Solid(_)) => VoxelType::Air,
+                _ => return None,
+            };
+            Some(VoxelChange { position, voxel })
+        })
+        .collect()
+}
+
+fn apply_voxel_changes(
+    changes: &[VoxelChange],
+    map_entity: Entity,
+    voxel_world: &mut VoxelWorld,
+    dirty_state: &mut WorldDirtyState,
+    time: &Time,
+) {
+    voxel_world.set_voxels(
+        map_entity,
+        changes
+            .iter()
+            .map(|change| (change.position, WorldVoxel::from(change.voxel))),
+    );
+    let now = time.elapsed_secs_f64();
+    if !dirty_state.is_dirty {
+        dirty_state.first_dirty_time = Some(now);
+    }
+    dirty_state.is_dirty = true;
+    dirty_state.last_edit_time = now;
+}
+
+fn send_brush_edit_ack(
+    client_entity: Entity,
+    sequence: u32,
+    changes: Vec<VoxelChange>,
+    ack_senders: &mut Query<&mut MessageSender<VoxelEditAck>>,
+) {
+    if let Ok(mut sender) = ack_senders.get_mut(client_entity) {
+        sender.send::<VoxelChannel>(VoxelEditAck { sequence, changes });
+    } else {
+        warn!("send_brush_edit_ack: no ack sender for {client_entity:?}");
     }
 }
 
