@@ -4,6 +4,8 @@ use crate::world_object::{preview_visual_from_def, DefaultVoxModelMaterial};
 use avian3d::prelude::{Position, Rotation, SpatialQuery, SpatialQueryFilter};
 use bevy::{prelude::*, window::PrimaryWindow};
 #[cfg(feature = "spawn-panel")]
+use bevy_egui::EguiContexts;
+#[cfg(feature = "spawn-panel")]
 use dev::panels::spawn::{
     NearbyWorldObject, PendingWorldObjectDelete, PendingWorldObjectMove,
     PendingWorldObjectPlacement, PendingWorldObjectRotation, SpawnPanelUi,
@@ -578,6 +580,7 @@ fn handle_terrain_brush_input(
     mut voxel_world: VoxelWorld,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
+    mut contexts: EguiContexts,
     action_query: Query<&ActionState<PlayerActions>, With<Controlled>>,
     settings: Res<TerrainBrushSettings>,
     mut stroke_state: ResMut<TerrainBrushStrokeState>,
@@ -600,9 +603,16 @@ fn handle_terrain_brush_input(
         return;
     };
 
+    if egui_wants_pointer(&mut contexts) {
+        trace!("handle_terrain_brush_input: egui is using pointer input");
+        reset_brush_stroke_state(&mut stroke_state);
+        return;
+    }
+
     let pressed = match settings.mode {
-        TerrainBrushMode::FillAir => action_state.pressed(&PlayerActions::PlaceVoxel),
-        TerrainBrushMode::Remove => action_state.pressed(&PlayerActions::RemoveVoxel),
+        TerrainBrushMode::FillAir | TerrainBrushMode::Remove => {
+            action_state.pressed(&PlayerActions::PlaceVoxel)
+        }
         TerrainBrushMode::PaintExisting | TerrainBrushMode::ReplaceAll => {
             trace!(
                 "handle_terrain_brush_input: mode {:?} is added in Phase 3",
@@ -675,6 +685,15 @@ fn handle_terrain_brush_input(
         });
     }
     mark_brush_application(&mut stroke_state, anchor, cursor_position, plane_lock);
+}
+
+#[cfg(feature = "spawn-panel")]
+fn egui_wants_pointer(contexts: &mut EguiContexts) -> bool {
+    let Ok(ctx) = contexts.ctx_mut() else {
+        trace!("egui_wants_pointer: EguiContexts not ready");
+        return false;
+    };
+    ctx.is_pointer_over_area() || ctx.wants_pointer_input()
 }
 
 #[cfg(feature = "spawn-panel")]

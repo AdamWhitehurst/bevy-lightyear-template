@@ -9,14 +9,21 @@ file_watcher = ["bevy/file_watcher"]
 tracy = ["bevy/trace_tracy", "tracy-client/enable"]
 inspector = ["dev/inspector"]
 world-inspector = ["dev/world-inspector"]
-spawn-panel = ["dev/spawn-panel"]
+spawn-panel = ["dev/spawn-panel", "dep:bevy_egui"]
 
 [dependencies]
 avian3d = { workspace = true }
 bevy = { workspace = true, default-features = true }
 voxel_map_engine = { workspace = true }
 leafwing-input-manager = { workspace = true }
-lightyear = { workspace = true, features = ["client", "netcode", "leafwing", "prediction", "replication", "interpolation" ] }
+lightyear = { workspace = true, features = [
+  "client",
+  "netcode",
+  "leafwing",
+  "prediction",
+  "replication",
+  "interpolation",
+] }
 client_lightyear = { workspace = true }
 protocol = { workspace = true }
 nostr_client = { workspace = true }
@@ -24,6 +31,7 @@ persistence = { workspace = true }
 render = { path = "../render" }
 ui = { path = "../ui" }
 dev = { path = "../dev" }
+bevy_egui = { version = "0.39", optional = true }
 anyhow = "1.0"
 tracy-client = { workspace = true }
 

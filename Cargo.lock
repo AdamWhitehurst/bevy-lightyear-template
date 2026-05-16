@@ -2597,6 +2597,7 @@ dependencies = [
  "approx",
  "avian3d",
  "bevy",
+ "bevy_egui",
  "client_lightyear",
  "dev",
  "leafwing-input-manager",

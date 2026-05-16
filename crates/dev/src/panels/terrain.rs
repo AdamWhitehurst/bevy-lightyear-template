@@ -36,7 +36,7 @@ impl Default for TerrainBrushSettings {
             material: 0,
             mode: TerrainBrushMode::FillAir,
             stroke_mode: TerrainBrushStrokeMode::Discrete,
-            continuous_every_n_frames: 6,
+            continuous_every_n_frames: 20,
         }
     }
 }

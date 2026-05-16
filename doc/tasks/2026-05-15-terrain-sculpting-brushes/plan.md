@@ -369,7 +369,10 @@ fn update_terrain_brush_preview(
 
 - Held terrain brush input now supports `Discrete` and `Continuous` stroke modes. `Discrete` ignores brush
   preview/anchor movement caused by newly placed voxels and only sends another request after screen-space cursor
-  movement. `Continuous` repeats while held at a configurable `Every N frames` interval, defaulting to `6` frames.
+  movement. `Continuous` repeats while held at a configurable `Every N frames` interval, defaulting to `20` frames.
+- Terrain brush application uses left click for all currently implemented modes; the selected brush mode determines
+  whether left click fills air or removes solids. Brush input is suppressed while egui is using pointer input so
+  clicking dev-panel controls does not also edit voxels behind the panel.
 - Held brush strokes lock to the initial hit face. Later cursor rays project onto that face plane instead of raycasting
   newly edited voxels, so top-face strokes move across the top plane and side-face strokes move across that side plane.
 - In `Continuous` mode, if the locked-plane anchor is already edited, the client searches along the initial hit-face
@@ -589,7 +592,7 @@ fn predict_brush_changes(
 
 Replace `handle_voxel_input` with `handle_terrain_brush_input` for terrain mode. It should:
 
-1. Read `PlayerActions::PlaceVoxel` for FillAir and `PlayerActions::RemoveVoxel` for Remove.
+1. Read `PlayerActions::PlaceVoxel` for both FillAir and Remove; the selected brush mode determines the operation.
 2. Allow click-drag by using pressed state plus `TerrainBrushStrokeState`.
 3. Skip if mode is PaintExisting/ReplaceAll in this phase with `trace!`.
 4. Compute the anchor with `current_terrain_brush_anchor`.
@@ -738,18 +741,21 @@ registered.
 
 - [ ] Run `cargo server` and two `cargo client` instances.
 - [ ] Select Fill Air, width/height > 1, click once; expected: multiple voxels are added through server authority.
-- [ ] Select Remove, width/height > 1, click once; expected: multiple solid voxels are removed through server authority.
+- [ ] Select Remove, width/height > 1, left-click once; expected: multiple solid voxels are removed through server
+      authority.
 - [ ] In Discrete stroke mode, press and hold without moving the cursor; expected: only one brush request is applied
       even if the preview anchor moves because newly placed voxels are closer to the camera.
 - [ ] In Discrete stroke mode, click-drag across the screen; expected: repeated brush applications occur only after
       screen-space cursor movement.
-- [ ] In Continuous stroke mode, press and hold; expected: brush applications repeat according to `Every N frames`, and
-      increasing the value slows the repeat rate. Fill Air grows outward along the initial hit-face normal and Remove
-      digs inward along the opposite normal while the cursor remains still.
+- [ ] In Continuous stroke mode, press and hold; expected: brush applications repeat according to `Every N frames`
+      (default `20`), and increasing the value slows the repeat rate. Fill Air grows outward along the initial hit-face
+      normal and Remove digs inward along the opposite normal while the cursor remains still.
 - [ ] Start strokes from a top face and from side faces; expected: held-stroke movement follows the initial hit face
       instead of flipping between vertical and horizontal planes mid-stroke.
-- [ ] Hold or drag Fill Air from an oblique camera angle; expected: the stroke follows the initial hit-face plane instead
-      of stepping diagonally toward the camera as new voxels are placed.
+- [ ] Hold or drag Fill Air from an oblique camera angle; expected: the stroke follows the initial hit-face plane
+      instead of stepping diagonally toward the camera as new voxels are placed.
+- [ ] Click and drag controls in the dev panel while terrain editing and Brush active are enabled; expected: UI controls
+      respond, but no terrain brush edits are sent behind the panel.
 - [ ] Drag across a chunk boundary; expected: both chunks visually remesh and later persist after server save debounce.
 - [ ] Observe second client; expected: it receives the same terrain updates, with same-chunk multi-edits arriving
       through batched section updates.
