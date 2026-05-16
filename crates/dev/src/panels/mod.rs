@@ -6,3 +6,6 @@ pub mod world_inspector;
 
 #[cfg(feature = "spawn-panel")]
 pub mod spawn;
+
+#[cfg(feature = "spawn-panel")]
+pub mod terrain;

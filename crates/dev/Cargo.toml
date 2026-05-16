@@ -6,7 +6,7 @@ edition = "2021"
 [features]
 inspector = ["dep:bevy_egui", "dep:bevy-inspector-egui", "dep:protocol"]
 world-inspector = ["inspector"]
-spawn-panel = ["inspector"]
+spawn-panel = ["inspector", "dep:voxel_map_engine"]
 
 [dependencies]
 avian3d = { workspace = true, features = ["debug-plugin"] }
@@ -14,3 +14,4 @@ bevy = { workspace = true, default-features = true }
 bevy_egui = { version = "0.39", optional = true }
 bevy-inspector-egui = { version = "0.36", optional = true }
 protocol = { workspace = true, optional = true }
+voxel_map_engine = { workspace = true, optional = true }

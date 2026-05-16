@@ -1,4 +1,5 @@
 pub mod api;
+pub mod brush;
 pub mod chunk;
 pub mod config;
 pub mod generation;
@@ -30,6 +31,8 @@ pub struct VoxelPlugin;
 impl Plugin for VoxelPlugin {
     fn build(&self, app: &mut App) {
         app.register_type::<config::MapDimensions>();
+        app.register_type::<brush::TerrainBrushShape>();
+        app.register_type::<brush::TerrainBrushMode>();
         app.register_type::<terrain::HeightMap>();
         app.register_type::<terrain::MoistureMap>();
         app.register_type::<terrain::BiomeRules>();
@@ -62,6 +65,7 @@ impl Plugin for VoxelPlugin {
 
 pub mod prelude {
     pub use crate::api::*;
+    pub use crate::brush::*;
     pub use crate::chunk::*;
     pub use crate::config::*;
     pub use crate::generation::*;

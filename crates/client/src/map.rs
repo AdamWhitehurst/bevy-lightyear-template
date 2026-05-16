@@ -12,6 +12,8 @@ use dev::panels::spawn::{
 #[cfg(feature = "spawn-panel")]
 use dev::DevInspectorState;
 use dev::EditingMode;
+#[cfg(feature = "spawn-panel")]
+use dev::TerrainBrushSettings;
 use leafwing_input_manager::prelude::*;
 #[cfg(feature = "spawn-panel")]
 use lightyear::prelude::Replicated;
@@ -32,8 +34,9 @@ use protocol::{
     VoxelEditRequest, VoxelType,
 };
 use voxel_map_engine::prelude::{
-    chunk_to_column, column_to_chunks, ChunkData, ChunkStatus, ChunkTicket, MapDimensions,
-    VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
+    brush_anchor, brush_footprint, chunk_to_column, column_to_chunks, ChunkData, ChunkStatus,
+    ChunkTicket, MapDimensions, TerrainBrushMode, VoxelMapInstance, VoxelPlugin, VoxelWorld,
+    WorldVoxel,
 };
 
 const RAYCAST_MAX_DISTANCE: f32 = 100.0;
@@ -100,6 +103,19 @@ pub fn current_placement_target(
     })
 }
 
+/// Local-only terrain brush preview footprint.
+#[derive(Resource, Default)]
+pub struct TerrainBrushPreview {
+    pub positions: Vec<IVec3>,
+}
+
+/// Tracks held brush strokes and suppresses duplicate applications at one anchor.
+#[derive(Resource, Default)]
+pub struct TerrainBrushStrokeState {
+    pub active: bool,
+    pub last_anchor: Option<IVec3>,
+}
+
 /// Buffers ChunkDataSync messages that arrive before the client player is ready.
 /// Lightyear clears MessageReceiver each frame in Last, so we must drain and
 /// Tracks pending predictions for block edits awaiting server acknowledgment.
@@ -133,6 +149,8 @@ impl Plugin for ClientMapPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(VoxelPlugin)
             .init_resource::<MapRegistry>()
+            .init_resource::<TerrainBrushPreview>()
+            .init_resource::<TerrainBrushStrokeState>()
             .init_resource::<VoxelPredictionState>()
             .init_resource::<EditingMode>()
             // handle_chunk_data_sync, handle_unload_column,
@@ -165,6 +183,10 @@ impl Plugin for ClientMapPlugin {
             .add_systems(
                 PostUpdate,
                 (
+                    #[cfg(feature = "spawn-panel")]
+                    update_terrain_brush_preview.run_if(in_editing_mode(EditingMode::Terrain)),
+                    #[cfg(feature = "spawn-panel")]
+                    update_terrain_brush_stroke_state.run_if(in_editing_mode(EditingMode::Terrain)),
                     handle_voxel_input.run_if(in_editing_mode(EditingMode::Terrain)),
                     #[cfg(feature = "spawn-panel")]
                     update_world_object_nearby_selection
@@ -359,6 +381,125 @@ fn handle_section_blocks_update(
             }
         }
     }
+}
+
+fn current_terrain_brush_anchor(
+    chunk_ticket: &ChunkTicket,
+    voxel_world: &VoxelWorld,
+    camera_query: &Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    window_query: &Query<&Window, With<PrimaryWindow>>,
+    mode: TerrainBrushMode,
+) -> Option<IVec3> {
+    let Some(ray) = camera_ray(camera_query, window_query) else {
+        trace!("current_terrain_brush_anchor: no camera ray");
+        return None;
+    };
+    let Some(hit) = voxel_world.raycast(chunk_ticket.map_entity, ray, RAYCAST_MAX_DISTANCE, |v| {
+        matches!(v, WorldVoxel::Solid(_))
+    }) else {
+        trace!("current_terrain_brush_anchor: raycast hit nothing");
+        return None;
+    };
+    let Some(anchor) = brush_anchor(&hit, mode) else {
+        trace!("current_terrain_brush_anchor: hit has no usable brush anchor");
+        return None;
+    };
+    Some(anchor)
+}
+
+#[cfg(feature = "spawn-panel")]
+fn update_terrain_brush_preview(
+    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    voxel_world: VoxelWorld,
+    camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    settings: Res<TerrainBrushSettings>,
+    mut preview: ResMut<TerrainBrushPreview>,
+    mut gizmos: Gizmos,
+) {
+    if !settings.active {
+        trace!("update_terrain_brush_preview: terrain brush inactive");
+        preview.positions.clear();
+        return;
+    }
+    let Ok(chunk_ticket) = player_query.single() else {
+        trace!("update_terrain_brush_preview: no predicted player with ChunkTicket");
+        preview.positions.clear();
+        return;
+    };
+    let Some(anchor) = current_terrain_brush_anchor(
+        chunk_ticket,
+        &voxel_world,
+        &camera_query,
+        &window_query,
+        settings.mode,
+    ) else {
+        preview.positions.clear();
+        return;
+    };
+    preview.positions = brush_footprint(anchor, settings.shape, settings.width, settings.height);
+    for pos in &preview.positions {
+        gizmos.cube(
+            Transform::from_translation(pos.as_vec3() + Vec3::splat(0.5))
+                .with_scale(Vec3::splat(1.0)),
+            Color::srgb(0.2, 0.9, 1.0),
+        );
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+fn update_terrain_brush_stroke_state(
+    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    voxel_world: VoxelWorld,
+    camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    window_query: Query<&Window, With<PrimaryWindow>>,
+    action_query: Query<&ActionState<PlayerActions>, With<Controlled>>,
+    settings: Res<TerrainBrushSettings>,
+    mut stroke_state: ResMut<TerrainBrushStrokeState>,
+) {
+    if !settings.active {
+        trace!("update_terrain_brush_stroke_state: terrain brush inactive");
+        stroke_state.active = false;
+        stroke_state.last_anchor = None;
+        return;
+    }
+    let Ok(action_state) = action_query.single() else {
+        trace!("update_terrain_brush_stroke_state: no entity with ActionState + Controlled");
+        stroke_state.active = false;
+        stroke_state.last_anchor = None;
+        return;
+    };
+    let pressed = match settings.mode {
+        TerrainBrushMode::Remove => action_state.pressed(&PlayerActions::RemoveVoxel),
+        TerrainBrushMode::FillAir
+        | TerrainBrushMode::PaintExisting
+        | TerrainBrushMode::ReplaceAll => action_state.pressed(&PlayerActions::PlaceVoxel),
+    };
+    if !pressed {
+        trace!("update_terrain_brush_stroke_state: no terrain brush action held");
+        stroke_state.active = false;
+        stroke_state.last_anchor = None;
+        return;
+    }
+    let Ok(chunk_ticket) = player_query.single() else {
+        trace!("update_terrain_brush_stroke_state: no predicted player with ChunkTicket");
+        stroke_state.active = false;
+        stroke_state.last_anchor = None;
+        return;
+    };
+    let Some(anchor) = current_terrain_brush_anchor(
+        chunk_ticket,
+        &voxel_world,
+        &camera_query,
+        &window_query,
+        settings.mode,
+    ) else {
+        stroke_state.active = false;
+        stroke_state.last_anchor = None;
+        return;
+    };
+    stroke_state.active = true;
+    stroke_state.last_anchor = Some(anchor);
 }
 
 fn handle_voxel_input(

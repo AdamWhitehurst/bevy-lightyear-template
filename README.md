@@ -138,7 +138,8 @@ Press `F4` to toggle the dev inspector root menu. With the spawn panel enabled, 
 it. Def-driven world-object placement is server-authoritative: select an object, arm placement, preview the terrain
 target, then click terrain in-game. The same panel can select existing replicated world objects by arming cursor pick
 and clicking in-game or by nearby list, then request authoritative delete, move, or yaw rotation edits that persist
-across chunk reloads. Free-form spawning remains client-local.
+across chunk reloads. Free-form spawning remains client-local. The Terrain tab provides activatable brush sculpting
+controls, rectangular width/height settings, and a voxel footprint preview while in Terrain editing mode.
 
 ### Certificate Regeneration
 

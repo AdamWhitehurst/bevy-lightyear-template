@@ -16,6 +16,13 @@ If this prints an active build/check/test, wait for it to finish or stop it befo
 
 ## Phase 1: Brush UI and Preview Footprint
 
+### Implemented Deviation Notes
+
+- Terrain brush controls are integrated into the existing `▧ World Objects` panel's Terrain tab instead of a separate `▦ Terrain` window. This prevents a second panel from forcing `EditingMode::Terrain` every frame and keeps mode switching local to the tab selector.
+- Brush preview/stroke state is gated by a `Brush active` checkbox; the wireframe does not follow the cursor unless the brush is active.
+- The rectangular brush shape is named `Rect`, not `Cube`, and exposes separate `width` and `height` controls. Width applies across horizontal X/Z; height applies across Y. A width of `2` covers `2x2` horizontally, `3` covers `3x3`, etc.
+- Width, height, and material use decrement/input/increment controls (`- [value] +`) rather than bare drag inputs.
+
 ### Changes
 
 #### 1. Brush footprint API
@@ -36,7 +43,7 @@ use crate::raycast::VoxelRaycastResult;
 #[reflect(Default)]
 pub enum TerrainBrushShape {
     #[default]
-    Cube,
+    Rect,
     Sphere,
 }
 
@@ -62,34 +69,22 @@ pub fn brush_anchor(hit: &VoxelRaycastResult, mode: TerrainBrushMode) -> Option<
 }
 
 /// Returns deterministic world-space positions covered by a brush.
-pub fn brush_footprint(anchor: IVec3, shape: TerrainBrushShape, size: u32) -> Vec<IVec3> {
-    let radius = size.max(1) as i32 - 1;
-    let mut positions = Vec::new();
-    for z in -radius..=radius {
-        for y in -radius..=radius {
-            for x in -radius..=radius {
-                let offset = IVec3::new(x, y, z);
-                if includes_offset(offset, shape, radius) {
-                    positions.push(anchor + offset);
-                }
-            }
-        }
+pub fn brush_footprint(anchor: IVec3, shape: TerrainBrushShape, width: u32, height: u32) -> Vec<IVec3> {
+    match shape {
+        TerrainBrushShape::Rect => rect_footprint(anchor, width, height),
+        TerrainBrushShape::Sphere => sphere_footprint(anchor, width),
     }
-    positions
 }
 
-fn includes_offset(offset: IVec3, shape: TerrainBrushShape, radius: i32) -> bool {
-    match shape {
-        TerrainBrushShape::Cube => true,
-        TerrainBrushShape::Sphere => offset.length_squared() <= radius * radius,
-    }
-}
+fn rect_footprint(anchor: IVec3, width: u32, height: u32) -> Vec<IVec3> { /* width on X/Z, height on Y */ }
+fn sphere_footprint(anchor: IVec3, width: u32) -> Vec<IVec3> { /* width is diameter */ }
 ```
 
 Add tests in this file:
 
-- `cube_size_one_returns_anchor_only`
-- `cube_size_two_is_stable_and_contains_negative_offsets`
+- `rect_width_one_height_one_returns_anchor_only`
+- `rect_width_two_height_one_returns_two_by_two_floor`
+- `rect_width_two_height_three_returns_twelve_voxels`
 - `sphere_excludes_cube_corners`
 - `fill_air_anchor_uses_hit_normal`
 - `remove_paint_replace_anchor_use_hit_position`
@@ -123,7 +118,7 @@ pub use crate::brush::*;
 **File**: `crates/dev/src/panels/terrain.rs`  
 **Action**: create
 
-Create a dedicated panel plugin and brush settings resource. The panel should set `EditingMode::Terrain` when opened or interacted with.
+Create terrain brush settings and controls integrated into the existing World Objects panel Terrain tab. The terrain plugin only initializes the settings resource; it must not open a second window or force `EditingMode::Terrain` every frame.
 
 ```rust
 use crate::state::{DevInspectorState, EditingMode};
@@ -135,8 +130,10 @@ use voxel_map_engine::prelude::{TerrainBrushMode, TerrainBrushShape};
 #[derive(Resource, Clone, Debug, Reflect)]
 #[reflect(Resource)]
 pub struct TerrainBrushSettings {
+    pub active: bool,
     pub shape: TerrainBrushShape,
-    pub size: u32,
+    pub width: u32,
+    pub height: u32,
     pub material: u8,
     pub mode: TerrainBrushMode,
 }
@@ -144,90 +141,32 @@ pub struct TerrainBrushSettings {
 impl Default for TerrainBrushSettings {
     fn default() -> Self {
         Self {
-            shape: TerrainBrushShape::Cube,
-            size: 1,
+            active: false,
+            shape: TerrainBrushShape::Rect,
+            width: 1,
+            height: 1,
             material: 0,
             mode: TerrainBrushMode::FillAir,
         }
     }
 }
 
-/// Dedicated terrain sculpting panel.
+/// Initializes terrain sculpting UI resources.
 pub struct TerrainPanelPlugin;
 
 impl Plugin for TerrainPanelPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<TerrainBrushSettings>()
-            .init_resource::<EditingMode>()
-            .add_systems(Update, toggle_terrain_panel)
-            .add_systems(
-                EguiPrimaryContextPass,
-                draw_terrain_panel.run_if(terrain_panel_enabled),
-            );
+        app.init_resource::<TerrainBrushSettings>();
     }
 }
 
-fn terrain_panel_enabled(state: Res<DevInspectorState>) -> bool {
-    state.enabled && state.panels.spawn_panel
-}
-
-fn toggle_terrain_panel(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<DevInspectorState>) {
-    if keys.just_pressed(KeyCode::F6) {
-        state.panels.spawn_panel = !state.panels.spawn_panel;
-    }
-}
-
-fn draw_terrain_panel(
-    mut contexts: EguiContexts,
-    mut settings: ResMut<TerrainBrushSettings>,
-    mut editing_mode: ResMut<EditingMode>,
-) {
-    let Ok(ctx) = contexts.ctx_mut() else {
-        trace!("draw_terrain_panel: EguiContexts not ready, skipping frame");
-        return;
-    };
-
-    egui::Window::new("▦ Terrain")
-        .default_width(180.0)
-        .show(ctx, |ui| {
-            *editing_mode = EditingMode::Terrain;
-            draw_brush_controls(ui, &mut settings);
-        });
-}
-
-fn draw_brush_controls(ui: &mut egui::Ui, settings: &mut TerrainBrushSettings) {
-    egui::Grid::new("terrain_brush_grid")
-        .num_columns(2)
-        .spacing([6.0, 4.0])
-        .show(ui, |ui| {
-            ui.label("Shape");
-            egui::ComboBox::from_id_salt("terrain_brush_shape")
-                .selected_text(format!("{:?}", settings.shape))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut settings.shape, TerrainBrushShape::Cube, "Cube");
-                    ui.selectable_value(&mut settings.shape, TerrainBrushShape::Sphere, "Sphere");
-                });
-            ui.end_row();
-
-            ui.label("Mode");
-            egui::ComboBox::from_id_salt("terrain_brush_mode")
-                .selected_text(format!("{:?}", settings.mode))
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut settings.mode, TerrainBrushMode::FillAir, "Fill Air");
-                    ui.selectable_value(&mut settings.mode, TerrainBrushMode::Remove, "Remove");
-                    ui.selectable_value(&mut settings.mode, TerrainBrushMode::PaintExisting, "Paint Existing");
-                    ui.selectable_value(&mut settings.mode, TerrainBrushMode::ReplaceAll, "Replace All");
-                });
-            ui.end_row();
-
-            ui.label("Size");
-            ui.add(egui::DragValue::new(&mut settings.size).range(1..=8));
-            ui.end_row();
-
-            ui.label("Material");
-            ui.add(egui::DragValue::new(&mut settings.material).range(0..=u8::MAX));
-            ui.end_row();
-        });
+/// Draws terrain brush controls inside the world-object panel's terrain tab.
+pub fn draw_terrain_controls(ui: &mut egui::Ui, settings: &mut TerrainBrushSettings) {
+    ui.checkbox(&mut settings.active, "Brush active");
+    ui.add_enabled_ui(settings.active, |ui| {
+        // Shape/mode controls omitted here for brevity.
+        // Width, height, and material are rendered as: - [value] +.
+    });
 }
 ```
 
@@ -262,17 +201,17 @@ Inside `DevPlugin::build`:
 app.add_plugins(panels::terrain::TerrainPanelPlugin);
 ```
 
-#### 6. Remove embedded terrain tab body
+#### 6. Integrate terrain controls into terrain tab
 
 **File**: `crates/dev/src/panels/spawn.rs`  
 **Action**: modify
 
-Keep the primary tab selector but stop embedding terrain controls in `spawn.rs`. Replace the empty tab body with a short pointer to the dedicated terrain panel.
+Keep the primary tab selector and render `draw_terrain_controls` in the Terrain tab, using `TerrainBrushSettings` as panel state.
 
 ```rust
-fn draw_terrain_tab(ui: &mut egui::Ui) {
+fn draw_terrain_tab(ui: &mut egui::Ui, settings: &mut TerrainBrushSettings) {
     draw_section(ui, "TERRAIN", |ui| {
-        ui.label("Use the dedicated Terrain panel for sculpting controls.");
+        draw_terrain_controls(ui, settings);
     });
 }
 ```
@@ -372,7 +311,7 @@ fn update_terrain_brush_preview(
         preview.positions.clear();
         return;
     };
-    preview.positions = brush_footprint(anchor, settings.shape, settings.size);
+    preview.positions = brush_footprint(anchor, settings.shape, settings.width, settings.height);
     for pos in &preview.positions {
         gizmos.cuboid(
             Transform::from_translation(pos.as_vec3() + Vec3::splat(0.5))
@@ -389,19 +328,21 @@ fn update_terrain_brush_preview(
 
 #### Automated
 
-- [ ] `pgrep -af 'cargo (build|check|test)' || true` shows no active cargo build/check/test before running tests.
-- [ ] `cargo test -p voxel_map_engine brush` passes.
-- [ ] `cargo check -p dev --features inspector,spawn-panel` passes.
-- [ ] `cargo check -p client` passes.
+- [x] `pgrep -af 'cargo (build|check|test)' || true` shows no active cargo build/check/test before running tests.
+- [x] `cargo test -p voxel_map_engine brush` passes.
+- [x] `cargo check -p dev --features inspector,spawn-panel` passes.
+- [x] `cargo check -p client` passes.
 
 #### Manual
 
-- [ ] Run `cargo server` and `cargo client` in separate terminals.
-- [ ] Press `F4`, open dev panels, and confirm a dedicated `Terrain` panel appears.
-- [ ] Adjust shape, size, material, and mode; expected: controls update without affecting object placement tabs.
-- [ ] Move the mouse over terrain; expected: wireframe footprint follows the cursor.
-- [ ] Switch between Fill Air and Remove; expected: Fill Air preview anchors adjacent to the hit face, Remove/Paint/Replace anchor on the hit voxel.
-- [ ] Hold edit input and drag; expected: stroke state updates as the anchor changes and does not repeatedly mark the same anchor.
+- [x] Run `cargo server` and `cargo client` in separate terminals.
+- [x] Press `F4`, open dev panels, and confirm terrain controls appear inside the World Objects panel's Terrain tab.
+- [x] Adjust shape, width, height, material, and mode; expected: controls update without affecting object placement tabs.
+- [x] Use the `- [value] +` controls for width, height, and material; expected: decrement/increment buttons clamp at their min/max.
+- [x] Toggle Brush active off and move over terrain; expected: no wireframe footprint follows the cursor.
+- [x] Toggle Brush active on and move over terrain; expected: wireframe footprint follows the cursor.
+- [x] Switch between Fill Air and Remove; expected: Fill Air preview anchors adjacent to the hit face, Remove/Paint/Replace anchor on the hit voxel.
+- [x] Hold edit input and drag; expected: stroke state updates as the anchor changes and does not repeatedly mark the same anchor.
 
 ---
 
@@ -434,7 +375,8 @@ pub struct VoxelBrushEditRequest {
     pub sequence: u32,
     pub anchor: IVec3,
     pub shape: TerrainBrushShape,
-    pub size: u32,
+    pub width: u32,
+    pub height: u32,
     pub mode: TerrainBrushMode,
     pub material: u8,
 }
@@ -595,7 +537,7 @@ fn predict_brush_changes(
     anchor: IVec3,
     settings: &TerrainBrushSettings,
 ) -> Vec<PredictedVoxelChange> {
-    brush_footprint(anchor, settings.shape, settings.size)
+    brush_footprint(anchor, settings.shape, settings.width, settings.height)
         .into_iter()
         .filter_map(|position| {
             let old = voxel_world.get_voxel(map_entity, position);
@@ -645,7 +587,8 @@ for mut sender in message_sender.iter_mut() {
         sequence,
         anchor,
         shape: settings.shape,
-        size: settings.size,
+        width: settings.width,
+        height: settings.height,
         mode: settings.mode,
         material: settings.material,
     });
@@ -691,7 +634,7 @@ fn concrete_brush_changes(
     map_entity: Entity,
     voxel_world: &VoxelWorld,
 ) -> Vec<VoxelChange> {
-    brush_footprint(request.anchor, request.shape, request.size)
+    brush_footprint(request.anchor, request.shape, request.width, request.height)
         .into_iter()
         .filter_map(|position| {
             let old = voxel_world.get_voxel(map_entity, position);
@@ -763,8 +706,8 @@ Register `handle_voxel_brush_edit_requests` in the server map plugin wherever `h
 #### Manual
 
 - [ ] Run `cargo server` and two `cargo client` instances.
-- [ ] Select Fill Air, size > 1, click once; expected: multiple voxels are added through server authority.
-- [ ] Select Remove, size > 1, click once; expected: multiple solid voxels are removed through server authority.
+- [ ] Select Fill Air, width/height > 1, click once; expected: multiple voxels are added through server authority.
+- [ ] Select Remove, width/height > 1, click once; expected: multiple solid voxels are removed through server authority.
 - [ ] Click-drag across different anchors; expected: repeated brush applications occur only when anchor changes.
 - [ ] Drag across a chunk boundary; expected: both chunks visually remesh and later persist after server save debounce.
 - [ ] Observe second client; expected: it receives the same terrain updates, with same-chunk multi-edits arriving through batched section updates.
@@ -850,7 +793,7 @@ let voxel = match request.mode {
 **File**: `crates/server/src/map.rs`  
 **Action**: modify
 
-Add validation hook now, with permissive rules except the brush-size limit added in Phase 5.
+Add validation hook now, with permissive rules except the brush footprint-size limit added in Phase 5.
 
 ```rust
 fn validate_voxel_brush_edit(
@@ -858,7 +801,7 @@ fn validate_voxel_brush_edit(
     _map_entity: Entity,
     _voxel_world: &VoxelWorld,
 ) -> bool {
-    request.size > 0
+    request.width > 0 && request.height > 0
 }
 ```
 
@@ -1105,7 +1048,7 @@ Register it in the server map plugin next to the brush request handler.
 
 ### Changes
 
-#### 1. Server brush size and payload limits
+#### 1. Server brush footprint and payload limits
 
 **File**: `crates/server/src/map.rs`  
 **Action**: modify
@@ -1120,10 +1063,10 @@ fn validate_voxel_brush_edit(
     _map_entity: Entity,
     _voxel_world: &VoxelWorld,
 ) -> bool {
-    if request.size == 0 {
+    if request.width == 0 || request.height == 0 {
         return false;
     }
-    brush_footprint(request.anchor, request.shape, request.size).len() <= MAX_BRUSH_VOXELS
+    brush_footprint(request.anchor, request.shape, request.width, request.height).len() <= MAX_BRUSH_VOXELS
 }
 
 fn validate_concrete_voxel_edit(request: &VoxelConcreteEditRequest) -> bool {
@@ -1214,7 +1157,7 @@ Add tests under the existing test module for:
 Update the Dev Inspector section only if the implemented UI changes documented user workflow. Add a concise sentence such as:
 
 ```markdown
-The Terrain panel provides dev/admin brush sculpting controls for Fill Air, Remove, Paint Existing, Replace All, preview, and acknowledged undo/redo while in Terrain editing mode.
+The Terrain tab provides dev/admin brush sculpting controls for Fill Air, Remove, Paint Existing, Replace All, preview, and acknowledged undo/redo while in Terrain editing mode.
 ```
 
 ### Verification

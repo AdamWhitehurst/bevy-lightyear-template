@@ -5,6 +5,7 @@
 //! Free-form spawns are client-local (no `Replicate`) at the world origin and
 //! carry a `DevSpawned` marker.
 
+use crate::panels::terrain::{draw_terrain_controls, TerrainBrushSettings};
 use crate::state::{DevInspectorState, EditingMode};
 use bevy::ecs::reflect::ReflectComponent;
 use bevy::prelude::ReflectDefault;
@@ -176,6 +177,7 @@ fn draw_spawn_panel(
     mut contexts: EguiContexts,
     mut ui_state: ResMut<SpawnPanelUi>,
     mut editing_mode: ResMut<EditingMode>,
+    mut terrain_settings: ResMut<TerrainBrushSettings>,
     // Optional because definitions load during startup; the panel renders a loading label until ready.
     world_objects: Option<Res<WorldObjectDefRegistry>>,
     type_registry: Res<AppTypeRegistry>,
@@ -191,7 +193,7 @@ fn draw_spawn_panel(
             draw_primary_tabs(ui, &mut editing_mode);
             ui.add_space(4.0);
             match *editing_mode {
-                EditingMode::Terrain => draw_terrain_tab(ui),
+                EditingMode::Terrain => draw_terrain_tab(ui, &mut terrain_settings),
                 EditingMode::PlaceDefinition => {
                     draw_definition_placement(ui, &mut ui_state, world_objects.as_deref())
                 }
@@ -224,8 +226,10 @@ fn draw_section(ui: &mut egui::Ui, title: &str, add_contents: impl FnOnce(&mut e
     });
 }
 
-fn draw_terrain_tab(ui: &mut egui::Ui) {
-    draw_section(ui, "TERRAIN", |_| {});
+fn draw_terrain_tab(ui: &mut egui::Ui, settings: &mut TerrainBrushSettings) {
+    draw_section(ui, "TERRAIN", |ui| {
+        draw_terrain_controls(ui, settings);
+    });
 }
 
 fn draw_definition_placement(

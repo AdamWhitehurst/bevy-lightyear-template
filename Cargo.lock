@@ -3091,6 +3091,7 @@ dependencies = [
  "bevy-inspector-egui",
  "bevy_egui",
  "protocol",
+ "voxel_map_engine",
 ]
 
 [[package]]
