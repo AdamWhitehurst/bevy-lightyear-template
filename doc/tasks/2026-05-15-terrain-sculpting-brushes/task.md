@@ -1,0 +1,5 @@
+# Terrain Sculpting Brushes
+
+Update the Dev plugin terrain editing mode to expose a usable terrain sculpting interface with brush shape, brush size, voxel type controls, and separate brush/paint modes. Brush mode should add or remove voxels with the selected shape and size, while paint mode should change existing voxel types without adding new voxels. Holding the edit input and dragging must continuously apply brush changes as the cursor moves, not only apply a single click. The active brush must show a mouse-following wireframe preview of the affected shape so users know where edits will occur before applying them.
+
+Add undo/redo for terrain edits, keep the terrain editing interface in its own module/file instead of folding it into `dev/src/panels/spawn.rs`, and extend `voxel_map_engine` so terrain tools can apply one logical edit operation across an area or volume of voxels, rather than only updating individual voxels. These multi-voxel operations must support positions spanning multiple chunks while preserving the existing dirty/remesh/update behavior.
