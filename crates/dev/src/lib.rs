@@ -12,9 +12,7 @@ pub use state::{DevInspectorState, EditingMode, PanelFlags};
 pub mod panels;
 
 #[cfg(all(feature = "inspector", feature = "spawn-panel"))]
-pub use panels::terrain::{
-    TerrainBrushPlaneMode, TerrainBrushSettings, TerrainBrushStrokeMode, TerrainPanelPlugin,
-};
+pub use panels::terrain::{TerrainBrushSettings, TerrainBrushStrokeMode, TerrainPanelPlugin};
 
 /// Adds physics debug rendering, runtime debug toggles, and optional inspector panels.
 pub struct DevPlugin;

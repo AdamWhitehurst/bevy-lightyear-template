@@ -13,7 +13,7 @@ use dev::panels::spawn::{
 use dev::DevInspectorState;
 use dev::EditingMode;
 #[cfg(feature = "spawn-panel")]
-use dev::{TerrainBrushPlaneMode, TerrainBrushSettings, TerrainBrushStrokeMode};
+use dev::{TerrainBrushSettings, TerrainBrushStrokeMode};
 use leafwing_input_manager::prelude::*;
 #[cfg(feature = "spawn-panel")]
 use lightyear::prelude::Replicated;
@@ -436,8 +436,8 @@ fn raycast_terrain_brush_anchor(
     Some((
         anchor,
         TerrainBrushPlaneLock {
-            point: anchor.as_vec3() + Vec3::splat(0.5),
-            normal: stroke_plane_normal(settings.plane_mode, hit_normal),
+            point: ray.origin + *ray.direction * RAYCAST_MAX_DISTANCE * hit.t,
+            normal: hit_normal,
             base_anchor: anchor,
         },
     ))
@@ -479,16 +479,6 @@ fn anchor_from_projected_plane_point(point: Vec3, plane_lock: TerrainBrushPlaneL
         }
     }
     anchor
-}
-
-#[cfg(feature = "spawn-panel")]
-fn stroke_plane_normal(plane_mode: TerrainBrushPlaneMode, hit_normal: Vec3) -> Vec3 {
-    match plane_mode {
-        TerrainBrushPlaneMode::Horizontal => Vec3::Y,
-        TerrainBrushPlaneMode::VerticalX => Vec3::X,
-        TerrainBrushPlaneMode::VerticalZ => Vec3::Z,
-        TerrainBrushPlaneMode::HitFace => hit_normal,
-    }
 }
 
 #[cfg(feature = "spawn-panel")]
@@ -2099,7 +2089,7 @@ mod tests {
     }
 
     #[test]
-    fn projected_horizontal_plane_preserves_locked_y_anchor() {
+    fn projected_top_hit_face_preserves_locked_y_anchor() {
         assert_eq!(
             anchor_from_projected_plane_point(
                 Vec3::new(4.0, 9.8, 3.2),
@@ -2114,7 +2104,7 @@ mod tests {
     }
 
     #[test]
-    fn projected_vertical_plane_preserves_locked_x_anchor() {
+    fn projected_side_hit_face_preserves_locked_x_anchor() {
         assert_eq!(
             anchor_from_projected_plane_point(
                 Vec3::new(9.0, 2.8, 3.2),
