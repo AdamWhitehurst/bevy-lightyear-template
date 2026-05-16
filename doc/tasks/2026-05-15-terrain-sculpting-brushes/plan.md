@@ -370,8 +370,12 @@ fn update_terrain_brush_preview(
 - Held terrain brush input now supports `Discrete` and `Continuous` stroke modes. `Discrete` ignores brush
   preview/anchor movement caused by newly placed voxels and only sends another request after screen-space cursor
   movement. `Continuous` repeats while held at a configurable `Every N frames` interval, defaulting to `6` frames.
-- Held brush strokes lock to the initial hit plane and project later cursor rays onto that plane. This prevents Fill Air
-  strokes from diagonally climbing toward the camera by raycasting against newly placed voxels during the same stroke.
+- Held brush strokes use an explicit stroke plane: `Horizontal` (default), `Vertical X`, `Vertical Z`, or legacy
+  `Hit Face`. Later cursor rays project onto that locked plane instead of raycasting newly edited voxels. This makes
+  horizontal-vs-vertical stroke movement deterministic instead of depending on whichever voxel face the camera ray hit.
+- In `Continuous` mode, if the locked-plane anchor is already edited, the client searches along the stroke normal for
+  the next editable layer. Holding still can therefore keep filling upward on `Horizontal` Fill Air strokes or digging
+  downward on Remove strokes without falling back to camera-biased raycasts.
 
 ### Changes
 
@@ -741,9 +745,12 @@ registered.
 - [ ] In Discrete stroke mode, click-drag across the screen; expected: repeated brush applications occur only after
       screen-space cursor movement.
 - [ ] In Continuous stroke mode, press and hold; expected: brush applications repeat according to `Every N frames`, and
-      increasing the value slows the repeat rate.
-- [ ] Hold or drag Fill Air from an oblique camera angle; expected: the stroke follows the initial hit plane instead of
-      stepping diagonally toward the camera as new voxels are placed.
+      increasing the value slows the repeat rate. With `Horizontal` plane selected, Fill Air grows upward and Remove digs
+      downward while the cursor remains still.
+- [ ] Switch between `Horizontal`, `Vertical X`, and `Vertical Z` stroke planes; expected: held-stroke movement is
+      deterministic for the selected plane rather than changing based on camera ray face hits.
+- [ ] Hold or drag Fill Air from an oblique camera angle; expected: the stroke follows the selected locked plane instead
+      of stepping diagonally toward the camera as new voxels are placed.
 - [ ] Drag across a chunk boundary; expected: both chunks visually remesh and later persist after server save debounce.
 - [ ] Observe second client; expected: it receives the same terrain updates, with same-chunk multi-edits arriving
       through batched section updates.

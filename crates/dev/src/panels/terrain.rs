@@ -12,6 +12,20 @@ pub enum TerrainBrushStrokeMode {
     Continuous,
 }
 
+/// Plane used for held terrain brush strokes.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Reflect)]
+pub enum TerrainBrushPlaneMode {
+    /// Move across a horizontal X/Z plane and grow/dig along Y.
+    #[default]
+    Horizontal,
+    /// Move across a vertical Y/Z plane and grow/dig along X.
+    VerticalX,
+    /// Move across a vertical X/Y plane and grow/dig along Z.
+    VerticalZ,
+    /// Use the exact face hit at stroke start.
+    HitFace,
+}
+
 /// User-selected terrain brush settings shared by dev UI and client terrain input.
 #[derive(Resource, Clone, Debug, Reflect)]
 #[reflect(Resource)]
@@ -23,6 +37,7 @@ pub struct TerrainBrushSettings {
     pub material: u8,
     pub mode: TerrainBrushMode,
     pub stroke_mode: TerrainBrushStrokeMode,
+    pub plane_mode: TerrainBrushPlaneMode,
     pub continuous_every_n_frames: u32,
 }
 
@@ -36,6 +51,7 @@ impl Default for TerrainBrushSettings {
             material: 0,
             mode: TerrainBrushMode::FillAir,
             stroke_mode: TerrainBrushStrokeMode::Discrete,
+            plane_mode: TerrainBrushPlaneMode::Horizontal,
             continuous_every_n_frames: 6,
         }
     }
@@ -122,6 +138,33 @@ pub fn draw_terrain_controls(ui: &mut egui::Ui, settings: &mut TerrainBrushSetti
                     );
                     ui.end_row();
                 }
+
+                ui.label("Plane");
+                egui::ComboBox::from_id_salt("terrain_brush_plane_mode")
+                    .selected_text(format!("{:?}", settings.plane_mode))
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut settings.plane_mode,
+                            TerrainBrushPlaneMode::Horizontal,
+                            "Horizontal",
+                        );
+                        ui.selectable_value(
+                            &mut settings.plane_mode,
+                            TerrainBrushPlaneMode::VerticalX,
+                            "Vertical X",
+                        );
+                        ui.selectable_value(
+                            &mut settings.plane_mode,
+                            TerrainBrushPlaneMode::VerticalZ,
+                            "Vertical Z",
+                        );
+                        ui.selectable_value(
+                            &mut settings.plane_mode,
+                            TerrainBrushPlaneMode::HitFace,
+                            "Hit Face",
+                        );
+                    });
+                ui.end_row();
 
                 ui.label("Width");
                 draw_u32_stepper(ui, "terrain_brush_width", &mut settings.width, 1, 16);
