@@ -35,15 +35,17 @@ use protocol::world_object::{
 };
 #[cfg(not(feature = "spawn-panel"))]
 use protocol::VoxelEditRequest;
+#[cfg(feature = "spawn-panel")]
+use protocol::{VoxelBrushEditRequest, VoxelChange, VoxelConcreteEditRequest};
 use protocol::{
     CharacterMarker, ChunkDataSync, MapInstanceId, MapRegistry, PlayerActions, SectionBlocksUpdate,
-    UnloadColumn, VoxelBrushEditRequest, VoxelChange, VoxelChannel, VoxelConcreteEditRequest,
-    VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelType,
+    UnloadColumn, VoxelChannel, VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelType,
 };
+#[cfg(feature = "spawn-panel")]
+use voxel_map_engine::prelude::{brush_anchor, brush_footprint, TerrainBrushMode};
 use voxel_map_engine::prelude::{
-    brush_anchor, brush_footprint, chunk_to_column, column_to_chunks, ChunkData, ChunkStatus,
-    ChunkTicket, MapDimensions, TerrainBrushMode, VoxelMapInstance, VoxelPlugin, VoxelWorld,
-    WorldVoxel,
+    chunk_to_column, column_to_chunks, ChunkData, ChunkStatus, ChunkTicket, MapDimensions,
+    VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
 };
 
 const RAYCAST_MAX_DISTANCE: f32 = 100.0;
@@ -2221,7 +2223,7 @@ fn restore_unacked_history_record(
     }
 }
 
-/// Processes server rejections, rolling back the predicted voxel to the correct value.
+/// Processes server rejections, rolling back predicted voxels to server state.
 fn handle_voxel_edit_reject(
     mut receivers: Query<&mut MessageReceiver<VoxelEditReject>>,
     mut prediction_state: ResMut<VoxelPredictionState>,
@@ -2239,16 +2241,65 @@ fn handle_voxel_edit_reject(
                 "handle_voxel_edit_reject: rejected seq={} at {:?}, correct={:?}",
                 reject.sequence, reject.position, reject.correct_voxel
             );
+            if rollback_prediction(
+                reject.sequence,
+                &mut prediction_state,
+                &mut voxel_world,
+                chunk_ticket.map_entity,
+            ) {
+                continue;
+            }
             voxel_world.set_voxel(
                 chunk_ticket.map_entity,
                 reject.position,
                 WorldVoxel::from(reject.correct_voxel),
             );
-            prediction_state
-                .pending
-                .retain(|p| p.sequence != reject.sequence);
         }
     }
+}
+
+fn rollback_prediction(
+    sequence: u32,
+    prediction_state: &mut VoxelPredictionState,
+    voxel_world: &mut VoxelWorld,
+    map_entity: Entity,
+) -> bool {
+    let Some(index) = prediction_state
+        .pending
+        .iter()
+        .position(|p| p.sequence == sequence)
+    else {
+        trace!("rollback_prediction: no pending prediction for seq={sequence}");
+        return false;
+    };
+    let prediction = prediction_state.pending.remove(index);
+    voxel_world.set_voxels(
+        map_entity,
+        prediction
+            .changes
+            .iter()
+            .map(|change| (change.position, WorldVoxel::from(change.old_voxel))),
+    );
+    true
+}
+
+#[cfg(test)]
+fn rollback_prediction_changes(
+    sequence: u32,
+    prediction_state: &mut VoxelPredictionState,
+) -> Option<Vec<(IVec3, VoxelType)>> {
+    let index = prediction_state
+        .pending
+        .iter()
+        .position(|p| p.sequence == sequence)?;
+    let prediction = prediction_state.pending.remove(index);
+    Some(
+        prediction
+            .changes
+            .into_iter()
+            .map(|change| (change.position, change.old_voxel))
+            .collect(),
+    )
 }
 
 #[cfg(test)]
@@ -2300,6 +2351,60 @@ mod tests {
 
         assert!(has_pending_prediction_at(&state, IVec3::new(6, 10, 15)));
         assert!(!has_pending_prediction_at(&state, IVec3::new(1, 2, 3)));
+    }
+
+    #[test]
+    fn stroke_state_suppresses_duplicate_discrete_cursor_position() {
+        let mut state = TerrainBrushStrokeState {
+            active: true,
+            last_cursor_position: Some(Vec2::new(12.0, 4.0)),
+            ..default()
+        };
+        let settings = TerrainBrushSettings {
+            stroke_mode: TerrainBrushStrokeMode::Discrete,
+            ..default()
+        };
+
+        assert!(should_suppress_brush_repeat(
+            &settings,
+            &mut state,
+            Vec2::new(12.1, 4.1)
+        ));
+        assert!(!should_suppress_brush_repeat(
+            &settings,
+            &mut state,
+            Vec2::new(13.0, 4.0)
+        ));
+    }
+
+    #[test]
+    fn reject_rolls_back_all_changes_in_prediction() {
+        let mut state = VoxelPredictionState::default();
+        state.pending.push(VoxelPrediction {
+            sequence: 9,
+            changes: vec![
+                PredictedVoxelChange {
+                    position: IVec3::new(1, 0, 0),
+                    old_voxel: VoxelType::Air,
+                    new_voxel: VoxelType::Solid(1),
+                },
+                PredictedVoxelChange {
+                    position: IVec3::new(2, 0, 0),
+                    old_voxel: VoxelType::Solid(7),
+                    new_voxel: VoxelType::Solid(2),
+                },
+            ],
+            kind: TerrainPredictionKind::NewEdit,
+        });
+
+        assert_eq!(
+            rollback_prediction_changes(9, &mut state),
+            Some(vec![
+                (IVec3::new(1, 0, 0), VoxelType::Air),
+                (IVec3::new(2, 0, 0), VoxelType::Solid(7)),
+            ])
+        );
+        assert!(state.pending.is_empty());
     }
 
     #[test]

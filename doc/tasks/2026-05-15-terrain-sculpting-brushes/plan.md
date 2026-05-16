@@ -1220,15 +1220,15 @@ and acknowledged undo/redo while in Terrain editing mode.
 
 #### Automated
 
-- [ ] `pgrep -af 'cargo (build|check|test)' || true` shows no active cargo build/check/test before running tests.
-- [ ] `cargo check-all` passes.
-- [ ] `cargo test-all` passes.
-- [ ] `cargo test -p voxel_map_engine brush` passes.
-- [ ] `cargo test -p voxel_map_engine api` passes.
-- [ ] `cargo test -p client prediction` passes.
-- [ ] `cargo test -p client undo` passes.
-- [ ] `cargo test -p server brush` passes.
-- [ ] `cargo test -p server concrete` passes.
+- [x] `pgrep -af 'cargo (build|check|test)' || true` shows no active cargo build/check/test before running tests.
+- [x] `cargo check-all` passes.
+- [x] `cargo test-all` passes.
+- [x] `cargo test -p voxel_map_engine brush` passes.
+- [x] `cargo test -p voxel_map_engine api` passes.
+- [x] `cargo test -p client prediction` passes.
+- [x] `cargo test -p client undo` passes.
+- [x] `cargo test -p server brush` passes.
+- [x] `cargo test -p server concrete` passes.
 
 #### Manual
 

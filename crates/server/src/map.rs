@@ -47,6 +47,8 @@ use voxel_map_engine::persistence::fs_chunk::FsChunkStore;
 use voxel_map_engine::persistence::fs_chunk_entities::FsChunkEntitiesStore;
 use voxel_map_engine::persistence::{ChunkFileEnvelope, CHUNK_SAVE_VERSION};
 
+const MAX_BRUSH_VOXELS: usize = 4096;
+
 /// Plugin managing server-side voxel map functionality.
 pub struct ServerMapPlugin;
 
@@ -1421,6 +1423,7 @@ pub fn handle_voxel_edit_requests(
 pub fn handle_voxel_brush_edit_requests(
     mut receivers: Query<(Entity, &mut MessageReceiver<VoxelBrushEditRequest>)>,
     mut ack_senders: Query<&mut MessageSender<VoxelEditAck>>,
+    mut reject_senders: Query<&mut MessageSender<VoxelEditReject>>,
     mut pending_broadcasts: ResMut<PendingVoxelBroadcasts>,
     mut dirty_state: ResMut<WorldDirtyState>,
     time: Res<Time>,
@@ -1439,10 +1442,17 @@ pub fn handle_voxel_brush_edit_requests(
                 continue;
             };
 
-            if !validate_voxel_brush_edit(&request, map_entity, &voxel_world) {
+            if !validate_voxel_brush_edit(&request) {
                 warn!(
                     "handle_voxel_brush_edit_requests: rejecting invalid brush request sequence {}",
                     request.sequence
+                );
+                send_voxel_edit_reject(
+                    client_entity,
+                    request.sequence,
+                    request.anchor,
+                    voxel_world.get_voxel(map_entity, request.anchor).into(),
+                    &mut reject_senders,
                 );
                 continue;
             }
@@ -1493,6 +1503,7 @@ pub fn handle_voxel_brush_edit_requests(
 pub fn handle_voxel_concrete_edit_requests(
     mut receivers: Query<(Entity, &mut MessageReceiver<VoxelConcreteEditRequest>)>,
     mut ack_senders: Query<&mut MessageSender<VoxelEditAck>>,
+    mut reject_senders: Query<&mut MessageSender<VoxelEditReject>>,
     mut pending_broadcasts: ResMut<PendingVoxelBroadcasts>,
     mut dirty_state: ResMut<WorldDirtyState>,
     time: Res<Time>,
@@ -1514,6 +1525,18 @@ pub fn handle_voxel_concrete_edit_requests(
                 warn!(
                     "handle_voxel_concrete_edit_requests: rejecting invalid concrete request sequence {}",
                     request.sequence
+                );
+                let reject_position = request
+                    .changes
+                    .first()
+                    .map(|change| change.position)
+                    .unwrap_or(IVec3::ZERO);
+                send_voxel_edit_reject(
+                    client_entity,
+                    request.sequence,
+                    reject_position,
+                    voxel_world.get_voxel(map_entity, reject_position).into(),
+                    &mut reject_senders,
                 );
                 continue;
             }
@@ -1617,18 +1640,36 @@ fn send_brush_edit_ack(
     }
 }
 
+fn send_voxel_edit_reject(
+    client_entity: Entity,
+    sequence: u32,
+    position: IVec3,
+    correct_voxel: VoxelType,
+    reject_senders: &mut Query<&mut MessageSender<VoxelEditReject>>,
+) {
+    if let Ok(mut sender) = reject_senders.get_mut(client_entity) {
+        sender.send::<VoxelChannel>(VoxelEditReject {
+            sequence,
+            position,
+            correct_voxel,
+        });
+    } else {
+        warn!("send_voxel_edit_reject: no reject sender for {client_entity:?}");
+    }
+}
+
 /// Validates a concrete voxel edit request. Returns false if the whole request should be rejected.
 fn validate_voxel_concrete_edit(request: &VoxelConcreteEditRequest) -> bool {
-    !request.changes.is_empty()
+    !request.changes.is_empty() && request.changes.len() <= MAX_BRUSH_VOXELS
 }
 
 /// Validates a voxel brush edit request. Returns false if the whole brush should be rejected.
-fn validate_voxel_brush_edit(
-    request: &VoxelBrushEditRequest,
-    _map_entity: Entity,
-    _voxel_world: &VoxelWorld,
-) -> bool {
-    request.width > 0 && request.height > 0
+fn validate_voxel_brush_edit(request: &VoxelBrushEditRequest) -> bool {
+    if request.width == 0 || request.height == 0 {
+        return false;
+    }
+    brush_footprint(request.anchor, request.shape, request.width, request.height).len()
+        <= MAX_BRUSH_VOXELS
 }
 
 /// Validates a voxel edit request. Returns false if the edit should be rejected.
@@ -2221,11 +2262,92 @@ mod tests {
         );
     }
 
+    fn brush_request(width: u32, height: u32) -> VoxelBrushEditRequest {
+        VoxelBrushEditRequest {
+            sequence: 1,
+            anchor: IVec3::ZERO,
+            shape: voxel_map_engine::prelude::TerrainBrushShape::Rect,
+            width,
+            height,
+            mode: TerrainBrushMode::FillAir,
+            material: 0,
+        }
+    }
+
+    #[test]
+    fn brush_request_validation_rejects_oversized_footprints() {
+        assert!(!validate_voxel_brush_edit(&brush_request(65, 1)));
+    }
+
+    #[test]
+    fn brush_request_validation_accepts_limit_sized_footprints() {
+        assert!(validate_voxel_brush_edit(&brush_request(64, 1)));
+    }
+
+    #[test]
+    fn fill_air_only_writes_air_or_unset_positions() {
+        assert_eq!(
+            voxel_for_brush_mode(WorldVoxel::Air, TerrainBrushMode::FillAir, 3),
+            Some(VoxelType::Solid(3))
+        );
+        assert_eq!(
+            voxel_for_brush_mode(WorldVoxel::Unset, TerrainBrushMode::FillAir, 3),
+            Some(VoxelType::Solid(3))
+        );
+        assert_eq!(
+            voxel_for_brush_mode(WorldVoxel::Solid(1), TerrainBrushMode::FillAir, 3),
+            None
+        );
+    }
+
+    #[test]
+    fn remove_only_writes_solid_positions() {
+        assert_eq!(
+            voxel_for_brush_mode(WorldVoxel::Solid(1), TerrainBrushMode::Remove, 3),
+            Some(VoxelType::Air)
+        );
+        assert_eq!(
+            voxel_for_brush_mode(WorldVoxel::Air, TerrainBrushMode::Remove, 3),
+            None
+        );
+    }
+
+    #[test]
+    fn replace_all_writes_every_footprint_position() {
+        assert_eq!(
+            voxel_for_brush_mode(WorldVoxel::Air, TerrainBrushMode::ReplaceAll, 5),
+            Some(VoxelType::Solid(5))
+        );
+        assert_eq!(
+            voxel_for_brush_mode(WorldVoxel::Solid(1), TerrainBrushMode::ReplaceAll, 5),
+            Some(VoxelType::Solid(5))
+        );
+        assert_eq!(
+            voxel_for_brush_mode(WorldVoxel::Unset, TerrainBrushMode::ReplaceAll, 5),
+            Some(VoxelType::Solid(5))
+        );
+    }
+
     #[test]
     fn concrete_request_validation_rejects_empty_changes() {
         let request = VoxelConcreteEditRequest {
             sequence: 42,
             changes: Vec::new(),
+        };
+
+        assert!(!validate_voxel_concrete_edit(&request));
+    }
+
+    #[test]
+    fn concrete_request_validation_rejects_oversized_payloads() {
+        let request = VoxelConcreteEditRequest {
+            sequence: 42,
+            changes: (0..=MAX_BRUSH_VOXELS)
+                .map(|index| VoxelChange {
+                    position: IVec3::new(index as i32, 0, 0),
+                    voxel: VoxelType::Solid(7),
+                })
+                .collect(),
         };
 
         assert!(!validate_voxel_concrete_edit(&request));

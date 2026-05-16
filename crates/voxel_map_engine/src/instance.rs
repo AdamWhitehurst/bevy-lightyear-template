@@ -100,6 +100,11 @@ impl VoxelMapInstance {
                 voxel != WorldVoxel::Unset,
                 "set_voxels: cannot write Unset (internal sentinel)"
             );
+            let chunk_pos = voxel_to_chunk_pos(world_pos, self.chunk_size);
+            if self.get_chunk_data(chunk_pos).is_none() {
+                trace!("set_voxels: chunk {chunk_pos} not loaded, edit at {world_pos} dropped");
+                continue;
+            }
             self.set_voxel(world_pos, voxel);
             written += 1;
         }

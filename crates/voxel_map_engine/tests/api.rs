@@ -454,3 +454,84 @@ fn api_set_voxels_handles_negative_world_coordinates() {
     assert!(instance.dirty_chunks.contains(&-IVec3::X));
     assert!(instance.chunks_needing_remesh.contains(&-IVec3::X));
 }
+
+#[test]
+fn api_set_voxels_handles_negative_multi_edit_chunk_mapping() {
+    let mut app = test_app();
+    let map = spawn_map(&mut app, 1);
+    spawn_ticket(&mut app, map, Vec3::ZERO, 1);
+
+    tick_until(&mut app, |app| {
+        has_loaded_chunk(app, map, -IVec3::X) && has_loaded_chunk(app, map, IVec3::new(-1, 0, -1))
+    });
+
+    app.world_mut()
+        .run_system_once(move |mut vw: VoxelWorld| {
+            assert_eq!(
+                vw.set_voxels(
+                    map,
+                    [
+                        (IVec3::new(-1, 2, 3), WorldVoxel::Solid(88)),
+                        (IVec3::new(-1, 2, -1), WorldVoxel::Solid(89)),
+                    ],
+                ),
+                2
+            );
+        })
+        .unwrap();
+
+    let instance = app.world().get::<VoxelMapInstance>(map).unwrap();
+    assert!(instance.dirty_chunks.contains(&-IVec3::X));
+    assert!(instance.dirty_chunks.contains(&IVec3::new(-1, 0, -1)));
+}
+
+#[test]
+fn api_set_voxels_updates_both_boundary_neighbors_in_one_call() {
+    let mut app = test_app();
+    let map = spawn_map(&mut app, 1);
+    spawn_ticket(&mut app, map, Vec3::ZERO, 1);
+
+    tick_until(&mut app, |app| {
+        has_loaded_chunk(app, map, -IVec3::X)
+            && has_loaded_chunk(app, map, IVec3::ZERO)
+            && has_loaded_chunk(app, map, IVec3::X)
+    });
+
+    app.world_mut()
+        .run_system_once(move |mut vw: VoxelWorld| {
+            assert_eq!(
+                vw.set_voxels(
+                    map,
+                    [
+                        (IVec3::new(0, 2, 3), WorldVoxel::Solid(91)),
+                        (IVec3::new(15, 2, 3), WorldVoxel::Solid(92)),
+                    ],
+                ),
+                2
+            );
+        })
+        .unwrap();
+
+    let instance = app.world().get::<VoxelMapInstance>(map).unwrap();
+    assert!(instance.chunks_needing_remesh.contains(&-IVec3::X));
+    assert!(instance.chunks_needing_remesh.contains(&IVec3::ZERO));
+    assert!(instance.chunks_needing_remesh.contains(&IVec3::X));
+}
+
+#[test]
+fn api_set_voxels_skips_unloaded_chunks_without_panicking() {
+    let mut app = test_app();
+    let map = spawn_map(&mut app, 1);
+    spawn_ticket(&mut app, map, Vec3::ZERO, 0);
+
+    tick_until(&mut app, |app| has_loaded_chunk(app, map, IVec3::ZERO));
+
+    app.world_mut()
+        .run_system_once(move |mut vw: VoxelWorld| {
+            assert_eq!(
+                vw.set_voxels(map, [(IVec3::new(1024, 2, 3), WorldVoxel::Solid(93))]),
+                0
+            );
+        })
+        .unwrap();
+}
