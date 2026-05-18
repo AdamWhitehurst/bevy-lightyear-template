@@ -186,6 +186,7 @@ Edit `assets/abilities.ron` to add or modify abilities. Each ability has:
 - Cooldown in ticks
 - Effects list with triggers: `OnTick` (fires once on a specified Active-phase tick offset, defaults to tick 0),
   `WhileActive` (fires every tick), `OnHit` (fires when a hitbox/projectile hits a target), `OnEnd` (fires on Active
-  exit), or `OnInput` (fires on input during Active for combo chaining)
+  exit), or `OnInput` (fires on semantic ability input during Active for combo chaining). `OnInput` asset entries use
+  `input: Slot(0)` through `Slot(3)` for ability slots; runtime maps them onto filtered `NetworkedPlayerActions`.
 - Effect types: `Melee`, `Projectile`, `AreaOfEffect`, `SetVelocity`, `Damage`, `ApplyForce`, `Ability` (spawns
   sub-ability), `Teleport`, `Shield`, or `Buff`

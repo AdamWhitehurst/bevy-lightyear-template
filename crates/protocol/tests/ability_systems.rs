@@ -6,9 +6,9 @@ use leafwing_input_manager::prelude::ActionState;
 use lightyear::prelude::{ComponentRegistry, LocalTimeline, PeerId, Server, Tick};
 use lightyear_replication::prespawn::PreSpawnedReceiver;
 use protocol::ability::{
-    AbilityAsset, AbilityPhases, ActiveBuff, ActiveBuffs, ActiveShield, HitTargets, HitboxOf,
-    InputEffect, MeleeHitbox, OnEndEffects, OnHitEffectDefs, OnHitEffects, OnInputEffects,
-    OnTickEffects, TickEffect, WhileActiveEffects,
+    AbilityAsset, AbilityInput, AbilityPhases, ActiveBuff, ActiveBuffs, ActiveShield, HitTargets,
+    HitboxOf, InputEffect, MeleeHitbox, OnEndEffects, OnHitEffectDefs, OnHitEffects,
+    OnInputEffects, OnTickEffects, TickEffect, WhileActiveEffects,
 };
 use protocol::*;
 use std::collections::HashMap;
@@ -149,7 +149,7 @@ fn test_defs() -> Vec<(String, AbilityAsset)> {
                 ],
                 vec![],
                 vec![InputEffect {
-                    action: NetworkedPlayerActions::Ability1,
+                    input: AbilityInput::Slot(0),
                     effect: AbilityEffect::Ability {
                         id: "punch2".into(),
                         target: EffectTarget::Caster,
@@ -187,7 +187,7 @@ fn test_defs() -> Vec<(String, AbilityAsset)> {
                 ],
                 vec![],
                 vec![InputEffect {
-                    action: NetworkedPlayerActions::Ability1,
+                    input: AbilityInput::Slot(0),
                     effect: AbilityEffect::Ability {
                         id: "punch3".into(),
                         target: EffectTarget::Caster,
@@ -1001,13 +1001,77 @@ fn on_input_effects_dispatched_during_active() {
         .get::<OnInputEffects>(ability_entity)
         .expect("OnInputEffects should be present during Active phase");
     assert_eq!(on_input.0.len(), 1, "punch has 1 OnInput effect");
-    assert_eq!(on_input.0[0].action, NetworkedPlayerActions::Ability1);
+    assert_eq!(on_input.0[0].input, AbilityInput::Slot(0));
     assert_eq!(
         on_input.0[0].effect,
         AbilityEffect::Ability {
             id: "punch2".into(),
             target: EffectTarget::Caster
         },
+    );
+}
+
+#[test]
+fn active_input_effect_fires_from_semantic_ability_input() {
+    let mut app = test_app();
+    insert_timeline(app.world_mut(), 200);
+    let char_entity = spawn_character(app.world_mut());
+
+    spawn_test_active_ability(
+        &mut app,
+        ActiveAbility {
+            def_id: AbilityId("punch".into()),
+            caster: char_entity,
+            original_caster: char_entity,
+            target: char_entity,
+            phase: AbilityPhase::Active,
+            phase_start_tick: Tick(200),
+            ability_slot: 0,
+            depth: 0,
+        },
+    );
+
+    app.world_mut()
+        .get_mut::<ActionState<NetworkedPlayerActions>>(char_entity)
+        .unwrap()
+        .press(&NetworkedPlayerActions::Ability1);
+    app.update();
+
+    assert!(
+        find_active_ability_for_def(app.world_mut(), "punch2").is_some(),
+        "Slot(0) OnInput should map to Ability1 and spawn punch2"
+    );
+}
+
+#[test]
+fn active_input_effect_ignores_unmatched_ability_input() {
+    let mut app = test_app();
+    insert_timeline(app.world_mut(), 200);
+    let char_entity = spawn_character(app.world_mut());
+
+    spawn_test_active_ability(
+        &mut app,
+        ActiveAbility {
+            def_id: AbilityId("punch".into()),
+            caster: char_entity,
+            original_caster: char_entity,
+            target: char_entity,
+            phase: AbilityPhase::Active,
+            phase_start_tick: Tick(200),
+            ability_slot: 0,
+            depth: 0,
+        },
+    );
+
+    app.world_mut()
+        .get_mut::<ActionState<NetworkedPlayerActions>>(char_entity)
+        .unwrap()
+        .press(&NetworkedPlayerActions::Ability2);
+    app.update();
+
+    assert!(
+        find_active_ability_for_def(app.world_mut(), "punch2").is_none(),
+        "Slot(0) OnInput should ignore unmatched Ability2 network input"
     );
 }
 
@@ -1793,6 +1857,7 @@ fn archetype_loads_from_ron_bytes() {
         .register_type::<OnEndEffects>()
         .register_type::<OnInputEffects>()
         .register_type::<InputEffect>()
+        .register_type::<AbilityInput>()
         .register_type::<AbilityEffect>()
         .register_type::<EffectTarget>()
         .register_type::<ForceFrame>();
@@ -1845,6 +1910,40 @@ fn archetype_loads_from_ron_bytes() {
 
     let on_hit = app.world().get::<OnHitEffectDefs>(entity).unwrap();
     assert_eq!(on_hit.0.len(), 1);
+}
+
+#[test]
+fn abilities_asset_loads_after_on_input_schema_migration() {
+    let mut app = App::new();
+    app.add_plugins(MinimalPlugins);
+    app.register_type::<AbilityPhases>()
+        .register_type::<OnTickEffects>()
+        .register_type::<TickEffect>()
+        .register_type::<WhileActiveEffects>()
+        .register_type::<OnHitEffectDefs>()
+        .register_type::<OnEndEffects>()
+        .register_type::<OnInputEffects>()
+        .register_type::<InputEffect>()
+        .register_type::<AbilityInput>()
+        .register_type::<AbilityEffect>()
+        .register_type::<EffectTarget>()
+        .register_type::<ForceFrame>();
+
+    let ron_bytes = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../assets/abilities/punch.ability.ron"
+    ))
+    .expect("punch ability asset should exist");
+    let registry = app.world().resource::<AppTypeRegistry>().0.clone();
+    let reg = registry.read();
+    let components = protocol::reflect_loader::deserialize_component_map(&ron_bytes, &reg)
+        .expect("migrated punch ability asset should load");
+
+    assert!(
+        components
+            .iter()
+            .any(|component| component.try_downcast_ref::<OnInputEffects>().is_some())
+    );
 }
 
 #[test]

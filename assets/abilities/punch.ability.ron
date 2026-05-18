@@ -6,5 +6,5 @@
         Damage(amount: 5.0, target: Victim),
         ApplyForce(force: (0.0, 52.78, 29.32), frame: RelativePosition, target: Victim),
     ]),
-    "protocol::ability::OnInputEffects": ([(action: Ability1, effect: Ability(id: "punch2", target: Caster))]),
+    "protocol::ability::OnInputEffects": ([(input: Slot(0), effect: Ability(id: "punch2", target: Caster))]),
 }

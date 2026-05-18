@@ -116,10 +116,9 @@ impl From<ron::error::Error> for ReflectLoadError {
 mod tests {
     use super::*;
     use crate::ability::{
-        AbilityEffect, AbilityPhases, EffectTarget, ForceFrame, InputEffect, OnHitEffectDefs,
-        OnInputEffects, OnTickEffects, TickEffect, WhileActiveEffects,
+        AbilityEffect, AbilityInput, AbilityPhases, EffectTarget, ForceFrame, InputEffect,
+        OnHitEffectDefs, OnInputEffects, OnTickEffects, TickEffect, WhileActiveEffects,
     };
-    use crate::NetworkedPlayerActions;
     use bevy::reflect::TypeRegistry;
 
     fn ability_test_registry() -> TypeRegistry {
@@ -131,10 +130,10 @@ mod tests {
         registry.register::<OnHitEffectDefs>();
         registry.register::<OnInputEffects>();
         registry.register::<InputEffect>();
+        registry.register::<AbilityInput>();
         registry.register::<AbilityEffect>();
         registry.register::<EffectTarget>();
         registry.register::<ForceFrame>();
-        registry.register::<NetworkedPlayerActions>();
         registry
     }
 
@@ -167,7 +166,7 @@ mod tests {
                 Damage(amount: 5.0, target: Victim),
                 ApplyForce(force: (0.0, 0.9, 2.85), frame: RelativePosition, target: Victim),
             ]),
-            "protocol::ability::OnInputEffects": ([(action: Ability1, effect: Ability(id: "punch2", target: Caster))]),
+            "protocol::ability::OnInputEffects": ([(input: Slot(0), effect: Ability(id: "punch2", target: Caster))]),
         }"#;
         let components = deserialize_component_map(ron, &registry).unwrap();
         assert_eq!(components.len(), 4);

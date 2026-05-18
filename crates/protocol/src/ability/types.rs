@@ -1,4 +1,4 @@
-use crate::NetworkedPlayerActions;
+use super::input::AbilityInput;
 use avian3d::prelude::Rotation;
 use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
@@ -111,7 +111,7 @@ pub enum EffectTrigger {
     OnHit(AbilityEffect),
     OnEnd(AbilityEffect),
     OnInput {
-        action: NetworkedPlayerActions,
+        input: AbilityInput,
         effect: AbilityEffect,
     },
 }
@@ -306,11 +306,11 @@ pub struct WhileActiveEffects(pub Vec<AbilityEffect>);
 #[reflect(Component, Serialize, Deserialize)]
 pub struct OnEndEffects(pub Vec<AbilityEffect>);
 
-/// Input-triggered effect with action metadata.
+/// Input-triggered effect with semantic ability input metadata.
 #[derive(Clone, Debug, PartialEq, Reflect, Serialize, Deserialize)]
 #[type_path = "protocol::ability"]
 pub struct InputEffect {
-    pub action: NetworkedPlayerActions,
+    pub input: AbilityInput,
     pub effect: AbilityEffect,
 }
 

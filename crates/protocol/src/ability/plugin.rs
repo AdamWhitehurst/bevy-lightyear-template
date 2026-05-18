@@ -2,6 +2,7 @@ use super::activation::{ability_activation, update_active_abilities};
 use super::effects::{
     apply_on_end_effects, apply_on_input_effects, apply_on_tick_effects, apply_while_active_effects,
 };
+use super::input::AbilityInput;
 use super::lifecycle::{
     ability_bullet_lifetime, aoe_hitbox_lifetime, despawn_active_ability_on_removal, expire_buffs,
 };
@@ -19,7 +20,6 @@ use super::types::{
     ConditionalEffects, EffectTarget, ForceFrame, InputEffect, OnEndEffects, OnHitEffectDefs,
     OnInputEffects, OnTickEffects, TickEffect, WhileActiveEffects,
 };
-use crate::NetworkedPlayerActions;
 use bevy::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
@@ -39,10 +39,10 @@ impl Plugin for AbilityPlugin {
             .register_type::<OnEndEffects>()
             .register_type::<OnInputEffects>()
             .register_type::<InputEffect>()
+            .register_type::<AbilityInput>()
             .register_type::<AbilityEffect>()
             .register_type::<EffectTarget>()
             .register_type::<ForceFrame>()
-            .register_type::<NetworkedPlayerActions>()
             .register_type::<Condition>()
             .register_type::<ConditionalEffect>()
             .register_type::<ConditionalEffects>();

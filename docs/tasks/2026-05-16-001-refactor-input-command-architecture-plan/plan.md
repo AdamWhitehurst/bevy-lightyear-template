@@ -434,7 +434,7 @@ Preserve existing phase checks, target resolution, tick use, and effect applicat
 
 #### 5. Asset migration
 
-**File**: `assets/abilities.ron`  
+**Files**: `assets/abilities/*.ability.ron`
 **Action**: modify
 
 Replace concrete action fields:
@@ -469,9 +469,12 @@ Document semantic `OnInput` schema and note that runtime maps semantic ability i
 
 ### Verification
 
-- `cargo test -p protocol ability_systems`
-- `cargo test -p client input_commands`
-- `rg 'OnInput\([^\n]*action|action: Ability|PlayerActions' assets crates/protocol/src/ability crates/protocol/tests/ability_systems.rs` shows no stale concrete ability asset schema references.
+- [x] Before each cargo command: `pgrep -af 'cargo (build|check|test|make)'`; wait or kill existing build/check/test.
+- [x] `cargo test -p protocol ability_systems`
+- [x] `cargo test -p protocol --test ability_systems`
+- [x] `cargo test -p client input_commands`
+- [x] `cargo test -p client --test input_commands`
+- [x] `rg 'OnInput\([^\n]*action|action: Ability|\bPlayerActions\b' assets crates/protocol/src/ability crates/protocol/tests/ability_systems.rs` shows no stale concrete ability asset schema references.
 
 ---
 

@@ -317,7 +317,14 @@ pub fn apply_on_input_effects(
             continue;
         };
         for input_effect in &effects.0 {
-            if !action_state.just_pressed(&input_effect.action) {
+            let Some(action) = input_effect.input.to_networked_action() else {
+                trace!(
+                    input = ?input_effect.input,
+                    "OnInput skipped: semantic input has no network action"
+                );
+                continue;
+            };
+            if !action_state.just_pressed(&action) {
                 continue;
             }
             match &input_effect.effect {
