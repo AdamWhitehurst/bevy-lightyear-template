@@ -24,6 +24,11 @@ impl KeyboardInputOwner {
     pub fn allows_ability_commands(self) -> bool {
         matches!(self, Self::Gameplay)
     }
+
+    /// Returns whether keyboard-origin world-object commands may be emitted.
+    pub fn allows_world_object_commands(self) -> bool {
+        matches!(self, Self::Gameplay)
+    }
 }
 
 /// Client-local pointer input owner.

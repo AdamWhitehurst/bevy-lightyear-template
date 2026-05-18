@@ -1,3 +1,5 @@
+#[cfg(feature = "spawn-panel")]
+use crate::input::editor::WorldObjectCommandIntent;
 use crate::input::gestures::ClientPointerGestureState;
 use crate::input::ownership::{ClientInputOwnershipSnapshot, PointerInputOwner};
 #[cfg(feature = "spawn-panel")]
@@ -1099,12 +1101,15 @@ fn update_world_object_nearby_selection(
 fn handle_world_object_cursor_pick_input(
     mut ui_state: ResMut<SpawnPanelUi>,
     inspector_state: Option<Res<DevInspectorState>>,
-    action_query: Query<&ActionState<NetworkedPlayerActions>, With<Controlled>>,
+    mut command_reader: MessageReader<WorldObjectCommandIntent>,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     object_query: Query<(), (With<WorldObjectId>, With<Replicated>)>,
     spatial_query: SpatialQuery,
 ) {
+    let pick_requested = command_reader
+        .read()
+        .any(|intent| matches!(intent, WorldObjectCommandIntent::Pick));
     if !ui_state.selection.cursor_pick_armed {
         trace!("handle_world_object_cursor_pick_input: cursor pick is not armed");
         return;
@@ -1117,12 +1122,8 @@ fn handle_world_object_cursor_pick_input(
         trace!("handle_world_object_cursor_pick_input: spawn panel is not active");
         return;
     }
-    let Ok(action_state) = action_query.single() else {
-        trace!("handle_world_object_cursor_pick_input: no controlled action state");
-        return;
-    };
-    if !action_state.just_pressed(&NetworkedPlayerActions::PlaceVoxel) {
-        trace!("handle_world_object_cursor_pick_input: place action not pressed");
+    if !pick_requested {
+        trace!("handle_world_object_cursor_pick_input: pick intent not received");
         return;
     }
     let Some(picked) =
@@ -1138,15 +1139,15 @@ fn handle_world_object_cursor_pick_input(
 
 #[cfg(feature = "spawn-panel")]
 fn handle_world_object_delete_input(
-    keys: Res<ButtonInput<KeyCode>>,
     mut ui_state: ResMut<SpawnPanelUi>,
+    mut command_reader: MessageReader<WorldObjectCommandIntent>,
     mut message_sender: Query<&mut MessageSender<WorldObjectDeleteRequest>>,
 ) {
-    let delete_requested =
-        keys.just_pressed(KeyCode::Delete) || ui_state.selection.delete_requested;
-    ui_state.selection.delete_requested = false;
-    if !delete_requested {
-        trace!("handle_world_object_delete_input: delete was not requested");
+    if !command_reader
+        .read()
+        .any(|intent| matches!(intent, WorldObjectCommandIntent::Delete))
+    {
+        trace!("handle_world_object_delete_input: delete intent not received");
         return;
     }
     let Some(target) = ui_state.selection.selected else {
@@ -1179,7 +1180,7 @@ fn handle_world_object_delete_input(
 #[cfg(feature = "spawn-panel")]
 fn handle_world_object_move_input(
     mut ui_state: ResMut<SpawnPanelUi>,
-    action_query: Query<&ActionState<NetworkedPlayerActions>, With<Controlled>>,
+    mut command_reader: MessageReader<WorldObjectCommandIntent>,
     player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
     mut voxel_world: VoxelWorld,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
@@ -1197,12 +1198,11 @@ fn handle_world_object_move_input(
         trace!("handle_world_object_move_input: move is not armed");
         return;
     }
-    let Ok(action_state) = action_query.single() else {
-        trace!("handle_world_object_move_input: no entity with ActionState + Controlled");
-        return;
-    };
-    if !action_state.just_pressed(&NetworkedPlayerActions::PlaceVoxel) {
-        trace!("handle_world_object_move_input: place action not pressed");
+    if !command_reader
+        .read()
+        .any(|intent| matches!(intent, WorldObjectCommandIntent::Move))
+    {
+        trace!("handle_world_object_move_input: move intent not received");
         return;
     }
     let Some(target) = ui_state.selection.selected else {
@@ -1306,14 +1306,17 @@ fn world_object_move_chunk_display(
 #[cfg(feature = "spawn-panel")]
 fn handle_world_object_rotate_input(
     mut ui_state: ResMut<SpawnPanelUi>,
+    mut command_reader: MessageReader<WorldObjectCommandIntent>,
     target_query: Query<(), (With<WorldObjectId>, With<Replicated>)>,
     mut message_sender: Query<&mut MessageSender<WorldObjectRotateRequest>>,
 ) {
-    if !ui_state.selection.rotate_requested {
-        trace!("handle_world_object_rotate_input: rotate was not requested");
+    let Some(yaw_delta) = command_reader.read().find_map(|intent| match intent {
+        WorldObjectCommandIntent::Rotate { yaw_delta } => Some(*yaw_delta),
+        _ => None,
+    }) else {
+        trace!("handle_world_object_rotate_input: rotate intent not received");
         return;
-    }
-    ui_state.selection.rotate_requested = false;
+    };
     let Some(target) = ui_state.selection.selected else {
         trace!("handle_world_object_rotate_input: no selected world object");
         return;
@@ -1322,7 +1325,7 @@ fn handle_world_object_rotate_input(
         trace!("handle_world_object_rotate_input: selected object no longer exists");
         return;
     }
-    let rotation = Quat::from_rotation_y(ui_state.selection.rotation_degrees_y.to_radians());
+    let rotation = Quat::from_rotation_y(yaw_delta.to_radians());
     let sequence = ui_state.selection.next_sequence();
     let request = WorldObjectRotateRequest {
         sequence,
@@ -1352,7 +1355,7 @@ fn handle_world_object_rotate_input(
 #[cfg(feature = "spawn-panel")]
 fn handle_world_object_placement_input(
     mut ui_state: ResMut<SpawnPanelUi>,
-    action_query: Query<&ActionState<NetworkedPlayerActions>, With<Controlled>>,
+    mut command_reader: MessageReader<WorldObjectCommandIntent>,
     player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
     mut voxel_world: VoxelWorld,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
@@ -1363,12 +1366,11 @@ fn handle_world_object_placement_input(
         trace!("handle_world_object_placement_input: placement is not armed");
         return;
     }
-    let Ok(action_state) = action_query.single() else {
-        trace!("handle_world_object_placement_input: no entity with ActionState + Controlled");
-        return;
-    };
-    if !action_state.just_pressed(&NetworkedPlayerActions::PlaceVoxel) {
-        trace!("handle_world_object_placement_input: place action not pressed");
+    if !command_reader
+        .read()
+        .any(|intent| matches!(intent, WorldObjectCommandIntent::Place))
+    {
+        trace!("handle_world_object_placement_input: place intent not received");
         return;
     }
     let Some(object_id) = ui_state.selected_object.clone() else {
@@ -1721,7 +1723,9 @@ fn update_world_object_edit_preview(
             );
         }
     } else {
-        trace!("update_world_object_edit_preview: selected object has no Position for rotation preview");
+        trace!(
+            "update_world_object_edit_preview: selected object has no Position for rotation preview"
+        );
     }
 }
 
@@ -1799,7 +1803,9 @@ pub fn reconcile_edit_preview_on_transform_replication(
                 continue;
             };
             if preview.target != target {
-                trace!("reconcile_edit_preview_on_transform_replication: preview target does not match changed target");
+                trace!(
+                    "reconcile_edit_preview_on_transform_replication: preview target does not match changed target"
+                );
                 continue;
             }
             let move_matches = position.is_some_and(|position| {
@@ -1819,7 +1825,9 @@ pub fn reconcile_edit_preview_on_transform_replication(
                         .any(|pending| pending.sequence == sequence)
             });
             if !move_matches && !rotation_matches {
-                trace!("reconcile_edit_preview_on_transform_replication: preview does not match changed target");
+                trace!(
+                    "reconcile_edit_preview_on_transform_replication: preview does not match changed target"
+                );
                 continue;
             }
             commands.entity(preview_entity).despawn();

@@ -7,13 +7,15 @@ pub mod ownership;
 pub mod raw;
 pub mod schedule;
 
-use bevy::prelude::*;
+use bevy::{prelude::*, transform::TransformSystems};
 use dev::EditingMode;
 use leafwing_input_manager::prelude::InputManagerPlugin;
 use lightyear::prelude::client::input::InputSystems;
 
 use self::ability::write_filtered_ability_actions;
-use self::editor::TerrainCommandIntent;
+#[cfg(feature = "spawn-panel")]
+use self::editor::write_world_object_command_intents;
+use self::editor::{TerrainCommandIntent, WorldObjectCommandIntent};
 use self::gestures::{ClientPointerGestureState, update_pointer_ownership};
 #[cfg(feature = "spawn-panel")]
 use self::ownership::capture_egui_input_ownership;
@@ -31,6 +33,7 @@ impl Plugin for ClientInputCommandPlugin {
             .init_resource::<ClientPointerGestureState>()
             .init_resource::<EditingMode>()
             .add_message::<TerrainCommandIntent>()
+            .add_message::<WorldObjectCommandIntent>()
             .configure_sets(
                 FixedPreUpdate,
                 (
@@ -60,6 +63,19 @@ impl Plugin for ClientInputCommandPlugin {
             )
                 .chain()
                 .in_set(ClientInputSet::Capture),
+        );
+
+        #[cfg(feature = "spawn-panel")]
+        app.add_systems(
+            PostUpdate,
+            (
+                capture_egui_input_ownership,
+                capture_editing_mode_pointer_ownership,
+                update_pointer_ownership,
+                write_world_object_command_intents,
+            )
+                .chain()
+                .before(TransformSystems::Propagate),
         );
 
         #[cfg(not(feature = "spawn-panel"))]

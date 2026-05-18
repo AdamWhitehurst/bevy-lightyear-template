@@ -660,11 +660,10 @@ No existing `crates/client/tests/plugin.rs` terrain request tests were present d
 
 #### 1. World-object intents
 
-**File**: `crates/client/src/input/editor.rs`  
-**Action**: modify
+**File**: `crates/client/src/input/editor.rs` **Action**: modify
 
 ```rust
-#[derive(Event, Clone, Debug, PartialEq)]
+#[derive(Message, Clone, Debug, PartialEq)]
 pub enum WorldObjectCommandIntent {
     Place,
     Pick,
@@ -674,13 +673,13 @@ pub enum WorldObjectCommandIntent {
 }
 ```
 
-#### 2. Event registration
+#### 2. Message registration
 
 **File**: `crates/client/src/input/mod.rs`  
 **Action**: modify
 
 ```rust
-app.add_event::<WorldObjectCommandIntent>();
+app.add_message::<WorldObjectCommandIntent>();
 ```
 
 #### 3. Editing helpers
@@ -718,10 +717,9 @@ Keyboard-origin delete requires permitted keyboard ownership. Do not change requ
 
 #### 5. Spawn panel bridge
 
-**File**: `crates/dev/src/panels/spawn.rs`  
-**Action**: modify
+**File**: `crates/client/src/input/editor.rs` **Action**: modify
 
-Bridge panel buttons/flags to `WorldObjectCommandIntent` so panel delete and keyboard delete share the same local command path. UI may retain selection/arming state; execution should be intent-based.
+Bridge spawn-panel flags to `WorldObjectCommandIntent` from the client input boundary so panel delete and keyboard delete share the same local command path without introducing a `dev` -> `client` dependency. UI may retain selection/arming state; execution should be intent-based.
 
 ### Regression tests
 
@@ -738,10 +736,13 @@ Update client plugin tests to seed ownership/gesture state. Server placement/edi
 
 ### Verification
 
-- `cargo test -p client --features spawn-panel input_commands`
-- `cargo test -p client --features spawn-panel plugin`
-- `cargo test -p server world_object`
-- Manual: place/edit tools emit only world-object requests; UI-owned pointer input does not leak into world clicks.
+- [x] Before each cargo command: `pgrep -af 'cargo (build|check|test|make)'`; wait or kill existing build/check/test.
+- [x] `cargo test -p client --features spawn-panel input_commands`
+- [x] `cargo test -p client --features spawn-panel --test input_commands`
+- [x] `cargo test -p client --features spawn-panel plugin`
+- [x] `cargo test -p client --features spawn-panel --test plugin`
+- [x] `cargo test -p server world_object`
+- [ ] Manual: place/edit tools emit only world-object requests; UI-owned pointer input does not leak into world clicks.
 
 ---
 

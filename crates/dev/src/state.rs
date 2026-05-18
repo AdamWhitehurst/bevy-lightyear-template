@@ -22,6 +22,11 @@ impl EditingMode {
     pub fn wants_world_object_pointer(self) -> bool {
         matches!(self, Self::PlaceDefinition | Self::SelectEdit)
     }
+
+    /// Returns whether this mode accepts world-object command intents.
+    pub fn accepts_world_object_commands(self) -> bool {
+        matches!(self, Self::PlaceDefinition | Self::SelectEdit)
+    }
 }
 
 /// Master toggle + per-panel toggles. F4 flips `enabled`; per-panel F-keys
