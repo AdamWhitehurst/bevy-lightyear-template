@@ -5,7 +5,7 @@ use leafwing_input_manager::prelude::ActionState;
 use lightyear::prelude::input::leafwing::LeafwingBuffer;
 use lightyear::prelude::*;
 use protocol::diagnostics::plot_action_state;
-use protocol::{CharacterMarker, PlayerActions};
+use protocol::{CharacterMarker, NetworkedPlayerActions};
 use tracy_client::plot;
 
 /// Server-specific tracy diagnostics.
@@ -19,7 +19,9 @@ impl Plugin for ServerDiagnosticsPlugin {
 }
 
 /// Plots input state for server character entities (one per player).
-fn plot_server_input_state(query: Query<&ActionState<PlayerActions>, With<CharacterMarker>>) {
+fn plot_server_input_state(
+    query: Query<&ActionState<NetworkedPlayerActions>, With<CharacterMarker>>,
+) {
     for action_state in &query {
         plot_action_state(action_state);
     }
@@ -28,7 +30,13 @@ fn plot_server_input_state(query: Query<&ActionState<PlayerActions>, With<Charac
 /// Plots server tick vs input buffer tick range to diagnose tick misalignment.
 fn plot_input_buffer_status(
     timeline: Res<LocalTimeline>,
-    query: Query<(Option<&LeafwingBuffer<PlayerActions>>, &CharacterMarker), With<ControlledBy>>,
+    query: Query<
+        (
+            Option<&LeafwingBuffer<NetworkedPlayerActions>>,
+            &CharacterMarker,
+        ),
+        With<ControlledBy>,
+    >,
 ) {
     let server_tick = timeline.tick();
     for (buffer_opt, _) in &query {

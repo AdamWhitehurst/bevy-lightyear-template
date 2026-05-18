@@ -35,12 +35,13 @@ use protocol::world_object::{
 };
 #[cfg(not(feature = "spawn-panel"))]
 use protocol::VoxelEditRequest;
+use protocol::{
+    CharacterMarker, ChunkDataSync, MapInstanceId, MapRegistry, NetworkedPlayerActions,
+    SectionBlocksUpdate, UnloadColumn, VoxelChannel, VoxelEditAck, VoxelEditBroadcast,
+    VoxelEditReject, VoxelType,
+};
 #[cfg(feature = "spawn-panel")]
 use protocol::{VoxelBrushEditRequest, VoxelChange, VoxelConcreteEditRequest};
-use protocol::{
-    CharacterMarker, ChunkDataSync, MapInstanceId, MapRegistry, PlayerActions, SectionBlocksUpdate,
-    UnloadColumn, VoxelChannel, VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelType,
-};
 #[cfg(feature = "spawn-panel")]
 use voxel_map_engine::prelude::{brush_anchor, brush_footprint, TerrainBrushMode};
 use voxel_map_engine::prelude::{
@@ -610,7 +611,7 @@ fn handle_terrain_brush_input(
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     mut contexts: EguiContexts,
-    action_query: Query<&ActionState<PlayerActions>, With<Controlled>>,
+    action_query: Query<&ActionState<NetworkedPlayerActions>, With<Controlled>>,
     settings: Res<TerrainBrushSettings>,
     mut stroke_state: ResMut<TerrainBrushStrokeState>,
     mut message_sender: Query<&mut MessageSender<VoxelBrushEditRequest>>,
@@ -638,7 +639,7 @@ fn handle_terrain_brush_input(
         return;
     }
 
-    let pressed = action_state.pressed(&PlayerActions::PlaceVoxel);
+    let pressed = action_state.pressed(&NetworkedPlayerActions::PlaceVoxel);
     if !pressed {
         trace!("handle_terrain_brush_input: no terrain brush action held");
         reset_brush_stroke_state(&mut stroke_state);
@@ -822,7 +823,7 @@ fn handle_voxel_input(
     mut voxel_world: VoxelWorld,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
-    action_query: Query<&ActionState<PlayerActions>, With<Controlled>>,
+    action_query: Query<&ActionState<NetworkedPlayerActions>, With<Controlled>>,
     mut message_sender: Query<&mut MessageSender<VoxelEditRequest>>,
     mut prediction_state: ResMut<VoxelPredictionState>,
 ) {
@@ -835,8 +836,8 @@ fn handle_voxel_input(
         return;
     };
 
-    let removing = action_state.just_pressed(&PlayerActions::RemoveVoxel);
-    let placing = action_state.just_pressed(&PlayerActions::PlaceVoxel);
+    let removing = action_state.just_pressed(&NetworkedPlayerActions::RemoveVoxel);
+    let placing = action_state.just_pressed(&NetworkedPlayerActions::PlaceVoxel);
     if !removing && !placing {
         trace!("handle_voxel_input: no voxel edit action pressed");
         return;
@@ -1084,7 +1085,7 @@ fn update_world_object_nearby_selection(
 fn handle_world_object_cursor_pick_input(
     mut ui_state: ResMut<SpawnPanelUi>,
     inspector_state: Option<Res<DevInspectorState>>,
-    action_query: Query<&ActionState<PlayerActions>, With<Controlled>>,
+    action_query: Query<&ActionState<NetworkedPlayerActions>, With<Controlled>>,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     object_query: Query<(), (With<WorldObjectId>, With<Replicated>)>,
@@ -1106,7 +1107,7 @@ fn handle_world_object_cursor_pick_input(
         trace!("handle_world_object_cursor_pick_input: no controlled action state");
         return;
     };
-    if !action_state.just_pressed(&PlayerActions::PlaceVoxel) {
+    if !action_state.just_pressed(&NetworkedPlayerActions::PlaceVoxel) {
         trace!("handle_world_object_cursor_pick_input: place action not pressed");
         return;
     }
@@ -1164,7 +1165,7 @@ fn handle_world_object_delete_input(
 #[cfg(feature = "spawn-panel")]
 fn handle_world_object_move_input(
     mut ui_state: ResMut<SpawnPanelUi>,
-    action_query: Query<&ActionState<PlayerActions>, With<Controlled>>,
+    action_query: Query<&ActionState<NetworkedPlayerActions>, With<Controlled>>,
     player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
     mut voxel_world: VoxelWorld,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
@@ -1186,7 +1187,7 @@ fn handle_world_object_move_input(
         trace!("handle_world_object_move_input: no entity with ActionState + Controlled");
         return;
     };
-    if !action_state.just_pressed(&PlayerActions::PlaceVoxel) {
+    if !action_state.just_pressed(&NetworkedPlayerActions::PlaceVoxel) {
         trace!("handle_world_object_move_input: place action not pressed");
         return;
     }
@@ -1337,7 +1338,7 @@ fn handle_world_object_rotate_input(
 #[cfg(feature = "spawn-panel")]
 fn handle_world_object_placement_input(
     mut ui_state: ResMut<SpawnPanelUi>,
-    action_query: Query<&ActionState<PlayerActions>, With<Controlled>>,
+    action_query: Query<&ActionState<NetworkedPlayerActions>, With<Controlled>>,
     player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
     mut voxel_world: VoxelWorld,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
@@ -1352,7 +1353,7 @@ fn handle_world_object_placement_input(
         trace!("handle_world_object_placement_input: no entity with ActionState + Controlled");
         return;
     };
-    if !action_state.just_pressed(&PlayerActions::PlaceVoxel) {
+    if !action_state.just_pressed(&NetworkedPlayerActions::PlaceVoxel) {
         trace!("handle_world_object_placement_input: place action not pressed");
         return;
     }

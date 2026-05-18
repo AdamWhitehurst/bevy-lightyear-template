@@ -5,7 +5,7 @@ use super::types::{
     ProjectileSpawnEffect, WhileActiveEffects,
 };
 use crate::map::MapInstanceId;
-use crate::{PlayerActions, PlayerId};
+use crate::{NetworkedPlayerActions, PlayerId};
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::ActionState;
@@ -306,7 +306,7 @@ pub fn apply_on_input_effects(
     server_query: Query<&ControlledBy>,
     player_id_query: Query<&PlayerId>,
     query: Query<(Entity, &OnInputEffects, &ActiveAbility)>,
-    action_query: Query<&ActionState<PlayerActions>>,
+    action_query: Query<&ActionState<NetworkedPlayerActions>>,
 ) {
     let tick = timeline.tick();
     for (_entity, effects, active) in &query {

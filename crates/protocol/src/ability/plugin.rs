@@ -19,7 +19,7 @@ use super::types::{
     ConditionalEffects, EffectTarget, ForceFrame, InputEffect, OnEndEffects, OnHitEffectDefs,
     OnInputEffects, OnTickEffects, TickEffect, WhileActiveEffects,
 };
-use crate::PlayerActions;
+use crate::NetworkedPlayerActions;
 use bevy::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
@@ -42,7 +42,7 @@ impl Plugin for AbilityPlugin {
             .register_type::<AbilityEffect>()
             .register_type::<EffectTarget>()
             .register_type::<ForceFrame>()
-            .register_type::<PlayerActions>()
+            .register_type::<NetworkedPlayerActions>()
             .register_type::<Condition>()
             .register_type::<ConditionalEffect>()
             .register_type::<ConditionalEffects>();

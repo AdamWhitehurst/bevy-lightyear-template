@@ -5,7 +5,7 @@ use super::types::{
     ActiveAbility, Condition, OnHitEffectDefs, OnHitEffects, TickEffect,
 };
 use crate::character::IsGrounded;
-use crate::{PlayerActions, PlayerId};
+use crate::{NetworkedPlayerActions, PlayerId};
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::ActionState;
 use lightyear::prelude::LocalTimeline;
@@ -15,21 +15,21 @@ use lightyear::prelude::{
 };
 use tracy_client::Client as TracyClient;
 
-const ABILITY_ACTIONS: [PlayerActions; 5] = [
-    PlayerActions::Ability1,
-    PlayerActions::Ability2,
-    PlayerActions::Ability3,
-    PlayerActions::Ability4,
-    PlayerActions::Jump,
+const ABILITY_ACTIONS: [NetworkedPlayerActions; 5] = [
+    NetworkedPlayerActions::Ability1,
+    NetworkedPlayerActions::Ability2,
+    NetworkedPlayerActions::Ability3,
+    NetworkedPlayerActions::Ability4,
+    NetworkedPlayerActions::Jump,
 ];
 
-/// Maps a `PlayerActions` ability variant to a slot index (0-4).
-pub fn ability_action_to_slot(action: &PlayerActions) -> Option<usize> {
+/// Maps a `NetworkedPlayerActions` ability variant to a slot index (0-4).
+pub fn ability_action_to_slot(action: &NetworkedPlayerActions) -> Option<usize> {
     ABILITY_ACTIONS.iter().position(|a| a == action)
 }
 
-/// Maps a slot index (0-4) to its corresponding `PlayerActions` variant.
-pub fn slot_to_ability_action(slot: usize) -> Option<PlayerActions> {
+/// Maps a slot index (0-4) to its corresponding `NetworkedPlayerActions` variant.
+pub fn slot_to_ability_action(slot: usize) -> Option<NetworkedPlayerActions> {
     ABILITY_ACTIONS.get(slot).copied()
 }
 
@@ -42,7 +42,7 @@ pub fn ability_activation(
     timeline: Res<LocalTimeline>,
     mut query: Query<(
         Entity,
-        &ActionState<PlayerActions>,
+        &ActionState<NetworkedPlayerActions>,
         Option<&AbilitySlots>,
         &mut AbilityCooldowns,
         &PlayerId,

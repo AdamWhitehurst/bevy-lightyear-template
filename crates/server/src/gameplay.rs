@@ -114,7 +114,7 @@ fn sync_ability_manifest(defs: Option<Res<AbilityDefs>>, mut last_len: Local<usi
 fn handle_character_movement(
     time: Res<Time>,
     mut query: Query<
-        (&ActionState<PlayerActions>, &ComputedMass, Forces),
+        (&ActionState<NetworkedPlayerActions>, &ComputedMass, Forces),
         (With<CharacterMarker>, Without<RespawnTimer>),
     >,
 ) {
@@ -410,7 +410,7 @@ pub fn spawn_authenticated_character(
             PlayerId(peer_id),
             Position(spawn_pos),
             Rotation::default(),
-            ActionState::<PlayerActions>::default(),
+            ActionState::<NetworkedPlayerActions>::default(),
             Replicate::to_clients(NetworkTarget::All),
             NetworkVisibility,
             PredictionTarget::to_clients(NetworkTarget::All),

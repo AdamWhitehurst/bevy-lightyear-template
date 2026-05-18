@@ -130,6 +130,8 @@ pub enum PointerInputOwner {
 
 If ownership is first computed in an `Update` UI/dev pass, add a copied fixed-tick resource or guarantee the same resource is updated before fixed transport writers. Do not let fixed writers depend on stale ownership.
 
+Implementation note: egui text focus must be captured into this snapshot before transport writers run. Use `bevy_egui::input::EguiWantsInput` in `ClientInputSet::Capture` to set `KeyboardInputOwner::Text` while egui wants keyboard input; otherwise the default `Gameplay` owner lets `1`-`4` leak into `NetworkedPlayerActions` and Lightyear buffering while typing in text fields.
+
 #### 5. Client-only raw action vocabulary
 
 **File**: `crates/client/src/input/raw.rs`  
@@ -318,15 +320,20 @@ Add integration-style tests:
 - `ability_does_not_fire_when_ui_owns_keyboard`
 - `ability_does_not_fire_when_text_owns_keyboard`
 - `ability_input_filter_runs_before_lightyear_buffers_inputs`
+- `egui_keyboard_focus_captures_text_ownership`
+- `egui_pointer_focus_captures_ui_pointer_ownership`
 
 Protocol ability tests must continue proving slot lookup, asset lookup, cooldown refusal, duplicate active refusal, and grounded/airborne validation using `ActionState<NetworkedPlayerActions>`.
 
 ### Verification
 
-- Before each cargo command: `pgrep -af 'cargo (build|check|test|make)'`; wait or kill existing build/check/test.
-- `cargo test -p protocol ability_systems`
-- `cargo test -p client input_commands`
-- Manual: `1`-`4` activate only when gameplay owns keyboard and still travel through Lightyear input buffering.
+- [x] Before each cargo command: `pgrep -af 'cargo (build|check|test|make)'`; wait or kill existing build/check/test.
+- [x] `cargo test -p protocol ability_systems`
+- [x] `cargo test -p client input_commands`
+- [x] Manual: `1`-`4` activate only when gameplay owns keyboard and still travel through Lightyear input buffering.
+  - Initial manual test found `1`-`4` still fired while typing in egui text input because the ownership snapshot was not populated from egui focus.
+  - Fixed by capturing `EguiWantsInput` in `ClientInputSet::Capture` before ability filtering and Lightyear input buffering.
+  - User retested and confirmed `1`-`4` do not fire abilities when typing into an input.
 
 ---
 

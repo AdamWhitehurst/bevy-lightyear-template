@@ -149,7 +149,7 @@ fn test_defs() -> Vec<(String, AbilityAsset)> {
                 ],
                 vec![],
                 vec![InputEffect {
-                    action: PlayerActions::Ability1,
+                    action: NetworkedPlayerActions::Ability1,
                     effect: AbilityEffect::Ability {
                         id: "punch2".into(),
                         target: EffectTarget::Caster,
@@ -187,7 +187,7 @@ fn test_defs() -> Vec<(String, AbilityAsset)> {
                 ],
                 vec![],
                 vec![InputEffect {
-                    action: PlayerActions::Ability1,
+                    action: NetworkedPlayerActions::Ability1,
                     effect: AbilityEffect::Ability {
                         id: "punch3".into(),
                         target: EffectTarget::Caster,
@@ -346,7 +346,7 @@ fn spawn_character(world: &mut World) -> Entity {
     world
         .spawn((
             CharacterMarker,
-            ActionState::<PlayerActions>::default(),
+            ActionState::<NetworkedPlayerActions>::default(),
             punch_slots(),
             AbilityCooldowns::default(),
             PlayerId(PeerId::Entity(1)),
@@ -381,9 +381,9 @@ fn activation_on_press() {
     let char_entity = spawn_character(app.world_mut());
 
     app.world_mut()
-        .get_mut::<ActionState<PlayerActions>>(char_entity)
+        .get_mut::<ActionState<NetworkedPlayerActions>>(char_entity)
         .unwrap()
-        .press(&PlayerActions::Ability1);
+        .press(&NetworkedPlayerActions::Ability1);
 
     app.update();
 
@@ -408,9 +408,9 @@ fn activation_blocked_by_cooldown() {
         .last_used[0] = Some(Tick(90));
 
     app.world_mut()
-        .get_mut::<ActionState<PlayerActions>>(char_entity)
+        .get_mut::<ActionState<NetworkedPlayerActions>>(char_entity)
         .unwrap()
-        .press(&PlayerActions::Ability1);
+        .press(&NetworkedPlayerActions::Ability1);
 
     app.update();
 
@@ -427,9 +427,9 @@ fn activation_empty_slot() {
     let char_entity = spawn_character(app.world_mut());
 
     app.world_mut()
-        .get_mut::<ActionState<PlayerActions>>(char_entity)
+        .get_mut::<ActionState<NetworkedPlayerActions>>(char_entity)
         .unwrap()
-        .press(&PlayerActions::Ability4);
+        .press(&NetworkedPlayerActions::Ability4);
 
     app.update();
 
@@ -446,9 +446,9 @@ fn activation_sets_cooldown() {
     let char_entity = spawn_character(app.world_mut());
 
     app.world_mut()
-        .get_mut::<ActionState<PlayerActions>>(char_entity)
+        .get_mut::<ActionState<NetworkedPlayerActions>>(char_entity)
         .unwrap()
-        .press(&PlayerActions::Ability1);
+        .press(&NetworkedPlayerActions::Ability1);
 
     app.update();
 
@@ -1001,7 +1001,7 @@ fn on_input_effects_dispatched_during_active() {
         .get::<OnInputEffects>(ability_entity)
         .expect("OnInputEffects should be present during Active phase");
     assert_eq!(on_input.0.len(), 1, "punch has 1 OnInput effect");
-    assert_eq!(on_input.0[0].action, PlayerActions::Ability1);
+    assert_eq!(on_input.0[0].action, NetworkedPlayerActions::Ability1);
     assert_eq!(
         on_input.0[0].effect,
         AbilityEffect::Ability {
@@ -1855,9 +1855,9 @@ fn archetype_ability_full_lifecycle() {
     let character = spawn_character(world);
 
     world
-        .get_mut::<ActionState<PlayerActions>>(character)
+        .get_mut::<ActionState<NetworkedPlayerActions>>(character)
         .unwrap()
-        .press(&PlayerActions::Ability1);
+        .press(&NetworkedPlayerActions::Ability1);
     app.update();
 
     let (ability_entity, active) = find_active_ability(app.world_mut()).unwrap();

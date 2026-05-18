@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use client::auth::ClientAuthPlugin;
 use client::gameplay::ClientGameplayPlugin;
+use client::input::ClientInputCommandPlugin;
 use client::map::ClientMapPlugin;
 use client::transition::ClientTransitionPlugin;
 use client_web_lightyear::WebClientPlugin;
@@ -36,7 +37,7 @@ fn main() {
         })
         .add_plugins(SharedGameplayPlugin)
         .add_plugins(NostrClientPlugin::default())
-        .add_plugins(WebClientPlugin::default())
+        .add_plugins(WebClientPlugin)
         .add_plugins(ClientAuthPlugin)
         .insert_resource(UiClientConfig {
             server_addr: std::net::SocketAddr::from(([127, 0, 0, 1], 5001)),
@@ -46,6 +47,7 @@ fn main() {
             private_key: protocol::PRIVATE_KEY,
         })
         .add_plugins(ClientGameplayPlugin)
+        .add_plugins(ClientInputCommandPlugin)
         .add_plugins(ClientMapPlugin)
         .add_plugins(ClientTransitionPlugin)
         .add_plugins(RenderPlugin)

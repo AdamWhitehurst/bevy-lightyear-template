@@ -166,14 +166,16 @@ bevy run --bin web --open
 ## Ability System
 
 Abilities are defined in `assets/abilities.ron` and loaded at startup. Each character has 4 ability slots mapped to keys
-1-4.
+1-4. Ability hotkeys first populate client-local `RawClientActions`, then keyboard ownership filters them into
+Lightyear-buffered `NetworkedPlayerActions`; UI/text keyboard ownership suppresses ability activation before input
+buffering.
 
 ### Hotkeys
 
-- `1` - Ability slot 1
-- `2` - Ability slot 2
-- `3` - Ability slot 3
-- `4` - Ability slot 4
+- `1` - Ability slot 1 when gameplay owns keyboard input
+- `2` - Ability slot 2 when gameplay owns keyboard input
+- `3` - Ability slot 3 when gameplay owns keyboard input
+- `4` - Ability slot 4 when gameplay owns keyboard input
 - `F3` - Toggle physics debug wireframes
 
 ### Defining Abilities

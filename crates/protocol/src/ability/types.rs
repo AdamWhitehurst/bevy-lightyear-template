@@ -1,4 +1,4 @@
-use crate::PlayerActions;
+use crate::NetworkedPlayerActions;
 use avian3d::prelude::Rotation;
 use bevy::ecs::entity::{EntityMapper, MapEntities};
 use bevy::prelude::*;
@@ -111,7 +111,7 @@ pub enum EffectTrigger {
     OnHit(AbilityEffect),
     OnEnd(AbilityEffect),
     OnInput {
-        action: PlayerActions,
+        action: NetworkedPlayerActions,
         effect: AbilityEffect,
     },
 }
@@ -310,7 +310,7 @@ pub struct OnEndEffects(pub Vec<AbilityEffect>);
 #[derive(Clone, Debug, PartialEq, Reflect, Serialize, Deserialize)]
 #[type_path = "protocol::ability"]
 pub struct InputEffect {
-    pub action: PlayerActions,
+    pub action: NetworkedPlayerActions,
     pub effect: AbilityEffect,
 }
 

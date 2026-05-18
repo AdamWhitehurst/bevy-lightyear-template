@@ -6,6 +6,7 @@ use lightyear::prelude::{Controlled, Interpolated, Predicted, Replicated};
 use protocol::*;
 use render::CameraOrbitState;
 
+use crate::input::raw::{raw_client_input_map, RawClientActions};
 use crate::world_object::{
     init_default_vox_model_material, on_visual_kind_changed, on_world_object_replicated,
     on_world_object_transform_changed,
@@ -61,18 +62,16 @@ fn handle_new_character(
     for (entity, is_controlled) in &confirmed_query {
         if is_controlled {
             trace!("Adding InputMap to controlled and predicted entity {entity:?}");
-            commands.entity(entity).insert(
-                InputMap::new([(PlayerActions::Jump, KeyCode::Space)])
-                    .with(PlayerActions::Jump, GamepadButton::South)
-                    .with_dual_axis(PlayerActions::Move, GamepadStick::LEFT)
-                    .with_dual_axis(PlayerActions::Move, VirtualDPad::wasd())
-                    .with(PlayerActions::PlaceVoxel, MouseButton::Left)
-                    .with(PlayerActions::RemoveVoxel, MouseButton::Right)
-                    .with(PlayerActions::Ability1, KeyCode::Digit1)
-                    .with(PlayerActions::Ability2, KeyCode::Digit2)
-                    .with(PlayerActions::Ability3, KeyCode::Digit3)
-                    .with(PlayerActions::Ability4, KeyCode::Digit4),
-            );
+            commands.entity(entity).insert((
+                InputMap::new([(NetworkedPlayerActions::Jump, KeyCode::Space)])
+                    .with(NetworkedPlayerActions::Jump, GamepadButton::South)
+                    .with_dual_axis(NetworkedPlayerActions::Move, GamepadStick::LEFT)
+                    .with_dual_axis(NetworkedPlayerActions::Move, VirtualDPad::wasd())
+                    .with(NetworkedPlayerActions::PlaceVoxel, MouseButton::Left)
+                    .with(NetworkedPlayerActions::RemoveVoxel, MouseButton::Right),
+                ActionState::<RawClientActions>::default(),
+                raw_client_input_map(),
+            ));
         } else {
             trace!("Remote character predicted for us: {entity:?}");
         }
@@ -96,7 +95,7 @@ fn handle_new_character(
 fn handle_character_movement(
     time: Res<Time>,
     mut query: Query<
-        (&ActionState<PlayerActions>, &ComputedMass, Forces),
+        (&ActionState<NetworkedPlayerActions>, &ComputedMass, Forces),
         (
             With<Predicted>,
             With<CharacterMarker>,
@@ -160,13 +159,13 @@ fn set_descendants_visibility(
 /// Writes the camera's target yaw angle into the player's ActionState for replication.
 fn sync_camera_yaw_to_input(
     camera_query: Query<&CameraOrbitState>,
-    mut player_query: Query<&mut ActionState<PlayerActions>, With<Predicted>>,
+    mut player_query: Query<&mut ActionState<NetworkedPlayerActions>, With<Predicted>>,
 ) {
     let Ok(orbit) = camera_query.single() else {
         return;
     };
 
     for mut action_state in &mut player_query {
-        action_state.set_value(&PlayerActions::CameraYaw, orbit.target_angle);
+        action_state.set_value(&NetworkedPlayerActions::CameraYaw, orbit.target_angle);
     }
 }

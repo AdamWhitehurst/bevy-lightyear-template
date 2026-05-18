@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod gameplay;
+pub mod input;
 pub mod map;
 pub mod persistence;
 pub mod transition;

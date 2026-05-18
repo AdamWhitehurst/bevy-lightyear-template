@@ -1,5 +1,6 @@
 pub mod diagnostics;
 pub mod gameplay;
+pub mod input;
 pub mod map;
 pub mod transition;
 pub mod world_object;
@@ -89,6 +90,7 @@ fn main() {
         )
         .insert_resource(ui_config) // Override default UiClientConfig
         .add_plugins(ClientGameplayPlugin)
+        .add_plugins(input::ClientInputCommandPlugin)
         .add_plugins(ClientMapPlugin)
         .add_plugins(transition::ClientTransitionPlugin)
         .add_plugins(RenderPlugin)

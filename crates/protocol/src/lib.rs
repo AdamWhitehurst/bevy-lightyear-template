@@ -67,8 +67,9 @@ pub const PROTOCOL_ID: u64 = 0;
 pub const PRIVATE_KEY: [u8; 32] = [0; 32];
 pub const FIXED_TIMESTEP_HZ: f64 = 64.0;
 
+/// Lightyear/Leafwing network input vocabulary for predicted player simulation.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Copy, Hash, Reflect)]
-pub enum PlayerActions {
+pub enum NetworkedPlayerActions {
     Move,
     CameraYaw,
     Jump,
@@ -80,7 +81,7 @@ pub enum PlayerActions {
     Ability4,
 }
 
-impl Actionlike for PlayerActions {
+impl Actionlike for NetworkedPlayerActions {
     fn input_control_kind(&self) -> InputControlKind {
         match self {
             Self::Move => InputControlKind::DualAxis,
@@ -100,8 +101,8 @@ pub struct ProtocolPlugin;
 
 impl Plugin for ProtocolPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(InputPlugin::<PlayerActions> {
-            config: InputConfig::<PlayerActions> {
+        app.add_plugins(InputPlugin::<NetworkedPlayerActions> {
+            config: InputConfig::<NetworkedPlayerActions> {
                 rebroadcast_inputs: true,
                 // At 5, srv_tick_past_buffer_end occasionally hits +1,
                 // causing axis values to persist (stuck movement) and discrete

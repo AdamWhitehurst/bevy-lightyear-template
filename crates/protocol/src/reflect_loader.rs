@@ -119,7 +119,7 @@ mod tests {
         AbilityEffect, AbilityPhases, EffectTarget, ForceFrame, InputEffect, OnHitEffectDefs,
         OnInputEffects, OnTickEffects, TickEffect, WhileActiveEffects,
     };
-    use crate::PlayerActions;
+    use crate::NetworkedPlayerActions;
     use bevy::reflect::TypeRegistry;
 
     fn ability_test_registry() -> TypeRegistry {
@@ -134,7 +134,7 @@ mod tests {
         registry.register::<AbilityEffect>();
         registry.register::<EffectTarget>();
         registry.register::<ForceFrame>();
-        registry.register::<PlayerActions>();
+        registry.register::<NetworkedPlayerActions>();
         registry
     }
 

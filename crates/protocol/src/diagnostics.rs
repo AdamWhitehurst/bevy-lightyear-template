@@ -7,7 +7,7 @@ use bevy::time::Real;
 use leafwing_input_manager::prelude::ActionState;
 use tracy_client::plot;
 
-use crate::PlayerActions;
+use crate::NetworkedPlayerActions;
 
 /// Shared tracy diagnostics registered by both client and server.
 pub struct SharedDiagnosticsPlugin;
@@ -45,17 +45,19 @@ fn plot_frame_diagnostics(time: Res<Time<Real>>, mut counter: ResMut<FixedStepCo
 /// Called by client and server diagnostics plugins with appropriate entity
 /// filters — the client must filter to `With<Predicted>` to avoid reading
 /// the Confirmed entity's stale replicated ActionState.
-pub fn plot_action_state(action_state: &ActionState<PlayerActions>) {
+pub fn plot_action_state(action_state: &ActionState<NetworkedPlayerActions>) {
     plot!(
         "move_input_magnitude",
-        action_state.axis_pair(&PlayerActions::Move).length() as f64
+        action_state
+            .axis_pair(&NetworkedPlayerActions::Move)
+            .length() as f64
     );
     plot!(
         "any_ability_pressed",
-        if action_state.pressed(&PlayerActions::Ability1)
-            || action_state.pressed(&PlayerActions::Ability2)
-            || action_state.pressed(&PlayerActions::Ability3)
-            || action_state.pressed(&PlayerActions::Ability4)
+        if action_state.pressed(&NetworkedPlayerActions::Ability1)
+            || action_state.pressed(&NetworkedPlayerActions::Ability2)
+            || action_state.pressed(&NetworkedPlayerActions::Ability3)
+            || action_state.pressed(&NetworkedPlayerActions::Ability4)
         {
             1.0
         } else {

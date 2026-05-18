@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use leafwing_input_manager::prelude::ActionState;
 use lightyear::prelude::{InputTimeline, IsSynced, PredictionMetrics};
 use protocol::diagnostics::plot_action_state;
-use protocol::PlayerActions;
+use protocol::NetworkedPlayerActions;
 use tracy_client::plot;
 use voxel_map_engine::prelude::VoxelChunk;
 
@@ -28,7 +28,7 @@ struct PrevRollbackMetrics {
 }
 
 /// Plots per-tick input state for the client's character.
-fn plot_client_input_state(query: Query<&ActionState<PlayerActions>>) {
+fn plot_client_input_state(query: Query<&ActionState<NetworkedPlayerActions>>) {
     for action_state in &query {
         plot_action_state(action_state);
     }

@@ -1,6 +1,6 @@
 use super::types::{CharacterMarker, IsGrounded};
 use crate::map::MapInstanceId;
-use crate::PlayerActions;
+use crate::NetworkedPlayerActions;
 use avian3d::prelude::{forces::ForcesItem, *};
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::ActionState;
@@ -9,7 +9,7 @@ use leafwing_input_manager::prelude::ActionState;
 pub fn apply_movement(
     mass: &ComputedMass,
     delta_secs: f32,
-    action_state: &ActionState<PlayerActions>,
+    action_state: &ActionState<NetworkedPlayerActions>,
     forces: &mut ForcesItem,
 ) {
     const MAX_SPEED: f32 = 15.0;
@@ -19,9 +19,9 @@ pub fn apply_movement(
 
     // Horizontal movement (camera-relative)
     let move_dir = action_state
-        .axis_pair(&PlayerActions::Move)
+        .axis_pair(&NetworkedPlayerActions::Move)
         .clamp_length_max(1.0);
-    let yaw = action_state.value(&PlayerActions::CameraYaw);
+    let yaw = action_state.value(&NetworkedPlayerActions::CameraYaw);
     let move_dir = Quat::from_rotation_y(yaw) * Vec3::new(-move_dir.x, 0.0, move_dir.y);
 
     let linear_velocity = forces.linear_velocity();
@@ -79,14 +79,14 @@ pub fn detect_grounded(
 /// Update character facing direction based on movement input.
 /// Separate from `apply_movement` because `Forces` already accesses `Rotation`.
 pub fn update_facing(
-    mut query: Query<(&ActionState<PlayerActions>, &mut Rotation), With<CharacterMarker>>,
+    mut query: Query<(&ActionState<NetworkedPlayerActions>, &mut Rotation), With<CharacterMarker>>,
 ) {
     for (action_state, mut rotation) in &mut query {
         let move_dir = action_state
-            .axis_pair(&PlayerActions::Move)
+            .axis_pair(&NetworkedPlayerActions::Move)
             .clamp_length_max(1.0);
         if move_dir != Vec2::ZERO {
-            let yaw = action_state.value(&PlayerActions::CameraYaw);
+            let yaw = action_state.value(&NetworkedPlayerActions::CameraYaw);
             *rotation = Rotation(Quat::from_rotation_y(
                 f32::atan2(move_dir.x, -move_dir.y) + yaw,
             ));
