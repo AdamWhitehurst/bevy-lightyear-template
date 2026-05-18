@@ -434,8 +434,7 @@ Preserve existing phase checks, target resolution, tick use, and effect applicat
 
 #### 5. Asset migration
 
-**Files**: `assets/abilities/*.ability.ron`
-**Action**: modify
+**Files**: `assets/abilities/*.ability.ron` **Action**: modify
 
 Replace concrete action fields:
 
@@ -576,10 +575,10 @@ Schedule `update_pointer_ownership` before terrain/world-object command producer
 use bevy::prelude::*;
 use protocol::map::voxel::VoxelBrushEditRequest;
 
-#[derive(Event, Clone, Debug)]
+#[derive(Message, Clone, Debug, PartialEq)]
 pub enum TerrainCommandIntent {
     BrushStroke(VoxelBrushEditRequest),
-    LegacyVoxelEdit,
+    LegacyVoxelEdit(VoxelEditRequest),
 }
 ```
 
@@ -597,7 +596,7 @@ pub mod editor;
 pub mod gestures;
 
 app.init_resource::<ClientPointerGestureState>()
-    .add_event::<TerrainCommandIntent>();
+    .add_message::<TerrainCommandIntent>();
 ```
 
 #### 5. Terrain map systems
@@ -636,11 +635,16 @@ Add helpers mapping edit mode to terrain/world-object pointer ownership without 
 
 Update `crates/client/tests/plugin.rs` terrain tests to seed/latch terrain ownership before expecting terrain requests.
 
+No existing `crates/client/tests/plugin.rs` terrain request tests were present during Phase 3 implementation, so no plugin terrain test seeding was needed.
+
 ### Verification
 
-- `cargo test -p client --features spawn-panel input_commands`
-- `cargo test -p client --features spawn-panel plugin`
-- Manual: UI-started drags do not sculpt; terrain-started drags stay terrain-owned until release; terrain mode does not place/select world objects.
+- [x] Before each cargo command: `pgrep -af 'cargo (build|check|test|make)'`; wait or kill existing build/check/test.
+- [x] `cargo test -p client --features spawn-panel input_commands`
+- [x] `cargo test -p client --features spawn-panel --test input_commands`
+- [x] `cargo test -p client --features spawn-panel plugin`
+- [x] `cargo test -p client --features spawn-panel --test plugin`
+- [x] Manual: UI-started drags do not sculpt; terrain-started drags stay terrain-owned until release; terrain mode does not place/select world objects. Verified that egui UI buttons such as Homebase still activate while their pointer input does not leak into terrain/world commands.
 
 ---
 

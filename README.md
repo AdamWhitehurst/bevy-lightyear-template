@@ -140,7 +140,7 @@ target, then click terrain in-game. The same panel can select existing replicate
 and clicking in-game or by nearby list, then request authoritative delete, move, or yaw rotation edits that persist
 across chunk reloads. Free-form spawning remains client-local. The Terrain tab provides activatable brush sculpting
 controls, rectangular width/height settings, mode-applied left-click brush strokes, discrete/continuous stroke modes
-with continuous frame-rate throttling, initial-hit-face stroke locking, UI-click suppression, a voxel footprint preview,
+with continuous frame-rate throttling, initial-hit-face stroke locking, UI-click suppression, latched pointer ownership so UI-started drags do not sculpt, a voxel footprint preview,
 server-authoritative Fill Air/Remove/Paint Existing/Replace All brush strokes, and acknowledged Undo/Redo while in Terrain editing mode; material 1 renders brown and material 2 renders grey.
 
 ### Certificate Regeneration

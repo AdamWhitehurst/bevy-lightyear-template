@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 #[cfg(feature = "spawn-panel")]
 use bevy_egui::input::EguiWantsInput;
+use dev::EditingMode;
 
 /// Client-local input ownership visible to fixed-tick transport writers.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -31,6 +32,20 @@ pub enum PointerInputOwner {
     #[default]
     World,
     Ui,
+    TerrainBrush,
+    WorldObject,
+}
+
+impl PointerInputOwner {
+    /// Returns whether terrain commands may be emitted.
+    pub fn allows_terrain(self) -> bool {
+        matches!(self, Self::TerrainBrush)
+    }
+
+    /// Returns whether world-object commands may be emitted.
+    pub fn allows_world_object(self) -> bool {
+        matches!(self, Self::WorldObject)
+    }
 }
 
 /// Applies egui focus state to the client input ownership snapshot.
@@ -49,6 +64,33 @@ pub fn apply_egui_ownership_state(
     } else {
         PointerInputOwner::World
     };
+}
+
+/// Applies the active dev editing mode to non-UI pointer ownership.
+pub fn apply_editing_mode_pointer_ownership(
+    ownership: &mut ClientInputOwnershipSnapshot,
+    editing_mode: EditingMode,
+) {
+    if ownership.pointer == PointerInputOwner::Ui {
+        trace!("apply_editing_mode_pointer_ownership: preserving UI pointer ownership");
+        return;
+    }
+
+    ownership.pointer = if editing_mode.wants_terrain_pointer() {
+        PointerInputOwner::TerrainBrush
+    } else if editing_mode.wants_world_object_pointer() {
+        PointerInputOwner::WorldObject
+    } else {
+        PointerInputOwner::World
+    };
+}
+
+/// Captures active editing mode pointer ownership for fixed-tick command routing.
+pub fn capture_editing_mode_pointer_ownership(
+    editing_mode: Res<EditingMode>,
+    mut ownership: ResMut<ClientInputOwnershipSnapshot>,
+) {
+    apply_editing_mode_pointer_ownership(&mut ownership, *editing_mode);
 }
 
 /// Captures egui input ownership for fixed-tick command routing.

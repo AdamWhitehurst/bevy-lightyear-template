@@ -12,6 +12,18 @@ pub enum EditingMode {
     SelectEdit,
 }
 
+impl EditingMode {
+    /// Returns whether this mode wants terrain pointer ownership.
+    pub fn wants_terrain_pointer(self) -> bool {
+        matches!(self, Self::Terrain)
+    }
+
+    /// Returns whether this mode wants world-object pointer ownership.
+    pub fn wants_world_object_pointer(self) -> bool {
+        matches!(self, Self::PlaceDefinition | Self::SelectEdit)
+    }
+}
+
 /// Master toggle + per-panel toggles. F4 flips `enabled`; per-panel F-keys
 /// flip the matching field in `panels`.
 #[derive(Resource, Default)]

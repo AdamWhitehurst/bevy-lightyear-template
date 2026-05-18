@@ -1,10 +1,14 @@
 use bevy::input::InputPlugin;
 use bevy::prelude::*;
+use client::input::editor::TerrainCommandIntent;
+use client::input::gestures::ClientPointerGestureState;
 use client::input::ownership::{
-    apply_egui_ownership_state, ClientInputOwnershipSnapshot, KeyboardInputOwner, PointerInputOwner,
+    apply_editing_mode_pointer_ownership, apply_egui_ownership_state, ClientInputOwnershipSnapshot,
+    KeyboardInputOwner, PointerInputOwner,
 };
 use client::input::raw::{raw_client_input_map, RawClientActions};
 use client::input::ClientInputCommandPlugin;
+use dev::EditingMode;
 use leafwing_input_manager::prelude::*;
 use lightyear::prelude::client::input::InputSystems;
 use lightyear::prelude::Controlled;
@@ -62,6 +66,10 @@ fn client_input_plugin_initializes_command_resources() {
     assert!(app
         .world()
         .contains_resource::<ClientInputOwnershipSnapshot>());
+    assert!(app.world().contains_resource::<ClientPointerGestureState>());
+    assert!(app
+        .world()
+        .contains_resource::<Messages<TerrainCommandIntent>>());
 }
 
 #[test]
@@ -167,4 +175,103 @@ fn ability_input_filter_runs_before_lightyear_buffers_inputs() {
     run_fixed_pre_update(&mut app);
 
     assert!(app.world().resource::<BufferedObserved>().0);
+}
+
+fn pointer_test_app() -> App {
+    let mut app = App::new();
+    app.add_plugins((MinimalPlugins, InputPlugin));
+    app.add_plugins(ClientInputCommandPlugin);
+    app
+}
+
+fn run_pointer_frame(app: &mut App) {
+    app.world_mut().run_schedule(FixedPreUpdate);
+}
+
+#[test]
+fn pointer_press_over_ui_latches_ui_owner_until_release() {
+    let mut app = pointer_test_app();
+    app.world_mut()
+        .resource_mut::<ClientInputOwnershipSnapshot>()
+        .pointer = PointerInputOwner::Ui;
+    app.world_mut()
+        .resource_mut::<ButtonInput<MouseButton>>()
+        .press(MouseButton::Left);
+
+    run_pointer_frame(&mut app);
+
+    assert_eq!(
+        app.world().resource::<ClientPointerGestureState>().owner,
+        Some(PointerInputOwner::Ui)
+    );
+
+    app.world_mut()
+        .resource_mut::<ClientInputOwnershipSnapshot>()
+        .pointer = PointerInputOwner::TerrainBrush;
+    run_pointer_frame(&mut app);
+
+    assert_eq!(
+        app.world().resource::<ClientPointerGestureState>().owner,
+        Some(PointerInputOwner::Ui),
+        "active drags keep their initial pointer owner"
+    );
+
+    app.world_mut()
+        .resource_mut::<ButtonInput<MouseButton>>()
+        .release(MouseButton::Left);
+    run_pointer_frame(&mut app);
+
+    assert_eq!(
+        app.world().resource::<ClientPointerGestureState>().owner,
+        None
+    );
+}
+
+#[test]
+fn pointer_press_over_terrain_latches_terrain_owner_until_release() {
+    let mut app = pointer_test_app();
+    app.world_mut()
+        .resource_mut::<ClientInputOwnershipSnapshot>()
+        .pointer = PointerInputOwner::TerrainBrush;
+    app.world_mut()
+        .resource_mut::<ButtonInput<MouseButton>>()
+        .press(MouseButton::Left);
+
+    run_pointer_frame(&mut app);
+
+    assert_eq!(
+        app.world().resource::<ClientPointerGestureState>().owner,
+        Some(PointerInputOwner::TerrainBrush)
+    );
+
+    app.world_mut()
+        .resource_mut::<ButtonInput<MouseButton>>()
+        .release(MouseButton::Left);
+    run_pointer_frame(&mut app);
+
+    assert_eq!(
+        app.world().resource::<ClientPointerGestureState>().owner,
+        None
+    );
+}
+
+#[test]
+fn terrain_does_not_edit_when_ui_owns_pointer() {
+    assert!(!PointerInputOwner::Ui.allows_terrain());
+}
+
+#[test]
+fn terrain_does_not_edit_when_world_object_owns_pointer() {
+    assert!(!PointerInputOwner::WorldObject.allows_terrain());
+}
+
+#[test]
+fn terrain_mode_primary_action_emits_only_terrain_intent() {
+    let mut ownership = ClientInputOwnershipSnapshot::default();
+
+    apply_editing_mode_pointer_ownership(&mut ownership, EditingMode::Terrain);
+
+    assert_eq!(ownership.pointer, PointerInputOwner::TerrainBrush);
+    assert!(ownership.pointer.allows_terrain());
+    assert!(!ownership.pointer.allows_world_object());
 }

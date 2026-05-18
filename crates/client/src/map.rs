@@ -1,10 +1,10 @@
+use crate::input::gestures::ClientPointerGestureState;
+use crate::input::ownership::{ClientInputOwnershipSnapshot, PointerInputOwner};
 #[cfg(feature = "spawn-panel")]
 use crate::world_object::{preview_visual_from_def, DefaultVoxModelMaterial};
 #[cfg(feature = "spawn-panel")]
 use avian3d::prelude::{Position, Rotation, SpatialQuery, SpatialQueryFilter};
 use bevy::{prelude::*, window::PrimaryWindow};
-#[cfg(feature = "spawn-panel")]
-use bevy_egui::EguiContexts;
 #[cfg(feature = "spawn-panel")]
 use dev::panels::spawn::{
     NearbyWorldObject, PendingWorldObjectDelete, PendingWorldObjectMove,
@@ -53,6 +53,13 @@ const RAYCAST_MAX_DISTANCE: f32 = 100.0;
 
 fn in_editing_mode(mode: EditingMode) -> impl Fn(Res<EditingMode>) -> bool + Clone {
     move |current_mode: Res<EditingMode>| *current_mode == mode
+}
+
+fn effective_pointer_owner(
+    ownership: &ClientInputOwnershipSnapshot,
+    gesture: &ClientPointerGestureState,
+) -> PointerInputOwner {
+    gesture.effective_owner(ownership.pointer)
 }
 
 #[cfg(feature = "spawn-panel")]
@@ -610,8 +617,9 @@ fn handle_terrain_brush_input(
     mut voxel_world: VoxelWorld,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
-    mut contexts: EguiContexts,
     action_query: Query<&ActionState<NetworkedPlayerActions>, With<Controlled>>,
+    ownership: Res<ClientInputOwnershipSnapshot>,
+    gesture: Res<ClientPointerGestureState>,
     settings: Res<TerrainBrushSettings>,
     mut stroke_state: ResMut<TerrainBrushStrokeState>,
     mut message_sender: Query<&mut MessageSender<VoxelBrushEditRequest>>,
@@ -633,8 +641,12 @@ fn handle_terrain_brush_input(
         return;
     };
 
-    if egui_wants_pointer(&mut contexts) {
-        trace!("handle_terrain_brush_input: egui is using pointer input");
+    let pointer_owner = effective_pointer_owner(&ownership, &gesture);
+    if !pointer_owner.allows_terrain() {
+        trace!(
+            ?pointer_owner,
+            "handle_terrain_brush_input: terrain input suppressed by pointer ownership"
+        );
         reset_brush_stroke_state(&mut stroke_state);
         return;
     }
@@ -705,15 +717,6 @@ fn handle_terrain_brush_input(
         });
     }
     mark_brush_application(&mut stroke_state, anchor, cursor_position, plane_lock);
-}
-
-#[cfg(feature = "spawn-panel")]
-fn egui_wants_pointer(contexts: &mut EguiContexts) -> bool {
-    let Ok(ctx) = contexts.ctx_mut() else {
-        trace!("egui_wants_pointer: EguiContexts not ready");
-        return false;
-    };
-    ctx.is_pointer_over_area() || ctx.wants_pointer_input()
 }
 
 #[cfg(feature = "spawn-panel")]
@@ -824,6 +827,8 @@ fn handle_voxel_input(
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     action_query: Query<&ActionState<NetworkedPlayerActions>, With<Controlled>>,
+    ownership: Res<ClientInputOwnershipSnapshot>,
+    gesture: Res<ClientPointerGestureState>,
     mut message_sender: Query<&mut MessageSender<VoxelEditRequest>>,
     mut prediction_state: ResMut<VoxelPredictionState>,
 ) {
@@ -835,6 +840,15 @@ fn handle_voxel_input(
         trace!("handle_voxel_input: no entity with ActionState + Controlled");
         return;
     };
+
+    let pointer_owner = effective_pointer_owner(&ownership, &gesture);
+    if !pointer_owner.allows_terrain() {
+        trace!(
+            ?pointer_owner,
+            "handle_voxel_input: terrain input suppressed by pointer ownership"
+        );
+        return;
+    }
 
     let removing = action_state.just_pressed(&NetworkedPlayerActions::RemoveVoxel);
     let placing = action_state.just_pressed(&NetworkedPlayerActions::PlaceVoxel);
