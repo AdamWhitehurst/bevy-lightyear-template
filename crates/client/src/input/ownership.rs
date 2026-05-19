@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 #[cfg(feature = "spawn-panel")]
 use bevy_egui::input::EguiWantsInput;
-use dev::EditingMode;
+use dev::{DevInspectorState, EditingMode};
 
 /// Client-local input ownership visible to fixed-tick transport writers.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -29,6 +29,21 @@ impl KeyboardInputOwner {
     pub fn allows_world_object_commands(self) -> bool {
         matches!(self, Self::Gameplay)
     }
+
+    /// Returns whether locomotion commands may be emitted.
+    pub fn allows_locomotion(self) -> bool {
+        matches!(self, Self::Gameplay)
+    }
+
+    /// Returns whether jump commands may be emitted.
+    pub fn allows_jump(self) -> bool {
+        matches!(self, Self::Gameplay)
+    }
+
+    /// Returns whether keyboard-origin camera controls may be emitted.
+    pub fn allows_camera_control(self) -> bool {
+        matches!(self, Self::Gameplay)
+    }
 }
 
 /// Client-local pointer input owner.
@@ -50,6 +65,11 @@ impl PointerInputOwner {
     /// Returns whether world-object commands may be emitted.
     pub fn allows_world_object(self) -> bool {
         matches!(self, Self::WorldObject)
+    }
+
+    /// Returns whether camera control may update networked movement yaw.
+    pub fn allows_camera_control(self) -> bool {
+        matches!(self, Self::World)
     }
 }
 
@@ -93,9 +113,21 @@ pub fn apply_editing_mode_pointer_ownership(
 /// Captures active editing mode pointer ownership for fixed-tick command routing.
 pub fn capture_editing_mode_pointer_ownership(
     editing_mode: Res<EditingMode>,
+    inspector_state: Option<Res<DevInspectorState>>,
     mut ownership: ResMut<ClientInputOwnershipSnapshot>,
 ) {
-    apply_editing_mode_pointer_ownership(&mut ownership, *editing_mode);
+    let editing_panel_active = inspector_state
+        .as_deref()
+        .is_some_and(|state| state.enabled && state.panels.spawn_panel);
+    if editing_panel_active {
+        apply_editing_mode_pointer_ownership(&mut ownership, *editing_mode);
+        return;
+    }
+    if ownership.pointer == PointerInputOwner::Ui {
+        trace!("capture_editing_mode_pointer_ownership: preserving UI pointer ownership");
+        return;
+    }
+    ownership.pointer = PointerInputOwner::World;
 }
 
 /// Captures egui input ownership for fixed-tick command routing.

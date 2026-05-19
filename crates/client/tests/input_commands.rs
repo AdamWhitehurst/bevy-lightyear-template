@@ -8,21 +8,26 @@ use client::input::ownership::{
 };
 use client::input::raw::{raw_client_input_map, RawClientActions};
 use client::input::ClientInputCommandPlugin;
-use dev::{panels::spawn::SpawnPanelUi, EditingMode};
+use dev::{panels::spawn::SpawnPanelUi, DevInspectorState, EditingMode};
 use leafwing_input_manager::prelude::*;
 use lightyear::prelude::client::input::InputSystems;
 use lightyear::prelude::Controlled;
 use protocol::NetworkedPlayerActions;
+use render::CameraOrbitState;
 
 #[derive(Resource, Default)]
-struct BufferedObserved(bool);
+struct BufferedObserved {
+    ability_1: bool,
+    movement: Vec2,
+}
 
 fn observe_buffered_input(
     query: Query<&ActionState<NetworkedPlayerActions>, With<Controlled>>,
     mut observed: ResMut<BufferedObserved>,
 ) {
     let action_state = query.single().expect("controlled input entity exists");
-    observed.0 = action_state.just_pressed(&NetworkedPlayerActions::Ability1);
+    observed.ability_1 = action_state.just_pressed(&NetworkedPlayerActions::Ability1);
+    observed.movement = action_state.axis_pair(&NetworkedPlayerActions::Move);
 }
 
 fn command_test_app() -> App {
@@ -54,6 +59,36 @@ fn press_raw_ability_1(app: &mut App, entity: Entity) {
         .get_mut::<ActionState<RawClientActions>>(entity)
         .expect("raw action state exists")
         .press(&RawClientActions::Ability1);
+}
+
+fn set_raw_move(app: &mut App, entity: Entity, movement: Vec2) {
+    app.world_mut()
+        .get_mut::<ActionState<RawClientActions>>(entity)
+        .expect("raw action state exists")
+        .set_axis_pair(&RawClientActions::Move, movement);
+}
+
+fn press_raw_jump(app: &mut App, entity: Entity) {
+    app.world_mut()
+        .get_mut::<ActionState<RawClientActions>>(entity)
+        .expect("raw action state exists")
+        .press(&RawClientActions::Jump);
+}
+
+fn press_raw_camera_left(app: &mut App, entity: Entity) {
+    app.world_mut()
+        .get_mut::<ActionState<RawClientActions>>(entity)
+        .expect("raw action state exists")
+        .press(&RawClientActions::CameraRotateLeft);
+}
+
+fn spawn_camera_orbit(app: &mut App, target_angle: f32) -> Entity {
+    app.world_mut()
+        .spawn(CameraOrbitState {
+            target_angle,
+            ..default()
+        })
+        .id()
 }
 
 fn run_fixed_pre_update(app: &mut App) {
@@ -177,13 +212,210 @@ fn ability_input_filter_runs_before_lightyear_buffers_inputs() {
 
     run_fixed_pre_update(&mut app);
 
-    assert!(app.world().resource::<BufferedObserved>().0);
+    assert!(app.world().resource::<BufferedObserved>().ability_1);
+}
+
+#[test]
+fn control_input_filter_runs_before_lightyear_buffers_inputs() {
+    let mut app = command_test_app();
+    let entity = spawn_controlled_input(&mut app);
+    set_raw_move(&mut app, entity, Vec2::new(0.25, 0.75));
+
+    run_fixed_pre_update(&mut app);
+
+    assert_eq!(
+        app.world().resource::<BufferedObserved>().movement,
+        Vec2::new(0.25, 0.75)
+    );
+}
+
+#[test]
+fn raw_movement_writes_networked_move_when_keyboard_owned_by_gameplay() {
+    let mut app = command_test_app();
+    let entity = spawn_controlled_input(&mut app);
+    set_raw_move(&mut app, entity, Vec2::new(0.5, 1.0));
+
+    run_fixed_pre_update(&mut app);
+
+    let action_state = app
+        .world()
+        .get::<ActionState<NetworkedPlayerActions>>(entity)
+        .expect("networked action state exists");
+    assert_eq!(
+        action_state.axis_pair(&NetworkedPlayerActions::Move),
+        Vec2::new(0.5, 1.0).clamp_length_max(1.0)
+    );
+}
+
+#[test]
+fn raw_movement_does_not_write_networked_move_when_keyboard_owned_by_text() {
+    let mut app = command_test_app();
+    let entity = spawn_controlled_input(&mut app);
+    app.world_mut()
+        .resource_mut::<ClientInputOwnershipSnapshot>()
+        .keyboard = KeyboardInputOwner::Text;
+    set_raw_move(&mut app, entity, Vec2::new(0.5, 1.0));
+
+    run_fixed_pre_update(&mut app);
+
+    let action_state = app
+        .world()
+        .get::<ActionState<NetworkedPlayerActions>>(entity)
+        .expect("networked action state exists");
+    assert_eq!(
+        action_state.axis_pair(&NetworkedPlayerActions::Move),
+        Vec2::ZERO
+    );
+}
+
+#[test]
+fn raw_jump_writes_networked_jump_only_when_keyboard_owned_by_gameplay() {
+    let mut app = command_test_app();
+    let entity = spawn_controlled_input(&mut app);
+    press_raw_jump(&mut app, entity);
+
+    run_fixed_pre_update(&mut app);
+
+    let action_state = app
+        .world()
+        .get::<ActionState<NetworkedPlayerActions>>(entity)
+        .expect("networked action state exists");
+    assert!(action_state.pressed(&NetworkedPlayerActions::Jump));
+
+    app.world_mut()
+        .resource_mut::<ClientInputOwnershipSnapshot>()
+        .keyboard = KeyboardInputOwner::Ui;
+    run_fixed_pre_update(&mut app);
+
+    let action_state = app
+        .world()
+        .get::<ActionState<NetworkedPlayerActions>>(entity)
+        .expect("networked action state exists");
+    assert!(!action_state.pressed(&NetworkedPlayerActions::Jump));
+}
+
+#[test]
+fn camera_rotation_does_not_fire_when_text_owns_keyboard() {
+    let mut app = command_test_app();
+    let entity = spawn_controlled_input(&mut app);
+    let camera = spawn_camera_orbit(&mut app, 1.25);
+    *app.world_mut().resource_mut::<EditingMode>() = EditingMode::PlaceFreeForm;
+    app.world_mut()
+        .resource_mut::<ClientInputOwnershipSnapshot>()
+        .keyboard = KeyboardInputOwner::Text;
+    press_raw_camera_left(&mut app, entity);
+
+    run_fixed_pre_update(&mut app);
+
+    let orbit = app
+        .world()
+        .get::<CameraOrbitState>(camera)
+        .expect("camera orbit exists");
+    assert_eq!(orbit.target_angle, 1.25);
+}
+
+#[test]
+fn camera_rotation_updates_orbit_when_ownership_allows_camera_control() {
+    let mut app = command_test_app();
+    let entity = spawn_controlled_input(&mut app);
+    let camera = spawn_camera_orbit(&mut app, 1.25);
+    *app.world_mut().resource_mut::<EditingMode>() = EditingMode::PlaceFreeForm;
+    press_raw_camera_left(&mut app, entity);
+
+    run_fixed_pre_update(&mut app);
+
+    let orbit = app
+        .world()
+        .get::<CameraOrbitState>(camera)
+        .expect("camera orbit exists");
+    assert_eq!(orbit.target_angle, 1.25 + std::f32::consts::FRAC_PI_2);
+}
+
+#[test]
+fn camera_rotation_matches_wasd_and_ignores_pointer_ownership() {
+    let mut app = command_test_app();
+    let entity = spawn_controlled_input(&mut app);
+    let camera = spawn_camera_orbit(&mut app, 1.25);
+    app.world_mut()
+        .resource_mut::<ClientInputOwnershipSnapshot>()
+        .pointer = PointerInputOwner::Ui;
+    press_raw_camera_left(&mut app, entity);
+
+    run_fixed_pre_update(&mut app);
+
+    let orbit = app
+        .world()
+        .get::<CameraOrbitState>(camera)
+        .expect("camera orbit exists");
+    assert_eq!(orbit.target_angle, 1.25 + std::f32::consts::FRAC_PI_2);
+}
+
+#[test]
+fn camera_yaw_matches_wasd_and_ignores_pointer_ownership() {
+    let mut app = command_test_app();
+    let entity = spawn_controlled_input(&mut app);
+    let camera = spawn_camera_orbit(&mut app, 1.25);
+    *app.world_mut().resource_mut::<EditingMode>() = EditingMode::PlaceFreeForm;
+
+    run_fixed_pre_update(&mut app);
+
+    let action_state = app
+        .world()
+        .get::<ActionState<NetworkedPlayerActions>>(entity)
+        .expect("networked action state exists");
+    assert_eq!(action_state.value(&NetworkedPlayerActions::CameraYaw), 1.25);
+
+    app.world_mut()
+        .resource_mut::<ClientInputOwnershipSnapshot>()
+        .pointer = PointerInputOwner::Ui;
+    app.world_mut()
+        .get_mut::<CameraOrbitState>(camera)
+        .expect("camera orbit exists")
+        .target_angle = 2.5;
+    run_fixed_pre_update(&mut app);
+
+    let action_state = app
+        .world()
+        .get::<ActionState<NetworkedPlayerActions>>(entity)
+        .expect("networked action state exists");
+    assert_eq!(action_state.value(&NetworkedPlayerActions::CameraYaw), 2.5);
+}
+
+#[test]
+fn camera_yaw_does_not_sync_when_text_owns_keyboard() {
+    let mut app = command_test_app();
+    let entity = spawn_controlled_input(&mut app);
+    let camera = spawn_camera_orbit(&mut app, 1.25);
+    *app.world_mut().resource_mut::<EditingMode>() = EditingMode::PlaceFreeForm;
+
+    run_fixed_pre_update(&mut app);
+
+    app.world_mut()
+        .resource_mut::<ClientInputOwnershipSnapshot>()
+        .keyboard = KeyboardInputOwner::Text;
+    app.world_mut()
+        .get_mut::<CameraOrbitState>(camera)
+        .expect("camera orbit exists")
+        .target_angle = 2.5;
+    run_fixed_pre_update(&mut app);
+
+    let action_state = app
+        .world()
+        .get::<ActionState<NetworkedPlayerActions>>(entity)
+        .expect("networked action state exists");
+    assert_eq!(action_state.value(&NetworkedPlayerActions::CameraYaw), 1.25);
 }
 
 fn pointer_test_app() -> App {
     let mut app = App::new();
     app.add_plugins((MinimalPlugins, InputPlugin));
     app.add_plugins(ClientInputCommandPlugin);
+    app.init_resource::<DevInspectorState>();
+    {
+        let mut inspector = app.world_mut().resource_mut::<DevInspectorState>();
+        inspector.enabled = true;
+        inspector.panels.spawn_panel = true;
+    }
     app
 }
 

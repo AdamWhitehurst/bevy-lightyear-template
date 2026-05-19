@@ -1,6 +1,7 @@
 //! Client-local ownership and command routing.
 
 pub mod ability;
+pub mod control;
 pub mod editor;
 pub mod gestures;
 pub mod ownership;
@@ -13,6 +14,7 @@ use leafwing_input_manager::prelude::InputManagerPlugin;
 use lightyear::prelude::client::input::InputSystems;
 
 use self::ability::write_filtered_ability_actions;
+use self::control::write_filtered_control_actions;
 #[cfg(feature = "spawn-panel")]
 use self::editor::write_world_object_command_intents;
 use self::editor::{TerrainCommandIntent, WorldObjectCommandIntent};
@@ -46,7 +48,10 @@ impl Plugin for ClientInputCommandPlugin {
             )
             .add_systems(
                 FixedPreUpdate,
-                write_filtered_ability_actions
+                (
+                    write_filtered_ability_actions,
+                    write_filtered_control_actions,
+                )
                     .in_set(ClientInputSet::WriteTransport)
                     .before(InputSystems::BufferClientInputs),
             );

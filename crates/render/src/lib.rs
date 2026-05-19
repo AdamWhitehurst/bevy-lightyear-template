@@ -37,7 +37,6 @@ impl Plugin for RenderPlugin {
         app.add_systems(
             Update,
             (
-                camera::handle_camera_rotation_input,
                 camera::update_camera_orbit,
                 camera::follow_player,
                 camera::center_background_sphere,

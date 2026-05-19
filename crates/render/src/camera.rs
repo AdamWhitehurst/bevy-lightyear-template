@@ -169,23 +169,6 @@ pub(crate) fn setup_lighting(mut commands: Commands) {
     ));
 }
 
-/// Handles Q/E input to rotate camera orbit by 90° increments.
-pub(crate) fn handle_camera_rotation_input(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut query: Query<&mut CameraOrbitState>,
-) {
-    let Ok(mut orbit) = query.single_mut() else {
-        return;
-    };
-
-    if keys.just_pressed(KeyCode::KeyQ) {
-        orbit.target_angle += std::f32::consts::FRAC_PI_2;
-    }
-    if keys.just_pressed(KeyCode::KeyE) {
-        orbit.target_angle -= std::f32::consts::FRAC_PI_2;
-    }
-}
-
 /// Lerps camera orbit angle toward the target using frame-rate-independent exponential approach.
 pub(crate) fn update_camera_orbit(time: Res<Time>, mut query: Query<&mut CameraOrbitState>) {
     let dt = time.delta_secs();

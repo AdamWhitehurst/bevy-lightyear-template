@@ -169,7 +169,7 @@ bevy run --bin web --open
 Abilities are defined in `assets/abilities.ron` and loaded at startup. Each character has 4 ability slots mapped to keys
 1-4. Ability hotkeys first populate client-local `RawClientActions`, then keyboard ownership filters them into
 Lightyear-buffered `NetworkedPlayerActions`; UI/text keyboard ownership suppresses ability activation before input
-buffering.
+buffering. Movement, jump, Q/E camera rotation, and camera yaw follow the same keyboard ownership filter.
 
 ### Hotkeys
 

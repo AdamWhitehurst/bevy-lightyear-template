@@ -819,7 +819,7 @@ pub fn write_filtered_control_actions(
             networked_actions.release(&NetworkedPlayerActions::Jump);
         }
 
-        // Copy CameraYaw from RawClientActions only when pointer ownership permits.
+        // Copy CameraYaw from RawClientActions only when keyboard ownership permits.
     }
 }
 ```
@@ -851,9 +851,9 @@ Move direct physical bindings for ownership-sensitive actions from `InputMap<Net
 
 - `VirtualDPad::wasd()` / gamepad movement if gamepad is ownership-sensitive by policy
 - jump if keyboard/UI focus should suppress it
-- camera yaw producer path, represented through Leafwing raw actions rather than raw `ButtonInput`
+- camera yaw producer path, including render camera Q/E rotation in `crates/render/src/camera.rs`, represented through Leafwing raw actions rather than raw `ButtonInput`
 
-Keep the `InputMap<NetworkedPlayerActions>` marker only if Lightyear requires it for local input target detection. Physical bindings may remain directly on `NetworkedPlayerActions` only for actions explicitly documented as safe to bypass ownership. Future Phase 5 implementation must not introduce new production raw Bevy `ButtonInput` command reads.
+Keep the `InputMap<NetworkedPlayerActions>` marker only if Lightyear requires it for local input target detection. Physical bindings may remain directly on `NetworkedPlayerActions` only for actions explicitly documented as safe to bypass ownership. Future Phase 5 implementation must not introduce new production raw Bevy `ButtonInput` command reads. Q/E typed into egui text inputs must not rotate the camera.
 
 #### 5. Shared movement/diagnostics
 
@@ -865,7 +865,7 @@ Keep the `InputMap<NetworkedPlayerActions>` marker only if Lightyear requires it
 **File**: `README.md`  
 **Action**: modify
 
-Document that UI/text keyboard ownership suppresses movement/jump, and UI/editor pointer ownership suppresses camera yaw.
+Document that UI/text keyboard ownership suppresses movement/jump/Q/E camera rotation/camera yaw consistently, matching WASD movement semantics.
 
 ### Regression tests
 
@@ -876,6 +876,9 @@ Document that UI/text keyboard ownership suppresses movement/jump, and UI/editor
 - `wasd_does_not_update_networked_move_action_when_keyboard_owned_by_text`
 - `wasd_does_not_update_networked_move_action_when_keyboard_owned_by_ui`
 - `gamepad_movement_respects_keyboard_or_control_ownership_policy`
+- `camera_rotation_updates_orbit_when_ownership_allows_camera_control`
+- `camera_rotation_matches_wasd_and_ignores_pointer_ownership`
+- `camera_rotation_does_not_fire_when_text_owns_keyboard`
 - `camera_yaw_syncs_when_pointer_allows_camera_control`
 - `camera_yaw_does_not_change_when_pointer_owned_by_ui`
 - `camera_yaw_does_not_change_when_pointer_owned_by_editor_tool`
@@ -883,9 +886,10 @@ Document that UI/text keyboard ownership suppresses movement/jump, and UI/editor
 
 ### Verification
 
-- `cargo test -p client input_commands`
-- `cargo test -p protocol character` if available; otherwise `cargo test -p protocol`
-- Manual: WASD/gamepad/camera still work normally; typing `WASD` in UI/text does not move; editor/UI pointer ownership does not rotate camera.
+- [x] Before each cargo command: `pgrep -af 'cargo (build|check|test|make)'`; wait or kill existing build/check/test.
+- [x] `cargo test -p client --features spawn-panel --test input_commands`
+- [x] `cargo test -p protocol character`
+- [x] Manual: WASD/gamepad/camera still work normally with movement relative to camera yaw; typing `WASD` in UI/text does not move; typing `Q`/`E` in UI/text does not rotate camera. User verified.
 
 ---
 

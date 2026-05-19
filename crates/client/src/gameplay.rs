@@ -1,10 +1,8 @@
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
-use lightyear::prelude::client::input::InputSystems;
 use lightyear::prelude::{Controlled, Interpolated, Predicted, Replicated};
 use protocol::*;
-use render::CameraOrbitState;
 
 use crate::input::raw::{raw_client_input_map, RawClientActions};
 use crate::world_object::{
@@ -26,10 +24,6 @@ impl Plugin for ClientGameplayPlugin {
             (protocol::detect_grounded, handle_character_movement)
                 .chain()
                 .before(protocol::ability::ability_activation),
-        );
-        app.add_systems(
-            FixedPreUpdate,
-            sync_camera_yaw_to_input.before(InputSystems::BufferClientInputs),
         );
         app.add_systems(
             Update,
@@ -63,11 +57,7 @@ fn handle_new_character(
         if is_controlled {
             trace!("Adding InputMap to controlled and predicted entity {entity:?}");
             commands.entity(entity).insert((
-                InputMap::<NetworkedPlayerActions>::default()
-                    .with(NetworkedPlayerActions::Jump, KeyCode::Space)
-                    .with(NetworkedPlayerActions::Jump, GamepadButton::South)
-                    .with_dual_axis(NetworkedPlayerActions::Move, GamepadStick::LEFT)
-                    .with_dual_axis(NetworkedPlayerActions::Move, VirtualDPad::wasd()),
+                InputMap::<NetworkedPlayerActions>::default(),
                 ActionState::<RawClientActions>::default(),
                 raw_client_input_map(),
             ));
@@ -152,19 +142,5 @@ fn set_descendants_visibility(
     for &child in children {
         commands.entity(child).insert(visibility);
         set_descendants_visibility(commands, child, children_query, visibility);
-    }
-}
-
-/// Writes the camera's target yaw angle into the player's ActionState for replication.
-fn sync_camera_yaw_to_input(
-    camera_query: Query<&CameraOrbitState>,
-    mut player_query: Query<&mut ActionState<NetworkedPlayerActions>, With<Predicted>>,
-) {
-    let Ok(orbit) = camera_query.single() else {
-        return;
-    };
-
-    for mut action_state in &mut player_query {
-        action_state.set_value(&NetworkedPlayerActions::CameraYaw, orbit.target_angle);
     }
 }
