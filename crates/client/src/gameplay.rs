@@ -63,12 +63,11 @@ fn handle_new_character(
         if is_controlled {
             trace!("Adding InputMap to controlled and predicted entity {entity:?}");
             commands.entity(entity).insert((
-                InputMap::new([(NetworkedPlayerActions::Jump, KeyCode::Space)])
+                InputMap::<NetworkedPlayerActions>::default()
+                    .with(NetworkedPlayerActions::Jump, KeyCode::Space)
                     .with(NetworkedPlayerActions::Jump, GamepadButton::South)
                     .with_dual_axis(NetworkedPlayerActions::Move, GamepadStick::LEFT)
-                    .with_dual_axis(NetworkedPlayerActions::Move, VirtualDPad::wasd())
-                    .with(NetworkedPlayerActions::PlaceVoxel, MouseButton::Left)
-                    .with(NetworkedPlayerActions::RemoveVoxel, MouseButton::Right),
+                    .with_dual_axis(NetworkedPlayerActions::Move, VirtualDPad::wasd()),
                 ActionState::<RawClientActions>::default(),
                 raw_client_input_map(),
             ));

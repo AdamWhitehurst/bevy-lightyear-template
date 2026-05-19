@@ -6,13 +6,13 @@ use super::gestures::ClientPointerGestureState;
 #[cfg(feature = "spawn-panel")]
 use super::ownership::{ClientInputOwnershipSnapshot, PointerInputOwner};
 #[cfg(feature = "spawn-panel")]
+use super::raw::RawClientActions;
+#[cfg(feature = "spawn-panel")]
 use dev::{panels::spawn::SpawnPanelUi, EditingMode};
 #[cfg(feature = "spawn-panel")]
 use leafwing_input_manager::prelude::ActionState;
 #[cfg(feature = "spawn-panel")]
 use lightyear::prelude::Controlled;
-#[cfg(feature = "spawn-panel")]
-use protocol::NetworkedPlayerActions;
 
 /// Client-local terrain command intents produced after ownership gating.
 #[derive(Message, Clone, Debug, PartialEq)]
@@ -37,8 +37,7 @@ pub fn write_world_object_command_intents(
     ownership: Res<ClientInputOwnershipSnapshot>,
     gesture: Res<ClientPointerGestureState>,
     editing_mode: Res<EditingMode>,
-    action_query: Query<&ActionState<NetworkedPlayerActions>, With<Controlled>>,
-    keys: Res<ButtonInput<KeyCode>>,
+    action_query: Query<&ActionState<RawClientActions>, With<Controlled>>,
     ui_state: Option<ResMut<SpawnPanelUi>>,
     mut writer: MessageWriter<WorldObjectCommandIntent>,
 ) {
@@ -56,7 +55,7 @@ pub fn write_world_object_command_intents(
         &mut writer,
     );
     write_panel_world_object_intents(&mut ui_state, &mut writer);
-    write_keyboard_world_object_intents(&ownership, &keys, *editing_mode, &mut writer);
+    write_keyboard_world_object_intents(&ownership, *editing_mode, &action_query, &mut writer);
 }
 
 #[cfg(feature = "spawn-panel")]
@@ -64,7 +63,7 @@ fn write_pointer_world_object_intent(
     ownership: &ClientInputOwnershipSnapshot,
     gesture: &ClientPointerGestureState,
     editing_mode: EditingMode,
-    action_query: &Query<&ActionState<NetworkedPlayerActions>, With<Controlled>>,
+    action_query: &Query<&ActionState<RawClientActions>, With<Controlled>>,
     ui_state: &SpawnPanelUi,
     writer: &mut MessageWriter<WorldObjectCommandIntent>,
 ) {
@@ -72,7 +71,7 @@ fn write_pointer_world_object_intent(
         trace!("write_pointer_world_object_intent: no controlled action state");
         return;
     };
-    if !action_state.just_pressed(&NetworkedPlayerActions::PlaceVoxel) {
+    if !action_state.just_pressed(&RawClientActions::PlaceVoxel) {
         trace!("write_pointer_world_object_intent: primary world-object action not pressed");
         return;
     }
@@ -132,11 +131,15 @@ fn write_panel_world_object_intents(
 #[cfg(feature = "spawn-panel")]
 fn write_keyboard_world_object_intents(
     ownership: &ClientInputOwnershipSnapshot,
-    keys: &ButtonInput<KeyCode>,
     editing_mode: EditingMode,
+    action_query: &Query<&ActionState<RawClientActions>, With<Controlled>>,
     writer: &mut MessageWriter<WorldObjectCommandIntent>,
 ) {
-    if !keys.just_pressed(KeyCode::Delete) {
+    let Ok(action_state) = action_query.single() else {
+        trace!("write_keyboard_world_object_intents: no controlled raw action state");
+        return;
+    };
+    if !action_state.just_pressed(&RawClientActions::Delete) {
         trace!("write_keyboard_world_object_intents: delete key not pressed");
         return;
     }

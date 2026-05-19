@@ -1,6 +1,9 @@
 use bevy::prelude::*;
+use leafwing_input_manager::prelude::ActionState;
+use lightyear::prelude::Controlled;
 
 use super::ownership::{ClientInputOwnershipSnapshot, PointerInputOwner};
+use super::raw::RawClientActions;
 
 /// Pointer owner latched for an active press or drag.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -24,17 +27,25 @@ impl ClientPointerGestureState {
 
 /// Latches pointer ownership from press until release.
 pub fn update_pointer_ownership(
-    buttons: Res<ButtonInput<MouseButton>>,
+    action_query: Query<&ActionState<RawClientActions>, With<Controlled>>,
     snapshot: Res<ClientInputOwnershipSnapshot>,
     mut gesture: ResMut<ClientPointerGestureState>,
 ) {
+    let Ok(action_state) = action_query.single() else {
+        trace!("update_pointer_ownership: no controlled raw action state");
+        return;
+    };
+
     if gesture.owner.is_none() {
-        for button in [MouseButton::Left, MouseButton::Right, MouseButton::Middle] {
-            if buttons.just_pressed(button) {
-                gesture.owner = Some(snapshot.pointer);
-                gesture.active_button = Some(button);
-                return;
-            }
+        if action_state.just_pressed(&RawClientActions::PlaceVoxel) {
+            gesture.owner = Some(snapshot.pointer);
+            gesture.active_button = Some(MouseButton::Left);
+            return;
+        }
+        if action_state.just_pressed(&RawClientActions::RemoveVoxel) {
+            gesture.owner = Some(snapshot.pointer);
+            gesture.active_button = Some(MouseButton::Right);
+            return;
         }
     }
 
@@ -42,7 +53,18 @@ pub fn update_pointer_ownership(
         trace!("update_pointer_ownership: no active pointer gesture");
         return;
     };
-    if buttons.just_released(button) {
+    let released = match button {
+        MouseButton::Left => action_state.just_released(&RawClientActions::PlaceVoxel),
+        MouseButton::Right => action_state.just_released(&RawClientActions::RemoveVoxel),
+        other => {
+            trace!(
+                ?other,
+                "update_pointer_ownership: unsupported active pointer button"
+            );
+            false
+        }
+    };
+    if released {
         gesture.clear();
     }
 }

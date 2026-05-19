@@ -2,6 +2,7 @@
 use crate::input::editor::WorldObjectCommandIntent;
 use crate::input::gestures::ClientPointerGestureState;
 use crate::input::ownership::{ClientInputOwnershipSnapshot, PointerInputOwner};
+use crate::input::raw::RawClientActions;
 #[cfg(feature = "spawn-panel")]
 use crate::world_object::{preview_visual_from_def, DefaultVoxModelMaterial};
 #[cfg(feature = "spawn-panel")]
@@ -38,9 +39,8 @@ use protocol::world_object::{
 #[cfg(not(feature = "spawn-panel"))]
 use protocol::VoxelEditRequest;
 use protocol::{
-    CharacterMarker, ChunkDataSync, MapInstanceId, MapRegistry, NetworkedPlayerActions,
-    SectionBlocksUpdate, UnloadColumn, VoxelChannel, VoxelEditAck, VoxelEditBroadcast,
-    VoxelEditReject, VoxelType,
+    CharacterMarker, ChunkDataSync, MapInstanceId, MapRegistry, SectionBlocksUpdate, UnloadColumn,
+    VoxelChannel, VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelType,
 };
 #[cfg(feature = "spawn-panel")]
 use protocol::{VoxelBrushEditRequest, VoxelChange, VoxelConcreteEditRequest};
@@ -619,7 +619,7 @@ fn handle_terrain_brush_input(
     mut voxel_world: VoxelWorld,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
-    action_query: Query<&ActionState<NetworkedPlayerActions>, With<Controlled>>,
+    action_query: Query<&ActionState<RawClientActions>, With<Controlled>>,
     ownership: Res<ClientInputOwnershipSnapshot>,
     gesture: Res<ClientPointerGestureState>,
     settings: Res<TerrainBrushSettings>,
@@ -653,7 +653,7 @@ fn handle_terrain_brush_input(
         return;
     }
 
-    let pressed = action_state.pressed(&NetworkedPlayerActions::PlaceVoxel);
+    let pressed = action_state.pressed(&RawClientActions::PlaceVoxel);
     if !pressed {
         trace!("handle_terrain_brush_input: no terrain brush action held");
         reset_brush_stroke_state(&mut stroke_state);
@@ -828,7 +828,7 @@ fn handle_voxel_input(
     mut voxel_world: VoxelWorld,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
-    action_query: Query<&ActionState<NetworkedPlayerActions>, With<Controlled>>,
+    action_query: Query<&ActionState<RawClientActions>, With<Controlled>>,
     ownership: Res<ClientInputOwnershipSnapshot>,
     gesture: Res<ClientPointerGestureState>,
     mut message_sender: Query<&mut MessageSender<VoxelEditRequest>>,
@@ -852,8 +852,8 @@ fn handle_voxel_input(
         return;
     }
 
-    let removing = action_state.just_pressed(&NetworkedPlayerActions::RemoveVoxel);
-    let placing = action_state.just_pressed(&NetworkedPlayerActions::PlaceVoxel);
+    let removing = action_state.just_pressed(&RawClientActions::RemoveVoxel);
+    let placing = action_state.just_pressed(&RawClientActions::PlaceVoxel);
     if !removing && !placing {
         trace!("handle_voxel_input: no voxel edit action pressed");
         return;

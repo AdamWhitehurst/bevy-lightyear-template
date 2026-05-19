@@ -5,9 +5,9 @@
 Refactor input routing into two explicit paths:
 
 1. **Networked gameplay transport**: movement, camera yaw, jump, ability activation, and active ability input effects are first read through a client-local Leafwing `ActionState<RawClientActions>`, ownership-filtered, then copied into `ActionState<NetworkedPlayerActions>` before `lightyear_inputs::client::InputSystems::BufferClientInputs` in `FixedPreUpdate`. Predicted clients and the server continue to simulate from the same buffered Lightyear/Leafwing network input.
-2. **Client-local command ownership**: terrain gestures, world-object tools, and dev/editor hotkeys are gated by ownership locally, then translated into the existing authoritative request messages or UI state changes.
+2. **Client-local command ownership**: terrain gestures, world-object tools, and dev/editor hotkeys are read through client-local Leafwing `ActionState<RawClientActions>`, gated by ownership locally, then translated into the existing authoritative request messages or UI state changes.
 
-`PlayerActions` is renamed to `NetworkedPlayerActions` to make its transport role explicit. Prefer keeping physical bindings in a separate client-only `RawClientActions` Leafwing input map, then translating permitted actions into the Lightyear-buffered `NetworkedPlayerActions`. Do not bind ownership-sensitive physical inputs directly to `InputMap<NetworkedPlayerActions>` except as a temporary migration fallback.
+`PlayerActions` is renamed to `NetworkedPlayerActions` to make its transport role explicit. Keep ownership-sensitive physical bindings in a separate client-only `RawClientActions` Leafwing input map, then translate permitted actions into the Lightyear-buffered `NetworkedPlayerActions` or local command intents. Do not add new production `ButtonInput::just_pressed` command paths, and do not bind ownership-sensitive physical inputs directly to `InputMap<NetworkedPlayerActions>` except as a temporary migration fallback being removed in the same phase.
 
 ## Phase 1: Ownership Snapshot Filters Networked Ability Slots
 
@@ -742,7 +742,8 @@ Update client plugin tests to seed ownership/gesture state. Server placement/edi
 - [x] `cargo test -p client --features spawn-panel plugin`
 - [x] `cargo test -p client --features spawn-panel --test plugin`
 - [x] `cargo test -p server world_object`
-- [ ] Manual: place/edit tools emit only world-object requests; UI-owned pointer input does not leak into world clicks.
+- [x] Manual: place/edit tools emit only world-object requests; UI-owned pointer input does not leak into world clicks.
+  - After migrating terrain/world-object pointer and Delete inputs to Leafwing `ActionState<RawClientActions>`, the user validated the phase with fixed-only `ClientInputCommandPlugin` scheduling.
 
 ---
 
@@ -850,10 +851,9 @@ Move direct physical bindings for ownership-sensitive actions from `InputMap<Net
 
 - `VirtualDPad::wasd()` / gamepad movement if gamepad is ownership-sensitive by policy
 - jump if keyboard/UI focus should suppress it
-- camera yaw producer path, if represented as Leafwing input
-- voxel edit bindings once editor phases route them locally
+- camera yaw producer path, represented through Leafwing raw actions rather than raw `ButtonInput`
 
-Keep the `InputMap<NetworkedPlayerActions>` marker only if Lightyear requires it for local input target detection. Physical bindings may remain directly on `NetworkedPlayerActions` only for actions explicitly documented as safe to bypass ownership.
+Keep the `InputMap<NetworkedPlayerActions>` marker only if Lightyear requires it for local input target detection. Physical bindings may remain directly on `NetworkedPlayerActions` only for actions explicitly documented as safe to bypass ownership. Future Phase 5 implementation must not introduce new production raw Bevy `ButtonInput` command reads.
 
 #### 5. Shared movement/diagnostics
 
@@ -908,7 +908,7 @@ Final ordering:
 
 - `ClientInputSet::Capture`: ownership snapshot availability and pointer gesture latch.
 - `ClientInputSet::WriteTransport`: ability/control/jump translators copy ownership-filtered `ActionState<RawClientActions>` into `ActionState<NetworkedPlayerActions>` before `InputSystems::BufferClientInputs`.
-- `ClientInputSet::ProduceLocalCommands`: terrain/world-object/dev local command intents.
+- `ClientInputSet::ProduceLocalCommands`: terrain/world-object/dev local command intents produced from Leafwing `ActionState<RawClientActions>`, not raw Bevy `ButtonInput`.
 - `ClientInputSet::Consume`: map/dev consumers send existing request messages or mutate UI state.
 
 #### 2. Dev hotkeys
@@ -933,7 +933,7 @@ impl KeyboardInputOwner {
 **Files**: `crates/client/src/gameplay.rs`, `crates/client/src/map.rs`, `crates/dev/src/panels/spawn.rs`, `crates/dev/src/panels/world_inspector.rs`  
 **Action**: modify
 
-Remove remaining raw gameplay/editor command polling outside `crates/client/src/input/` producers, except documented low-level exceptions. Every expected early-out must use `trace!`.
+Remove remaining raw gameplay/editor command polling, including inside `crates/client/src/input/` producers; production command producers should read Leafwing `ActionState<RawClientActions>` or filtered `ActionState<NetworkedPlayerActions>`, except documented low-level exceptions. Every expected early-out must use `trace!`.
 
 #### 4. Diagnostics and README
 

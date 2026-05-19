@@ -1,17 +1,17 @@
 use bevy::input::InputPlugin;
 use bevy::prelude::*;
-use client::input::ClientInputCommandPlugin;
 use client::input::editor::{TerrainCommandIntent, WorldObjectCommandIntent};
 use client::input::gestures::ClientPointerGestureState;
 use client::input::ownership::{
-    ClientInputOwnershipSnapshot, KeyboardInputOwner, PointerInputOwner,
-    apply_editing_mode_pointer_ownership, apply_egui_ownership_state,
+    apply_editing_mode_pointer_ownership, apply_egui_ownership_state, ClientInputOwnershipSnapshot,
+    KeyboardInputOwner, PointerInputOwner,
 };
-use client::input::raw::{RawClientActions, raw_client_input_map};
-use dev::{EditingMode, panels::spawn::SpawnPanelUi};
+use client::input::raw::{raw_client_input_map, RawClientActions};
+use client::input::ClientInputCommandPlugin;
+use dev::{panels::spawn::SpawnPanelUi, EditingMode};
 use leafwing_input_manager::prelude::*;
-use lightyear::prelude::Controlled;
 use lightyear::prelude::client::input::InputSystems;
+use lightyear::prelude::Controlled;
 use protocol::NetworkedPlayerActions;
 
 #[derive(Resource, Default)]
@@ -63,19 +63,16 @@ fn run_fixed_pre_update(app: &mut App) {
 #[test]
 fn client_input_plugin_initializes_command_resources() {
     let app = command_test_app();
-    assert!(
-        app.world()
-            .contains_resource::<ClientInputOwnershipSnapshot>()
-    );
+    assert!(app
+        .world()
+        .contains_resource::<ClientInputOwnershipSnapshot>());
     assert!(app.world().contains_resource::<ClientPointerGestureState>());
-    assert!(
-        app.world()
-            .contains_resource::<Messages<TerrainCommandIntent>>()
-    );
-    assert!(
-        app.world()
-            .contains_resource::<Messages<WorldObjectCommandIntent>>()
-    );
+    assert!(app
+        .world()
+        .contains_resource::<Messages<TerrainCommandIntent>>());
+    assert!(app
+        .world()
+        .contains_resource::<Messages<WorldObjectCommandIntent>>());
 }
 
 #[test]
@@ -194,11 +191,25 @@ fn run_pointer_frame(app: &mut App) {
     app.world_mut().run_schedule(FixedPreUpdate);
 }
 
-fn press_networked_place(app: &mut App, entity: Entity) {
+fn press_raw_place(app: &mut App, entity: Entity) {
     app.world_mut()
-        .get_mut::<ActionState<NetworkedPlayerActions>>(entity)
-        .expect("networked action state exists")
-        .press(&NetworkedPlayerActions::PlaceVoxel);
+        .get_mut::<ActionState<RawClientActions>>(entity)
+        .expect("raw action state exists")
+        .press(&RawClientActions::PlaceVoxel);
+}
+
+fn release_raw_place(app: &mut App, entity: Entity) {
+    app.world_mut()
+        .get_mut::<ActionState<RawClientActions>>(entity)
+        .expect("raw action state exists")
+        .release(&RawClientActions::PlaceVoxel);
+}
+
+fn press_raw_delete(app: &mut App, entity: Entity) {
+    app.world_mut()
+        .get_mut::<ActionState<RawClientActions>>(entity)
+        .expect("raw action state exists")
+        .press(&RawClientActions::Delete);
 }
 
 fn current_world_object_intents(app: &App) -> Vec<WorldObjectCommandIntent> {
@@ -210,18 +221,17 @@ fn current_world_object_intents(app: &App) -> Vec<WorldObjectCommandIntent> {
 }
 
 fn run_world_object_command_frame(app: &mut App) {
-    app.world_mut().run_schedule(PostUpdate);
+    app.world_mut().run_schedule(FixedPreUpdate);
 }
 
 #[test]
 fn pointer_press_over_ui_latches_ui_owner_until_release() {
     let mut app = pointer_test_app();
+    let entity = spawn_controlled_input(&mut app);
     app.world_mut()
         .resource_mut::<ClientInputOwnershipSnapshot>()
         .pointer = PointerInputOwner::Ui;
-    app.world_mut()
-        .resource_mut::<ButtonInput<MouseButton>>()
-        .press(MouseButton::Left);
+    press_raw_place(&mut app, entity);
 
     run_pointer_frame(&mut app);
 
@@ -241,9 +251,7 @@ fn pointer_press_over_ui_latches_ui_owner_until_release() {
         "active drags keep their initial pointer owner"
     );
 
-    app.world_mut()
-        .resource_mut::<ButtonInput<MouseButton>>()
-        .release(MouseButton::Left);
+    release_raw_place(&mut app, entity);
     run_pointer_frame(&mut app);
 
     assert_eq!(
@@ -255,12 +263,11 @@ fn pointer_press_over_ui_latches_ui_owner_until_release() {
 #[test]
 fn pointer_press_over_terrain_latches_terrain_owner_until_release() {
     let mut app = pointer_test_app();
+    let entity = spawn_controlled_input(&mut app);
     app.world_mut()
         .resource_mut::<ClientInputOwnershipSnapshot>()
         .pointer = PointerInputOwner::TerrainBrush;
-    app.world_mut()
-        .resource_mut::<ButtonInput<MouseButton>>()
-        .press(MouseButton::Left);
+    press_raw_place(&mut app, entity);
 
     run_pointer_frame(&mut app);
 
@@ -269,9 +276,7 @@ fn pointer_press_over_terrain_latches_terrain_owner_until_release() {
         Some(PointerInputOwner::TerrainBrush)
     );
 
-    app.world_mut()
-        .resource_mut::<ButtonInput<MouseButton>>()
-        .release(MouseButton::Left);
+    release_raw_place(&mut app, entity);
     run_pointer_frame(&mut app);
 
     assert_eq!(
@@ -311,7 +316,7 @@ fn place_definition_mode_primary_action_emits_only_world_object_place_intent() {
         .placement
         .armed = true;
     let entity = spawn_controlled_input(&mut app);
-    press_networked_place(&mut app, entity);
+    press_raw_place(&mut app, entity);
 
     run_world_object_command_frame(&mut app);
 
@@ -336,7 +341,7 @@ fn world_object_place_does_not_fire_when_ui_owns_pointer() {
         .resource_mut::<ClientPointerGestureState>()
         .owner = Some(PointerInputOwner::Ui);
     let entity = spawn_controlled_input(&mut app);
-    press_networked_place(&mut app, entity);
+    press_raw_place(&mut app, entity);
 
     run_world_object_command_frame(&mut app);
 
@@ -356,7 +361,7 @@ fn world_object_place_does_not_fire_when_terrain_owns_pointer() {
         .resource_mut::<ClientPointerGestureState>()
         .owner = Some(PointerInputOwner::TerrainBrush);
     let entity = spawn_controlled_input(&mut app);
-    press_networked_place(&mut app, entity);
+    press_raw_place(&mut app, entity);
 
     run_world_object_command_frame(&mut app);
 
@@ -373,7 +378,7 @@ fn select_edit_mode_primary_action_emits_pick_or_edit_intent_only() {
         .selection
         .cursor_pick_armed = true;
     let entity = spawn_controlled_input(&mut app);
-    press_networked_place(&mut app, entity);
+    press_raw_place(&mut app, entity);
 
     run_world_object_command_frame(&mut app);
 
@@ -392,9 +397,8 @@ fn world_object_keyboard_delete_does_not_fire_when_ui_or_text_owns_keyboard() {
         app.world_mut()
             .resource_mut::<ClientInputOwnershipSnapshot>()
             .keyboard = owner;
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::Delete);
+        let entity = spawn_controlled_input(&mut app);
+        press_raw_delete(&mut app, entity);
 
         run_world_object_command_frame(&mut app);
 
@@ -423,10 +427,8 @@ fn panel_delete_and_keyboard_delete_share_delete_intent() {
     let mut keyboard_app = pointer_test_app();
     keyboard_app.init_resource::<SpawnPanelUi>();
     *keyboard_app.world_mut().resource_mut::<EditingMode>() = EditingMode::SelectEdit;
-    keyboard_app
-        .world_mut()
-        .resource_mut::<ButtonInput<KeyCode>>()
-        .press(KeyCode::Delete);
+    let entity = spawn_controlled_input(&mut keyboard_app);
+    press_raw_delete(&mut keyboard_app, entity);
 
     run_world_object_command_frame(&mut keyboard_app);
 

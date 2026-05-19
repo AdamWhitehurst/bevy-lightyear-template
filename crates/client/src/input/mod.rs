@@ -7,7 +7,7 @@ pub mod ownership;
 pub mod raw;
 pub mod schedule;
 
-use bevy::{prelude::*, transform::TransformSystems};
+use bevy::prelude::*;
 use dev::EditingMode;
 use leafwing_input_manager::prelude::InputManagerPlugin;
 use lightyear::prelude::client::input::InputSystems;
@@ -16,10 +16,10 @@ use self::ability::write_filtered_ability_actions;
 #[cfg(feature = "spawn-panel")]
 use self::editor::write_world_object_command_intents;
 use self::editor::{TerrainCommandIntent, WorldObjectCommandIntent};
-use self::gestures::{ClientPointerGestureState, update_pointer_ownership};
+use self::gestures::{update_pointer_ownership, ClientPointerGestureState};
 #[cfg(feature = "spawn-panel")]
 use self::ownership::capture_egui_input_ownership;
-use self::ownership::{ClientInputOwnershipSnapshot, capture_editing_mode_pointer_ownership};
+use self::ownership::{capture_editing_mode_pointer_ownership, ClientInputOwnershipSnapshot};
 use self::raw::RawClientActions;
 use self::schedule::ClientInputSet;
 
@@ -46,12 +46,9 @@ impl Plugin for ClientInputCommandPlugin {
             )
             .add_systems(
                 FixedPreUpdate,
-                (
-                    update_pointer_ownership.in_set(ClientInputSet::ProduceLocalCommands),
-                    write_filtered_ability_actions
-                        .in_set(ClientInputSet::WriteTransport)
-                        .before(InputSystems::BufferClientInputs),
-                ),
+                write_filtered_ability_actions
+                    .in_set(ClientInputSet::WriteTransport)
+                    .before(InputSystems::BufferClientInputs),
             );
 
         #[cfg(feature = "spawn-panel")]
@@ -67,21 +64,19 @@ impl Plugin for ClientInputCommandPlugin {
 
         #[cfg(feature = "spawn-panel")]
         app.add_systems(
-            PostUpdate,
-            (
-                capture_egui_input_ownership,
-                capture_editing_mode_pointer_ownership,
-                update_pointer_ownership,
-                write_world_object_command_intents,
-            )
+            FixedPreUpdate,
+            (update_pointer_ownership, write_world_object_command_intents)
                 .chain()
-                .before(TransformSystems::Propagate),
+                .in_set(ClientInputSet::ProduceLocalCommands),
         );
 
         #[cfg(not(feature = "spawn-panel"))]
         app.add_systems(
             FixedPreUpdate,
-            capture_editing_mode_pointer_ownership.in_set(ClientInputSet::Capture),
+            (
+                capture_editing_mode_pointer_ownership.in_set(ClientInputSet::Capture),
+                update_pointer_ownership.in_set(ClientInputSet::ProduceLocalCommands),
+            ),
         );
     }
 }
