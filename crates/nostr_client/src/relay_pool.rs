@@ -1,10 +1,13 @@
 use async_channel::Receiver;
 use bevy::prelude::*;
 use bevy::tasks::IoTaskPool;
-use nostr_sdk::{Client, Filter, RelayMessage, RelayPoolNotification};
+use nostr_sdk::{Client, Filter, Kind, RelayMessage, RelayPoolNotification};
 use protocol::RelayPoolReady;
 
-use crate::plugin::NostrClientConfig;
+use crate::{
+    announcement::{NOSTR_KIND_SERVER_ANNOUNCEMENT, SERVER_ANNOUNCEMENT_IDENTIFIER},
+    plugin::NostrClientConfig,
+};
 
 #[derive(Resource, Clone)]
 pub struct RelayPool {
@@ -43,7 +46,10 @@ pub fn spawn_relay_pool(mut commands: Commands, config: Res<NostrClientConfig>) 
             let mut notifications = client.notifications();
             client.connect().await;
 
-            let filter = Filter::new().limit(1);
+            let filter = Filter::new()
+                .kind(Kind::Custom(NOSTR_KIND_SERVER_ANNOUNCEMENT))
+                .identifier(SERVER_ANNOUNCEMENT_IDENTIFIER)
+                .limit(1);
             let subscription = match client.subscribe(filter, None).await {
                 Ok(subscription) => subscription,
                 Err(error) => {

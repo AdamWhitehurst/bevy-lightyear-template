@@ -17,7 +17,8 @@ pub const SERVER_ANNOUNCEMENT_TTL_SECS: u64 = 10;
 #[cfg(not(debug_assertions))]
 pub const SERVER_ANNOUNCEMENT_TTL_SECS: u64 = 60;
 pub const SERVER_ANNOUNCEMENT_REPUBLISH_SECS: u64 = SERVER_ANNOUNCEMENT_TTL_SECS / 2;
-const SERVER_ANNOUNCEMENT_IDENTIFIER: &str = "server";
+pub(crate) const SERVER_ANNOUNCEMENT_IDENTIFIER: &str = "untitled-brawler";
+const SERVER_ANNOUNCEMENT_EXPIRED: &str = "server announcement expired";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ServerAnnouncement {
@@ -73,7 +74,7 @@ pub fn server_announcement_builder(
     let content = serde_json::to_string(announcement)?;
     let expiration = Timestamp::now() + Duration::from_secs(SERVER_ANNOUNCEMENT_TTL_SECS);
     Ok(
-        EventBuilder::new(Kind::Custom(NOSTR_KIND_SERVER_ANNOUNCEMENT.into()), content)
+        EventBuilder::new(Kind::Custom(NOSTR_KIND_SERVER_ANNOUNCEMENT), content)
             .tag(Tag::identifier(SERVER_ANNOUNCEMENT_IDENTIFIER))
             .tag(Tag::expiration(expiration)),
     )
@@ -103,16 +104,23 @@ pub async fn publish_server_announcement(
 
 fn server_announcement_filter() -> Filter {
     Filter::new()
-        .kind(Kind::Custom(NOSTR_KIND_SERVER_ANNOUNCEMENT.into()))
+        .kind(Kind::Custom(NOSTR_KIND_SERVER_ANNOUNCEMENT))
         .identifier(SERVER_ANNOUNCEMENT_IDENTIFIER)
 }
 
 pub fn parse_server_announcement_event(event: &Event) -> Result<ServerListEntry, String> {
-    if event.kind != Kind::Custom(NOSTR_KIND_SERVER_ANNOUNCEMENT.into()) {
+    if event.kind != Kind::Custom(NOSTR_KIND_SERVER_ANNOUNCEMENT) {
         return Err(format!("unexpected announcement kind {}", event.kind));
     }
     if event.tags.identifier() != Some(SERVER_ANNOUNCEMENT_IDENTIFIER) {
         return Err("server announcement identifier tag mismatch".to_string());
+    }
+    if event
+        .tags
+        .expiration()
+        .is_some_and(|expiration| *expiration <= Timestamp::now())
+    {
+        return Err(SERVER_ANNOUNCEMENT_EXPIRED.to_string());
     }
 
     let announcement: ServerAnnouncement = serde_json::from_str(&event.content)
@@ -211,6 +219,9 @@ pub fn spawn_server_announcement_subscription(
                         match parse_server_announcement_event(event.as_ref()) {
                             Ok(entry) => {
                                 let _ = tx.send(entry).await;
+                            }
+                            Err(error) if error == SERVER_ANNOUNCEMENT_EXPIRED => {
+                                trace!("ignored expired server announcement event")
                             }
                             Err(error) => {
                                 trace!(%error, "ignored non-matching server announcement event")
@@ -354,6 +365,23 @@ mod tests {
         let error = parse_server_announcement_event(&event).unwrap_err();
 
         assert!(error.contains("unsupported announcement version"));
+    }
+
+    #[test]
+    fn parse_server_announcement_event_rejects_expired_events() {
+        let keys = Keys::new(SecretKey::generate());
+        let content = serde_json::to_string(&announcement()).unwrap();
+        let event = EventBuilder::new(Kind::Custom(NOSTR_KIND_SERVER_ANNOUNCEMENT), content)
+            .tag(Tag::identifier(SERVER_ANNOUNCEMENT_IDENTIFIER))
+            .tag(Tag::expiration(
+                Timestamp::now() - Duration::from_secs(SERVER_ANNOUNCEMENT_TTL_SECS + 1),
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        let error = parse_server_announcement_event(&event).unwrap_err();
+
+        assert!(error.contains("server announcement expired"));
     }
 
     #[test]

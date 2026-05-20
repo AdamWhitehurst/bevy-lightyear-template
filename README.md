@@ -24,8 +24,7 @@ This installs dependencies and generates certificates.
 
 ### 2. Configure Nostr identities
 
-Nostr `nsec1...` values are plaintext private keys. Do not commit them, paste them into logs, or share them. The server
-and client use them differently:
+Nostr `nsec1...` values are plaintext private keys. Do not commit them, paste them into logs, or share them. The server and client use them differently:
 
 #### Server identity
 
@@ -34,8 +33,7 @@ The server signs its relay announcement with a durable Nostr key. Provide it wit
 - `SERVER_NSEC`, which takes precedence, or
 - `keys/server.nsec`, used as the local development fallback.
 
-Both sources may contain either a raw `nsec1...` secret or an encrypted NIP-49 `ncryptsec1...` value. If you use
-`ncryptsec1...`, also set `SERVER_NSEC_PASSPHRASE`.
+Both sources may contain either a raw `nsec1...` secret or an encrypted NIP-49 `ncryptsec1...` value. If you use `ncryptsec1...`, also set `SERVER_NSEC_PASSPHRASE`.
 
 ```bash
 # One-shot env var
@@ -55,17 +53,14 @@ SERVER_NSEC='ncryptsec1...' SERVER_NSEC_PASSPHRASE='...' cargo server
 
 The native client starts on the Nostr Login screen:
 
-- **Generate** creates a new Nostr key, encrypts it with the passphrase you enter, and stores only encrypted identity
-  data in `worlds/identity.bin`.
-- **Import** accepts an existing `nsec1...`, encrypts it with the passphrase you enter, and stores only encrypted
-  identity data in `worlds/identity.bin`.
+- **Generate** creates a new Nostr key, encrypts it with the passphrase you enter, and stores only encrypted identity data in `worlds/identity.bin`.
+- **Import** accepts an existing `nsec1...`, encrypts it with the passphrase you enter, and stores only encrypted identity data in `worlds/identity.bin`.
 - On later launches, enter the same passphrase on **Unlock** to reuse the same public key and durable identity.
 - To reset the native client identity, stop the client and delete `worlds/identity.bin`.
 
 The web client can Generate or Import for the current browser session, but it does not write `worlds/identity.bin`.
 
-Relay discovery uses the default public relay list unless `NOSTR_RELAYS` is set to a comma-separated list of `wss://...`
-relay URLs:
+Relay discovery uses custom Nostr kind `30078` with identifier tag `#d=untitled-brawler`; clients ignore expired announcements. Discovery uses the default public relay list unless `NOSTR_RELAYS` is set to a comma-separated list of `wss://...` relay URLs:
 
 ```bash
 NOSTR_RELAYS='wss://relay.damus.io,wss://nos.lol' cargo client
@@ -134,16 +129,7 @@ bevy-lightyear-template/
 
 ### Dev Inspector
 
-Press `F4` to toggle the dev inspector root menu. With the spawn panel enabled, press `F6` or use the root menu to open
-it. Dev hotkeys route through client-local `RawClientActions` and are suppressed while UI/text owns keyboard input.
-Def-driven world-object placement is server-authoritative: select an object, arm placement, preview the terrain
-target, then click terrain in-game. The same panel can select existing replicated world objects by arming cursor pick
-and clicking in-game or by nearby list, then request authoritative delete, move, or yaw rotation edits that persist
-across chunk reloads. Free-form spawning remains client-local. World-object and terrain pointer commands use
-client-local Leafwing `RawClientActions` before ownership gating. The Terrain tab provides activatable brush sculpting
-controls, rectangular width/height settings, mode-applied left-click brush strokes, discrete/continuous stroke modes
-with continuous frame-rate throttling, initial-hit-face stroke locking, UI-click suppression, latched pointer ownership so UI-started drags do not sculpt, a voxel footprint preview,
-server-authoritative Fill Air/Remove/Paint Existing/Replace All brush strokes, and acknowledged Undo/Redo while in Terrain editing mode; material 1 renders brown and material 2 renders grey.
+Press `F4` to toggle the dev inspector root menu. With the spawn panel enabled, press `F6` or use the root menu to open it. Dev hotkeys route through client-local `RawClientActions` and are suppressed while UI/text owns keyboard input. Def-driven world-object placement is server-authoritative: select an object, arm placement, preview the terrain target, then click terrain in-game. The same panel can select existing replicated world objects by arming cursor pick and clicking in-game or by nearby list, then request authoritative delete, move, or yaw rotation edits that persist across chunk reloads. Free-form spawning remains client-local. World-object and terrain pointer commands use client-local Leafwing `RawClientActions` before ownership gating. The Terrain tab provides activatable brush sculpting controls, rectangular width/height settings, mode-applied left-click brush strokes, discrete/continuous stroke modes with continuous frame-rate throttling, initial-hit-face stroke locking, UI-click suppression, latched pointer ownership so UI-started drags do not sculpt, a voxel footprint preview, server-authoritative Fill Air/Remove/Paint Existing/Replace All brush strokes, and acknowledged Undo/Redo while in Terrain editing mode; material 1 renders brown and material 2 renders grey.
 
 ### Certificate Regeneration
 
@@ -167,10 +153,7 @@ bevy run --bin web --open
 
 ## Ability System
 
-Abilities are defined in `assets/abilities.ron` and loaded at startup. Each character has 4 ability slots mapped to keys
-1-4. Ability hotkeys first populate client-local `RawClientActions`, then keyboard ownership filters them into
-Lightyear-buffered `NetworkedPlayerActions`; UI/text keyboard ownership suppresses ability activation before input
-buffering. Movement, jump, Q/E camera rotation, and camera yaw follow the same keyboard ownership filter.
+Abilities are defined in `assets/abilities.ron` and loaded at startup. Each character has 4 ability slots mapped to keys 1-4. Ability hotkeys first populate client-local `RawClientActions`, then keyboard ownership filters them into Lightyear-buffered `NetworkedPlayerActions`; UI/text keyboard ownership suppresses ability activation before input buffering. Movement, jump, Q/E camera rotation, and camera yaw follow the same keyboard ownership filter.
 
 ### Hotkeys
 
@@ -189,9 +172,5 @@ Edit `assets/abilities.ron` to add or modify abilities. Each ability has:
 
 - Phase durations (startup, active, recovery) in ticks (64 ticks = 1 second)
 - Cooldown in ticks
-- Effects list with triggers: `OnTick` (fires once on a specified Active-phase tick offset, defaults to tick 0),
-  `WhileActive` (fires every tick), `OnHit` (fires when a hitbox/projectile hits a target), `OnEnd` (fires on Active
-  exit), or `OnInput` (fires on semantic ability input during Active for combo chaining). `OnInput` asset entries use
-  `input: Slot(0)` through `Slot(3)` for ability slots; runtime maps them onto filtered `NetworkedPlayerActions`.
-- Effect types: `Melee`, `Projectile`, `AreaOfEffect`, `SetVelocity`, `Damage`, `ApplyForce`, `Ability` (spawns
-  sub-ability), `Teleport`, `Shield`, or `Buff`
+- Effects list with triggers: `OnTick` (fires once on a specified Active-phase tick offset, defaults to tick 0), `WhileActive` (fires every tick), `OnHit` (fires when a hitbox/projectile hits a target), `OnEnd` (fires on Active exit), or `OnInput` (fires on semantic ability input during Active for combo chaining). `OnInput` asset entries use `input: Slot(0)` through `Slot(3)` for ability slots; runtime maps them onto filtered `NetworkedPlayerActions`.
+- Effect types: `Melee`, `Projectile`, `AreaOfEffect`, `SetVelocity`, `Damage`, `ApplyForce`, `Ability` (spawns sub-ability), `Teleport`, `Shield`, or `Buff`

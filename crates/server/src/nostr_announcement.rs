@@ -74,7 +74,7 @@ fn publish_announcement(
             )
             .await
             {
-                Ok(event_id) => info!(%event_id, "published Nostr server announcement"),
+                Ok(event_id) => trace!(%event_id, "published Nostr server announcement"),
                 Err(error) => panic!("failed to publish Nostr server announcement: {error}"),
             }
         })

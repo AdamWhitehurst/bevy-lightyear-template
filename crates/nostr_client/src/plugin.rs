@@ -42,16 +42,9 @@ fn relays_from_env_or_default() -> Vec<String> {
         })
 }
 
+#[derive(Default)]
 pub struct NostrClientPlugin {
     pub config: NostrClientConfig,
-}
-
-impl Default for NostrClientPlugin {
-    fn default() -> Self {
-        Self {
-            config: NostrClientConfig::default(),
-        }
-    }
 }
 
 impl Plugin for NostrClientPlugin {

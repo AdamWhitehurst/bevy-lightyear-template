@@ -10,7 +10,7 @@ pub fn build_identity_proof(
     nonce: [u8; 32],
 ) -> Result<IdentityProof, String> {
     let keys = nostr_sdk::Keys::new(identity.secret.clone());
-    let event = EventBuilder::new(Kind::Custom(NOSTR_KIND_AUTH.into()), "")
+    let event = EventBuilder::new(Kind::Custom(NOSTR_KIND_AUTH), "")
         .tag(Tag::custom(
             TagKind::custom("challenge"),
             [hex::encode(nonce)],
@@ -31,7 +31,7 @@ pub fn verify_identity_proof(
 ) -> Result<PlayerIdentity, String> {
     let event = Event::from_json(&proof.signed_event_json)
         .map_err(|error| format!("invalid Nostr event JSON: {error}"))?;
-    if event.kind != Kind::Custom(NOSTR_KIND_AUTH.into()) {
+    if event.kind != Kind::Custom(NOSTR_KIND_AUTH) {
         return Err(format!(
             "identity proof event kind must be {NOSTR_KIND_AUTH}, got {}",
             event.kind
