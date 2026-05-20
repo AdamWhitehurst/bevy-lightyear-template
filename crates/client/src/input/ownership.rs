@@ -44,6 +44,11 @@ impl KeyboardInputOwner {
     pub fn allows_camera_control(self) -> bool {
         matches!(self, Self::Gameplay)
     }
+
+    /// Returns whether developer hotkeys may be emitted.
+    pub fn allows_dev_hotkeys(self) -> bool {
+        matches!(self, Self::Gameplay)
+    }
 }
 
 /// Client-local pointer input owner.

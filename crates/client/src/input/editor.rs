@@ -1,18 +1,19 @@
 use bevy::prelude::*;
+use dev::DevHotkeyIntent;
+#[cfg(feature = "spawn-panel")]
+use dev::EditingMode;
+use leafwing_input_manager::prelude::ActionState;
+use lightyear::prelude::Controlled;
 use protocol::{VoxelBrushEditRequest, VoxelEditRequest};
 
 #[cfg(feature = "spawn-panel")]
 use super::gestures::ClientPointerGestureState;
+use super::ownership::ClientInputOwnershipSnapshot;
 #[cfg(feature = "spawn-panel")]
-use super::ownership::{ClientInputOwnershipSnapshot, PointerInputOwner};
-#[cfg(feature = "spawn-panel")]
+use super::ownership::PointerInputOwner;
 use super::raw::RawClientActions;
 #[cfg(feature = "spawn-panel")]
-use dev::{panels::spawn::SpawnPanelUi, EditingMode};
-#[cfg(feature = "spawn-panel")]
-use leafwing_input_manager::prelude::ActionState;
-#[cfg(feature = "spawn-panel")]
-use lightyear::prelude::Controlled;
+use dev::panels::spawn::SpawnPanelUi;
 
 /// Client-local terrain command intents produced after ownership gating.
 #[derive(Message, Clone, Debug, PartialEq)]
@@ -29,6 +30,44 @@ pub enum WorldObjectCommandIntent {
     Move,
     Rotate { yaw_delta: f32 },
     Delete,
+}
+
+/// Emits developer hotkey intents from owned keyboard input.
+pub fn write_dev_hotkey_intents(
+    ownership: Res<ClientInputOwnershipSnapshot>,
+    action_query: Query<&ActionState<RawClientActions>, With<Controlled>>,
+    mut writer: MessageWriter<DevHotkeyIntent>,
+) {
+    let Ok(action_state) = action_query.single() else {
+        trace!("write_dev_hotkey_intents: no controlled raw action state");
+        return;
+    };
+    if !ownership.keyboard.allows_dev_hotkeys() {
+        if action_state.just_pressed(&RawClientActions::DevTogglePhysics)
+            || action_state.just_pressed(&RawClientActions::DevToggleInspector)
+            || action_state.just_pressed(&RawClientActions::DevToggleWorldInspector)
+            || action_state.just_pressed(&RawClientActions::DevToggleSpawnPanel)
+        {
+            trace!(
+                owner = ?ownership.keyboard,
+                "write_dev_hotkey_intents: dev hotkey suppressed"
+            );
+        }
+        return;
+    }
+
+    if action_state.just_pressed(&RawClientActions::DevTogglePhysics) {
+        writer.write(DevHotkeyIntent::TogglePhysicsDebug);
+    }
+    if action_state.just_pressed(&RawClientActions::DevToggleInspector) {
+        writer.write(DevHotkeyIntent::ToggleDevInspector);
+    }
+    if action_state.just_pressed(&RawClientActions::DevToggleWorldInspector) {
+        writer.write(DevHotkeyIntent::ToggleWorldInspector);
+    }
+    if action_state.just_pressed(&RawClientActions::DevToggleSpawnPanel) {
+        writer.write(DevHotkeyIntent::ToggleSpawnPanel);
+    }
 }
 
 /// Emits world-object command intents from owned pointer and keyboard input.

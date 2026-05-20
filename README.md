@@ -135,7 +135,8 @@ bevy-lightyear-template/
 ### Dev Inspector
 
 Press `F4` to toggle the dev inspector root menu. With the spawn panel enabled, press `F6` or use the root menu to open
-it. Def-driven world-object placement is server-authoritative: select an object, arm placement, preview the terrain
+it. Dev hotkeys route through client-local `RawClientActions` and are suppressed while UI/text owns keyboard input.
+Def-driven world-object placement is server-authoritative: select an object, arm placement, preview the terrain
 target, then click terrain in-game. The same panel can select existing replicated world objects by arming cursor pick
 and clicking in-game or by nearby list, then request authoritative delete, move, or yaw rotation edits that persist
 across chunk reloads. Free-form spawning remains client-local. World-object and terrain pointer commands use
@@ -177,7 +178,10 @@ buffering. Movement, jump, Q/E camera rotation, and camera yaw follow the same k
 - `2` - Ability slot 2 when gameplay owns keyboard input
 - `3` - Ability slot 3 when gameplay owns keyboard input
 - `4` - Ability slot 4 when gameplay owns keyboard input
-- `F3` - Toggle physics debug wireframes
+- `F3` - Toggle physics debug wireframes when gameplay owns keyboard input
+- `F4` - Toggle dev inspector root menu when gameplay owns keyboard input
+- `F5` - Toggle world inspector when gameplay owns keyboard input
+- `F6` - Toggle spawn panel when gameplay owns keyboard input
 
 ### Defining Abilities
 

@@ -16,6 +16,10 @@ pub enum RawClientActions {
     PlaceVoxel,
     RemoveVoxel,
     Delete,
+    DevTogglePhysics,
+    DevToggleInspector,
+    DevToggleWorldInspector,
+    DevToggleSpawnPanel,
 }
 
 impl Actionlike for RawClientActions {
@@ -44,4 +48,8 @@ pub fn raw_client_input_map() -> InputMap<RawClientActions> {
         .with(RawClientActions::PlaceVoxel, MouseButton::Left)
         .with(RawClientActions::RemoveVoxel, MouseButton::Right)
         .with(RawClientActions::Delete, KeyCode::Delete)
+        .with(RawClientActions::DevTogglePhysics, KeyCode::F3)
+        .with(RawClientActions::DevToggleInspector, KeyCode::F4)
+        .with(RawClientActions::DevToggleWorldInspector, KeyCode::F5)
+        .with(RawClientActions::DevToggleSpawnPanel, KeyCode::F6)
 }

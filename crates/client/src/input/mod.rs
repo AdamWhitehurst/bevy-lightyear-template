@@ -17,13 +17,14 @@ use self::ability::write_filtered_ability_actions;
 use self::control::write_filtered_control_actions;
 #[cfg(feature = "spawn-panel")]
 use self::editor::write_world_object_command_intents;
-use self::editor::{TerrainCommandIntent, WorldObjectCommandIntent};
+use self::editor::{write_dev_hotkey_intents, TerrainCommandIntent, WorldObjectCommandIntent};
 use self::gestures::{update_pointer_ownership, ClientPointerGestureState};
 #[cfg(feature = "spawn-panel")]
 use self::ownership::capture_egui_input_ownership;
 use self::ownership::{capture_editing_mode_pointer_ownership, ClientInputOwnershipSnapshot};
 use self::raw::RawClientActions;
 use self::schedule::ClientInputSet;
+use dev::DevHotkeyIntent;
 
 /// Routes physical client input into ownership-filtered network/local commands.
 pub struct ClientInputCommandPlugin;
@@ -36,6 +37,7 @@ impl Plugin for ClientInputCommandPlugin {
             .init_resource::<EditingMode>()
             .add_message::<TerrainCommandIntent>()
             .add_message::<WorldObjectCommandIntent>()
+            .add_message::<DevHotkeyIntent>()
             .configure_sets(
                 FixedPreUpdate,
                 (
@@ -70,7 +72,11 @@ impl Plugin for ClientInputCommandPlugin {
         #[cfg(feature = "spawn-panel")]
         app.add_systems(
             FixedPreUpdate,
-            (update_pointer_ownership, write_world_object_command_intents)
+            (
+                update_pointer_ownership,
+                write_world_object_command_intents,
+                write_dev_hotkey_intents,
+            )
                 .chain()
                 .in_set(ClientInputSet::ProduceLocalCommands),
         );
@@ -81,6 +87,7 @@ impl Plugin for ClientInputCommandPlugin {
             (
                 capture_editing_mode_pointer_ownership.in_set(ClientInputSet::Capture),
                 update_pointer_ownership.in_set(ClientInputSet::ProduceLocalCommands),
+                write_dev_hotkey_intents.in_set(ClientInputSet::ProduceLocalCommands),
             ),
         );
     }

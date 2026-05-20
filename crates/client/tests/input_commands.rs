@@ -8,7 +8,7 @@ use client::input::ownership::{
 };
 use client::input::raw::{raw_client_input_map, RawClientActions};
 use client::input::ClientInputCommandPlugin;
-use dev::{panels::spawn::SpawnPanelUi, DevInspectorState, EditingMode};
+use dev::{panels::spawn::SpawnPanelUi, DevHotkeyIntent, DevInspectorState, EditingMode};
 use leafwing_input_manager::prelude::*;
 use lightyear::prelude::client::input::InputSystems;
 use lightyear::prelude::Controlled;
@@ -82,6 +82,21 @@ fn press_raw_camera_left(app: &mut App, entity: Entity) {
         .press(&RawClientActions::CameraRotateLeft);
 }
 
+fn press_raw_dev_hotkey(app: &mut App, entity: Entity, action: RawClientActions) {
+    app.world_mut()
+        .get_mut::<ActionState<RawClientActions>>(entity)
+        .expect("raw action state exists")
+        .press(&action);
+}
+
+fn current_dev_hotkey_intents(app: &App) -> Vec<DevHotkeyIntent> {
+    app.world()
+        .resource::<Messages<DevHotkeyIntent>>()
+        .iter_current_update_messages()
+        .cloned()
+        .collect()
+}
+
 fn spawn_camera_orbit(app: &mut App, target_angle: f32) -> Entity {
     app.world_mut()
         .spawn(CameraOrbitState {
@@ -108,6 +123,7 @@ fn client_input_plugin_initializes_command_resources() {
     assert!(app
         .world()
         .contains_resource::<Messages<WorldObjectCommandIntent>>());
+    assert!(app.world().contains_resource::<Messages<DevHotkeyIntent>>());
 }
 
 #[test]
@@ -379,6 +395,56 @@ fn camera_yaw_matches_wasd_and_ignores_pointer_ownership() {
         .get::<ActionState<NetworkedPlayerActions>>(entity)
         .expect("networked action state exists");
     assert_eq!(action_state.value(&NetworkedPlayerActions::CameraYaw), 2.5);
+}
+
+#[test]
+fn dev_hotkeys_fire_when_gameplay_owns_keyboard() {
+    let mut app = command_test_app();
+    let entity = spawn_controlled_input(&mut app);
+    press_raw_dev_hotkey(&mut app, entity, RawClientActions::DevTogglePhysics);
+    press_raw_dev_hotkey(&mut app, entity, RawClientActions::DevToggleInspector);
+    press_raw_dev_hotkey(&mut app, entity, RawClientActions::DevToggleWorldInspector);
+    press_raw_dev_hotkey(&mut app, entity, RawClientActions::DevToggleSpawnPanel);
+
+    run_fixed_pre_update(&mut app);
+
+    assert_eq!(
+        current_dev_hotkey_intents(&app),
+        vec![
+            DevHotkeyIntent::TogglePhysicsDebug,
+            DevHotkeyIntent::ToggleDevInspector,
+            DevHotkeyIntent::ToggleWorldInspector,
+            DevHotkeyIntent::ToggleSpawnPanel,
+        ]
+    );
+}
+
+#[test]
+fn dev_hotkeys_do_not_fire_when_ui_owns_keyboard() {
+    let mut app = command_test_app();
+    let entity = spawn_controlled_input(&mut app);
+    app.world_mut()
+        .resource_mut::<ClientInputOwnershipSnapshot>()
+        .keyboard = KeyboardInputOwner::Ui;
+    press_raw_dev_hotkey(&mut app, entity, RawClientActions::DevToggleInspector);
+
+    run_fixed_pre_update(&mut app);
+
+    assert!(current_dev_hotkey_intents(&app).is_empty());
+}
+
+#[test]
+fn dev_hotkeys_do_not_fire_when_text_owns_keyboard() {
+    let mut app = command_test_app();
+    let entity = spawn_controlled_input(&mut app);
+    app.world_mut()
+        .resource_mut::<ClientInputOwnershipSnapshot>()
+        .keyboard = KeyboardInputOwner::Text;
+    press_raw_dev_hotkey(&mut app, entity, RawClientActions::DevToggleSpawnPanel);
+
+    run_fixed_pre_update(&mut app);
+
+    assert!(current_dev_hotkey_intents(&app).is_empty());
 }
 
 #[test]

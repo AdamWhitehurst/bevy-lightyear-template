@@ -7,6 +7,7 @@
 
 use crate::panels::terrain::{draw_terrain_controls, TerrainBrushSettings, TerrainEditHistory};
 use crate::state::{DevInspectorState, EditingMode};
+use crate::DevHotkeyIntent;
 use bevy::ecs::reflect::ReflectComponent;
 use bevy::prelude::ReflectDefault;
 use bevy::prelude::*;
@@ -155,6 +156,7 @@ impl Plugin for SpawnPanelPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SpawnPanelUi>()
             .init_resource::<EditingMode>()
+            .add_message::<DevHotkeyIntent>()
             .add_systems(Update, toggle_spawn_panel)
             .add_systems(
                 EguiPrimaryContextPass,
@@ -167,9 +169,14 @@ fn spawn_panel_enabled(state: Res<DevInspectorState>) -> bool {
     state.enabled && state.panels.spawn_panel
 }
 
-fn toggle_spawn_panel(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<DevInspectorState>) {
-    if keys.just_pressed(KeyCode::F6) {
-        state.panels.spawn_panel = !state.panels.spawn_panel;
+fn toggle_spawn_panel(
+    mut intents: MessageReader<DevHotkeyIntent>,
+    mut state: ResMut<DevInspectorState>,
+) {
+    for intent in intents.read() {
+        if *intent == DevHotkeyIntent::ToggleSpawnPanel {
+            state.panels.spawn_panel = !state.panels.spawn_panel;
+        }
     }
 }
 

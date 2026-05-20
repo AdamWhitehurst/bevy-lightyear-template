@@ -8,6 +8,19 @@ use bevy::prelude::*;
 mod state;
 pub use state::{DevInspectorState, EditingMode, PanelFlags};
 
+/// Client-routed developer hotkey commands.
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DevHotkeyIntent {
+    /// Toggles physics debug gizmos.
+    TogglePhysicsDebug,
+    /// Toggles the dev inspector root menu.
+    ToggleDevInspector,
+    /// Toggles the world inspector panel.
+    ToggleWorldInspector,
+    /// Toggles the spawn panel.
+    ToggleSpawnPanel,
+}
+
 #[cfg(feature = "inspector")]
 pub mod panels;
 
@@ -22,9 +35,10 @@ pub struct DevPlugin;
 
 impl Plugin for DevPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(PhysicsDebugPlugin::default())
+        app.add_plugins(PhysicsDebugPlugin)
             .init_resource::<DevInspectorState>()
             .init_resource::<EditingMode>()
+            .add_message::<DevHotkeyIntent>()
             .add_systems(Startup, hide_physics_debug)
             .add_systems(Update, (toggle_physics_debug, toggle_dev_inspector));
 
@@ -51,18 +65,28 @@ fn hide_physics_debug(mut store: ResMut<GizmoConfigStore>) {
     config.enabled = false;
 }
 
-/// Toggles the avian physics debug gizmos when F3 is pressed.
-fn toggle_physics_debug(keys: Res<ButtonInput<KeyCode>>, mut store: ResMut<GizmoConfigStore>) {
-    if keys.just_pressed(KeyCode::F3) {
-        let (config, _) = store.config_mut::<PhysicsGizmos>();
-        config.enabled = !config.enabled;
+/// Toggles the avian physics debug gizmos from routed dev hotkey intents.
+fn toggle_physics_debug(
+    mut intents: MessageReader<DevHotkeyIntent>,
+    mut store: ResMut<GizmoConfigStore>,
+) {
+    for intent in intents.read() {
+        if *intent == DevHotkeyIntent::TogglePhysicsDebug {
+            let (config, _) = store.config_mut::<PhysicsGizmos>();
+            config.enabled = !config.enabled;
+        }
     }
 }
 
-/// Toggles the dev inspector root menu when F4 is pressed.
-fn toggle_dev_inspector(keys: Res<ButtonInput<KeyCode>>, mut state: ResMut<DevInspectorState>) {
-    if keys.just_pressed(KeyCode::F4) {
-        state.enabled = !state.enabled;
+/// Toggles the dev inspector root menu from routed dev hotkey intents.
+fn toggle_dev_inspector(
+    mut intents: MessageReader<DevHotkeyIntent>,
+    mut state: ResMut<DevInspectorState>,
+) {
+    for intent in intents.read() {
+        if *intent == DevHotkeyIntent::ToggleDevInspector {
+            state.enabled = !state.enabled;
+        }
     }
 }
 

@@ -930,7 +930,7 @@ impl KeyboardInputOwner {
 }
 ```
 
-`F3`/`F4`/`F6` should not fire while UI/text owns keyboard input. Keep dev state in `dev`; avoid introducing a `dev` -> `client` dependency cycle.
+`F3`/`F4`/`F5`/`F6` should not fire while UI/text owns keyboard input. Keep dev state in `dev`; avoid introducing a `dev` -> `client` dependency cycle.
 
 #### 3. Raw polling cleanup
 
@@ -960,11 +960,11 @@ Use public resources/events plus both `ActionState<RawClientActions>` and `Actio
 
 ### Verification
 
-- `cargo check-all`
-- `cargo test -p client --features spawn-panel input_commands`
-- `cargo test-all`
-- `rg 'PlayerActions|Digit1|Digit2|Digit3|Digit4|VirtualDPad::wasd|PlaceVoxel|RemoveVoxel|MouseButton::Left|MouseButton::Right' crates/client/src crates/dev/src crates/protocol/src/ability` and review each match. Remaining raw command polling must be in approved input producers, tests, or documented exceptions.
-- Manual: F3/F4/F6, ability hotkeys, locomotion/camera, terrain brush, and world-object edit flows work with gameplay ownership and are suppressed under focused UI/text as documented.
+- [x] `cargo check-all`
+- [x] `cargo test -p client --features spawn-panel input_commands`
+- [x] `cargo test-all` workspace/native tests passed; wasm-pack Firefox step timed out after compiling `web` without a Rust test failure.
+- [x] `rg 'PlayerActions|Digit1|Digit2|Digit3|Digit4|VirtualDPad::wasd|PlaceVoxel|RemoveVoxel|MouseButton::Left|MouseButton::Right' crates/client/src crates/dev/src crates/protocol/src/ability` reviewed: remaining matches are approved raw producers, networked transport/shared ability use, diagnostics, or terrain/world-object producers.
+- [x] Manual: F3/F4/F5/F6, ability hotkeys, locomotion/camera, terrain brush, and world-object edit flows work with gameplay ownership and are suppressed under focused UI/text as documented. User verified.
 
 ## Cross-Phase Constraints
 
