@@ -49,6 +49,7 @@ pub struct MapTerrainEditHistory {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TerrainEditRecord {
     pub map_id: MapInstanceId,
+    pub gesture_id: Option<u32>,
     pub changes: Vec<AcknowledgedVoxelChange>,
 }
 
@@ -91,12 +92,7 @@ pub fn draw_terrain_controls(
     settings: &mut TerrainBrushSettings,
     history: &mut TerrainEditHistory,
 ) {
-    let map_history = history
-        .active_map
-        .as_ref()
-        .and_then(|map_id| history.by_map.get(map_id));
-    let can_undo = map_history.is_some_and(|history| !history.undo.is_empty());
-    let can_redo = map_history.is_some_and(|history| !history.redo.is_empty());
+    let (can_undo, can_redo) = terrain_history_button_state(history);
     ui.horizontal(|ui| {
         if ui
             .add_enabled(can_undo, egui::Button::new("Undo"))
@@ -203,6 +199,16 @@ pub fn draw_terrain_controls(
     });
 }
 
+fn terrain_history_button_state(history: &TerrainEditHistory) -> (bool, bool) {
+    let map_history = history
+        .active_map
+        .as_ref()
+        .and_then(|map_id| history.by_map.get(map_id));
+    let can_undo = map_history.is_some_and(|history| !history.undo.is_empty());
+    let can_redo = map_history.is_some_and(|history| !history.redo.is_empty());
+    (can_undo, can_redo)
+}
+
 fn draw_u32_stepper(ui: &mut egui::Ui, id: &'static str, value: &mut u32, min: u32, max: u32) {
     ui.push_id(id, |ui| {
         ui.horizontal(|ui| {
@@ -229,4 +235,52 @@ fn draw_u8_stepper(ui: &mut egui::Ui, id: &'static str, value: &mut u8, min: u8,
             }
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(map_id: MapInstanceId) -> TerrainEditRecord {
+        TerrainEditRecord {
+            map_id,
+            gesture_id: None,
+            changes: vec![AcknowledgedVoxelChange {
+                position: IVec3::ZERO,
+                old_voxel: VoxelType::Air,
+                new_voxel: VoxelType::Solid(1),
+            }],
+        }
+    }
+
+    #[test]
+    fn buttons_disable_without_active_map() {
+        let mut history = TerrainEditHistory::default();
+        history
+            .by_map
+            .entry(MapInstanceId::Overworld)
+            .or_default()
+            .undo
+            .push(record(MapInstanceId::Overworld));
+
+        assert_eq!(terrain_history_button_state(&history), (false, false));
+    }
+
+    #[test]
+    fn buttons_use_active_map_when_available() {
+        let homebase = MapInstanceId::Homebase {
+            owner: protocol::NostrPublicKey([7; 32]),
+        };
+        let mut history = TerrainEditHistory::default();
+        history.active_map = Some(homebase.clone());
+        history
+            .by_map
+            .entry(MapInstanceId::Overworld)
+            .or_default()
+            .undo
+            .push(record(MapInstanceId::Overworld));
+        history.by_map.entry(homebase).or_default();
+
+        assert_eq!(terrain_history_button_state(&history), (false, false));
+    }
 }

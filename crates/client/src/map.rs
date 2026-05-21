@@ -144,6 +144,8 @@ pub struct TerrainBrushStrokeState {
     pub last_cursor_position: Option<Vec2>,
     pub frames_since_last_application: u32,
     pub plane_lock: Option<TerrainBrushPlaneLock>,
+    pub current_gesture_id: Option<u32>,
+    pub next_gesture_id: u32,
 }
 
 /// Buffers ChunkDataSync messages that arrive before the client player is ready.
@@ -161,6 +163,7 @@ pub struct VoxelPrediction {
     pub map_id: MapInstanceId,
     pub changes: Vec<PredictedVoxelChange>,
     pub kind: TerrainPredictionKind,
+    pub gesture_id: Option<u32>,
 }
 
 /// Source operation for a pending terrain edit prediction.
@@ -728,6 +731,7 @@ fn handle_terrain_brush_input(
     };
 
     let sequence = prediction_state.next();
+    let gesture_id = current_or_start_terrain_gesture(&mut stroke_state);
     voxel_world.set_voxels(
         chunk_ticket.map_entity,
         changes
@@ -739,6 +743,7 @@ fn handle_terrain_brush_input(
         map_id: map_id.clone(),
         changes,
         kind: TerrainPredictionKind::NewEdit,
+        gesture_id: Some(gesture_id),
     });
 
     for mut sender in message_sender.iter_mut() {
@@ -855,6 +860,18 @@ fn reset_brush_stroke_state(stroke_state: &mut TerrainBrushStrokeState) {
     stroke_state.last_cursor_position = None;
     stroke_state.frames_since_last_application = 0;
     stroke_state.plane_lock = None;
+    stroke_state.current_gesture_id = None;
+}
+
+#[cfg(feature = "spawn-panel")]
+fn current_or_start_terrain_gesture(stroke_state: &mut TerrainBrushStrokeState) -> u32 {
+    if let Some(gesture_id) = stroke_state.current_gesture_id {
+        return gesture_id;
+    }
+    let gesture_id = stroke_state.next_gesture_id;
+    stroke_state.next_gesture_id = stroke_state.next_gesture_id.wrapping_add(1);
+    stroke_state.current_gesture_id = Some(gesture_id);
+    gesture_id
 }
 
 #[cfg(not(feature = "spawn-panel"))]
@@ -934,6 +951,7 @@ fn handle_voxel_input(
             new_voxel: voxel,
         }],
         kind: TerrainPredictionKind::NewEdit,
+        gesture_id: None,
     });
 
     for mut sender in message_sender.iter_mut() {
@@ -2125,7 +2143,10 @@ fn record_acknowledged_prediction(history: &mut TerrainEditHistory, prediction: 
     let map_history = history.by_map.entry(prediction.map_id.clone()).or_default();
     match prediction.kind {
         TerrainPredictionKind::NewEdit => {
-            map_history.undo.push(acknowledged_record(prediction));
+            push_or_merge_acknowledged_record(
+                &mut map_history.undo,
+                acknowledged_record(prediction),
+            );
             map_history.redo.clear();
         }
         TerrainPredictionKind::Undo => map_history
@@ -2136,9 +2157,53 @@ fn record_acknowledged_prediction(history: &mut TerrainEditHistory, prediction: 
 }
 
 #[cfg(feature = "spawn-panel")]
+fn push_or_merge_acknowledged_record(
+    records: &mut Vec<TerrainEditRecord>,
+    record: TerrainEditRecord,
+) {
+    let Some(gesture_id) = record.gesture_id else {
+        records.push(record);
+        return;
+    };
+    let Some(last) = records
+        .last_mut()
+        .filter(|last| last.map_id == record.map_id && last.gesture_id == Some(gesture_id))
+    else {
+        records.push(record);
+        return;
+    };
+    merge_acknowledged_changes(last, record.changes);
+    if last.changes.is_empty() {
+        records.pop();
+    }
+}
+
+#[cfg(feature = "spawn-panel")]
+fn merge_acknowledged_changes(
+    record: &mut TerrainEditRecord,
+    changes: Vec<AcknowledgedVoxelChange>,
+) {
+    for change in changes {
+        if let Some(existing) = record
+            .changes
+            .iter_mut()
+            .find(|existing| existing.position == change.position)
+        {
+            existing.new_voxel = change.new_voxel;
+            continue;
+        }
+        record.changes.push(change);
+    }
+    record
+        .changes
+        .retain(|change| change.old_voxel != change.new_voxel);
+}
+
+#[cfg(feature = "spawn-panel")]
 fn acknowledged_record(prediction: &VoxelPrediction) -> TerrainEditRecord {
     TerrainEditRecord {
         map_id: prediction.map_id.clone(),
+        gesture_id: prediction.gesture_id,
         changes: prediction
             .changes
             .iter()
@@ -2155,6 +2220,7 @@ fn acknowledged_record(prediction: &VoxelPrediction) -> TerrainEditRecord {
 fn reversed_acknowledged_record(prediction: &VoxelPrediction) -> TerrainEditRecord {
     TerrainEditRecord {
         map_id: prediction.map_id.clone(),
+        gesture_id: prediction.gesture_id,
         changes: prediction
             .changes
             .iter()
@@ -2216,6 +2282,7 @@ fn prediction_from_concrete_changes(
         map_id: record.map_id.clone(),
         changes: predicted,
         kind,
+        gesture_id: record.gesture_id,
     }
 }
 
@@ -2397,6 +2464,7 @@ mod tests {
                 })
                 .collect(),
             kind: TerrainPredictionKind::NewEdit,
+            gesture_id: None,
         }
     }
 
@@ -2483,6 +2551,7 @@ mod tests {
                 },
             ],
             kind: TerrainPredictionKind::NewEdit,
+            gesture_id: None,
         });
 
         assert_eq!(
@@ -2526,6 +2595,7 @@ mod tests {
     fn terrain_record() -> TerrainEditRecord {
         TerrainEditRecord {
             map_id: MapInstanceId::Overworld,
+            gesture_id: None,
             changes: vec![AcknowledgedVoxelChange {
                 position: IVec3::new(1, 2, 3),
                 old_voxel: VoxelType::Air,
@@ -2573,6 +2643,7 @@ mod tests {
 
         record_acknowledged_prediction(&mut history, &prediction);
 
+        assert_eq!(history.active_map, None);
         assert!(history.by_map.get(&MapInstanceId::Overworld).is_none());
         assert_eq!(
             history
@@ -2583,6 +2654,73 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn acknowledged_predictions_do_not_replace_synced_active_map() {
+        let homebase = homebase_map_id();
+        let mut history = TerrainEditHistory {
+            active_map: Some(homebase.clone()),
+            ..default()
+        };
+        let prediction = prediction(10, [IVec3::new(3, 0, 0)]);
+
+        record_acknowledged_prediction(&mut history, &prediction);
+
+        assert_eq!(history.active_map, Some(homebase));
+        assert_eq!(
+            history
+                .by_map
+                .get(&MapInstanceId::Overworld)
+                .expect("overworld history should be created")
+                .undo
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn acknowledged_predictions_from_one_gesture_share_one_undo_record() {
+        let mut history = TerrainEditHistory::default();
+        let mut first = prediction(10, [IVec3::new(1, 0, 0)]);
+        first.gesture_id = Some(7);
+        let mut second = prediction(11, [IVec3::new(2, 0, 0)]);
+        second.gesture_id = Some(7);
+
+        record_acknowledged_prediction(&mut history, &first);
+        record_acknowledged_prediction(&mut history, &second);
+
+        let undo = &history
+            .by_map
+            .get(&MapInstanceId::Overworld)
+            .expect("overworld history should exist")
+            .undo;
+        assert_eq!(undo.len(), 1);
+        assert_eq!(undo[0].changes.len(), 2);
+    }
+
+    #[test]
+    fn gesture_history_keeps_original_old_voxel_and_final_new_voxel() {
+        let mut history = TerrainEditHistory::default();
+        let mut first = prediction(10, [IVec3::new(1, 0, 0)]);
+        first.gesture_id = Some(7);
+        let mut second = prediction(11, [IVec3::new(1, 0, 0)]);
+        second.gesture_id = Some(7);
+        second.changes[0].old_voxel = VoxelType::Solid(1);
+        second.changes[0].new_voxel = VoxelType::Solid(9);
+
+        record_acknowledged_prediction(&mut history, &first);
+        record_acknowledged_prediction(&mut history, &second);
+
+        let undo = &history
+            .by_map
+            .get(&MapInstanceId::Overworld)
+            .expect("overworld history should exist")
+            .undo;
+        assert_eq!(undo.len(), 1);
+        assert_eq!(undo[0].changes.len(), 1);
+        assert_eq!(undo[0].changes[0].old_voxel, VoxelType::Air);
+        assert_eq!(undo[0].changes[0].new_voxel, VoxelType::Solid(9));
     }
 
     #[test]
