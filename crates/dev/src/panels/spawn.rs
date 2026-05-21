@@ -1,33 +1,21 @@
 //! Spawn panel. Selects the active `EditingMode` for terrain editing, authoritative
-//! definition-driven world-object placement, free-form client-local spawning, and
-//! existing world-object selection/editing.
-//!
-//! Free-form spawns are client-local (no `Replicate`) at the world origin and
-//! carry a `DevSpawned` marker.
+//! definition-driven world-object placement, and existing world-object selection/editing.
 
 use crate::panels::terrain::{draw_terrain_controls, TerrainBrushSettings, TerrainEditHistory};
 use crate::state::{DevInspectorState, EditingMode};
 use crate::DevHotkeyIntent;
-use bevy::ecs::reflect::ReflectComponent;
-use bevy::prelude::ReflectDefault;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass};
-use protocol::map::MapInstanceId;
 use protocol::world_object::{
-    apply_object_components, WorldObjectDefRegistry, WorldObjectEditRejectReason, WorldObjectId,
+    WorldObjectDefRegistry, WorldObjectEditRejectReason, WorldObjectId,
     WorldObjectPlacementRejectReason,
 };
-
-/// Marker for any entity spawned via the dev spawn panel. Client-local; not replicated.
-#[derive(Component)]
-pub struct DevSpawned;
 
 #[derive(Resource, Default)]
 pub struct SpawnPanelUi {
     pub selected_object: Option<WorldObjectId>,
     pub placement: WorldObjectPlacementUi,
     pub selection: WorldObjectSelectionUi,
-    selected_freeform: Vec<String>,
 }
 
 /// Client-owned world-object placement request state shown by the spawn panel.
@@ -188,8 +176,6 @@ fn draw_spawn_panel(
     mut terrain_history: ResMut<TerrainEditHistory>,
     // Optional because definitions load during startup; the panel renders a loading label until ready.
     world_objects: Option<Res<WorldObjectDefRegistry>>,
-    type_registry: Res<AppTypeRegistry>,
-    mut commands: Commands,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         trace!("draw_spawn_panel: EguiContexts not ready, skipping frame");
@@ -207,9 +193,6 @@ fn draw_spawn_panel(
                 EditingMode::PlaceDefinition => {
                     draw_definition_placement(ui, &mut ui_state, world_objects.as_deref())
                 }
-                EditingMode::PlaceFreeForm => {
-                    draw_freeform_tab(ui, &mut ui_state, &type_registry, &mut commands)
-                }
                 EditingMode::SelectEdit => draw_world_object_edit_tab(ui, &mut ui_state),
             }
             ui.add_space(4.0);
@@ -221,7 +204,6 @@ fn draw_primary_tabs(ui: &mut egui::Ui, editing_mode: &mut EditingMode) {
     ui.horizontal(|ui| {
         ui.selectable_value(editing_mode, EditingMode::Terrain, "▦  Terrain");
         ui.selectable_value(editing_mode, EditingMode::PlaceDefinition, "▧  Place");
-        ui.selectable_value(editing_mode, EditingMode::PlaceFreeForm, "□  Free");
         ui.selectable_value(editing_mode, EditingMode::SelectEdit, "↖  Edit");
     });
 }
@@ -460,59 +442,4 @@ fn draw_status_section(ui: &mut egui::Ui, ui_state: &SpawnPanelUi) {
 fn draw_status_item(ui: &mut egui::Ui, label: &str, value: usize) {
     ui.label(label);
     ui.label(value.to_string());
-}
-
-fn draw_freeform_tab(
-    ui: &mut egui::Ui,
-    ui_state: &mut SpawnPanelUi,
-    type_registry: &AppTypeRegistry,
-    commands: &mut Commands,
-) {
-    let registry = type_registry.read();
-    let mut component_paths: Vec<String> = registry
-        .iter()
-        .filter(|reg| reg.data::<ReflectComponent>().is_some())
-        .map(|reg| reg.type_info().type_path().to_string())
-        .collect();
-    component_paths.sort();
-    ui.label("Pick reflected Components (multi-select, client-local):");
-    egui::ScrollArea::vertical()
-        .max_height(200.0)
-        .show(ui, |ui| {
-            for path in &component_paths {
-                let mut checked = ui_state.selected_freeform.iter().any(|p| p == path);
-                if ui.checkbox(&mut checked, path).changed() {
-                    if checked {
-                        ui_state.selected_freeform.push(path.clone());
-                    } else {
-                        ui_state.selected_freeform.retain(|p| p != path);
-                    }
-                }
-            }
-        });
-    let spawn_clicked = ui.button("Spawn with selected components").clicked();
-    if spawn_clicked && !ui_state.selected_freeform.is_empty() {
-        let mut components: Vec<Box<dyn bevy::reflect::PartialReflect>> = Vec::new();
-        for path in &ui_state.selected_freeform {
-            let Some(reg) = registry.get_with_type_path(path) else {
-                warn!("freeform spawn: type {path} not in registry, skipping");
-                continue;
-            };
-            let Some(default) = reg.data::<ReflectDefault>() else {
-                warn!("freeform spawn: type {path} has no ReflectDefault, skipping");
-                continue;
-            };
-            components.push(default.default().into_partial_reflect());
-        }
-        drop(registry);
-        let entity = commands
-            .spawn((
-                Transform::default(),
-                DevSpawned,
-                MapInstanceId::Overworld,
-                Name::new("dev:freeform"),
-            ))
-            .id();
-        apply_object_components(commands, entity, components, type_registry.0.clone());
-    }
 }

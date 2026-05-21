@@ -315,7 +315,7 @@ fn camera_rotation_does_not_fire_when_text_owns_keyboard() {
     let mut app = command_test_app();
     let entity = spawn_controlled_input(&mut app);
     let camera = spawn_camera_orbit(&mut app, 1.25);
-    *app.world_mut().resource_mut::<EditingMode>() = EditingMode::PlaceFreeForm;
+    *app.world_mut().resource_mut::<EditingMode>() = EditingMode::SelectEdit;
     app.world_mut()
         .resource_mut::<ClientInputOwnershipSnapshot>()
         .keyboard = KeyboardInputOwner::Text;
@@ -335,7 +335,7 @@ fn camera_rotation_updates_orbit_when_ownership_allows_camera_control() {
     let mut app = command_test_app();
     let entity = spawn_controlled_input(&mut app);
     let camera = spawn_camera_orbit(&mut app, 1.25);
-    *app.world_mut().resource_mut::<EditingMode>() = EditingMode::PlaceFreeForm;
+    *app.world_mut().resource_mut::<EditingMode>() = EditingMode::SelectEdit;
     press_raw_camera_left(&mut app, entity);
 
     run_fixed_pre_update(&mut app);
@@ -371,7 +371,7 @@ fn camera_yaw_matches_wasd_and_ignores_pointer_ownership() {
     let mut app = command_test_app();
     let entity = spawn_controlled_input(&mut app);
     let camera = spawn_camera_orbit(&mut app, 1.25);
-    *app.world_mut().resource_mut::<EditingMode>() = EditingMode::PlaceFreeForm;
+    *app.world_mut().resource_mut::<EditingMode>() = EditingMode::SelectEdit;
 
     run_fixed_pre_update(&mut app);
 
@@ -452,7 +452,7 @@ fn camera_yaw_does_not_sync_when_text_owns_keyboard() {
     let mut app = command_test_app();
     let entity = spawn_controlled_input(&mut app);
     let camera = spawn_camera_orbit(&mut app, 1.25);
-    *app.world_mut().resource_mut::<EditingMode>() = EditingMode::PlaceFreeForm;
+    *app.world_mut().resource_mut::<EditingMode>() = EditingMode::SelectEdit;
 
     run_fixed_pre_update(&mut app);
 

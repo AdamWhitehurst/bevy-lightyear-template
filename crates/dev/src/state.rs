@@ -8,7 +8,6 @@ pub enum EditingMode {
     #[default]
     Terrain,
     PlaceDefinition,
-    PlaceFreeForm,
     SelectEdit,
 }
 
