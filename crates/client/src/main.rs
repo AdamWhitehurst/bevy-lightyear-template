@@ -160,6 +160,9 @@ fn poll_identity_store_load(
     for (_key, error) in ops.load_errors.drain(..) {
         panic!("Failed to load encrypted identity: {error}");
     }
+    for (_key, error) in ops.save_errors.drain(..) {
+        panic!("Failed to save encrypted identity: {error}");
+    }
 }
 
 fn handle_identity_save_requests(

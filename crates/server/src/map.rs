@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -48,6 +49,16 @@ use voxel_map_engine::persistence::fs_chunk_entities::FsChunkEntitiesStore;
 use voxel_map_engine::persistence::{ChunkFileEnvelope, CHUNK_SAVE_VERSION};
 
 const MAX_BRUSH_VOXELS: usize = 4096;
+
+fn log_save_errors<K, V>(ops: &mut PendingStoreOps<K, V>, context: &str)
+where
+    K: Send + Sync + Debug + 'static,
+    V: Send + Sync + 'static,
+{
+    for (key, error) in ops.save_errors.drain(..) {
+        error!("Failed to save {context} at {key:?}: {error}");
+    }
+}
 
 /// Plugin managing server-side voxel map functionality.
 pub struct ServerMapPlugin;
@@ -163,6 +174,9 @@ fn poll_map_meta(
     type_registry: Res<AppTypeRegistry>,
 ) {
     for (entity, mut ops, store, mut state) in &mut query {
+        ops.poll();
+        log_save_errors(&mut ops, "map metadata");
+
         if *state != MapLoadState::AwaitingMeta {
             continue;
         }
@@ -172,8 +186,6 @@ fn poll_map_meta(
             ops.spawn_load(&store.0, ());
             return;
         }
-
-        ops.poll();
 
         if let Some((_, meta_opt)) = ops.completed_loads.pop() {
             let (seed, gen_version) = match meta_opt {
@@ -432,6 +444,7 @@ fn save_dirty_chunks_flush(
         }
     }
     chunk_ops.flush();
+    log_save_errors(chunk_ops, "chunk data");
 }
 
 pub fn save_world_on_shutdown(
@@ -493,11 +506,13 @@ pub fn save_world_on_shutdown(
         };
         meta_ops.spawn_save(&meta_store.0, (), meta);
         meta_ops.flush();
+        log_save_errors(&mut meta_ops, "map metadata");
 
         if let Some(entities) = by_map.get(map_id) {
             entity_ops.spawn_save(&entity_store.0, (), entities.clone());
         }
         entity_ops.flush();
+        log_save_errors(&mut entity_ops, "map entities");
     }
 
     info!("World saved on shutdown");
@@ -580,6 +595,9 @@ fn poll_map_entities(
     )>,
 ) {
     for (map_id, mut state, store, mut ops) in &mut query {
+        ops.poll();
+        log_save_errors(&mut ops, "map entities");
+
         if *state != MapLoadState::AwaitingEntities {
             continue;
         }
@@ -589,8 +607,6 @@ fn poll_map_entities(
             ops.spawn_load(&store.0, ());
             return;
         }
-
-        ops.poll();
 
         if let Some((_, entities_opt)) = ops.completed_loads.pop() {
             if let Some(entities) = &entities_opt {
@@ -629,6 +645,7 @@ fn on_map_instance_id_added(
 fn poll_chunk_entity_ops(mut query: Query<&mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>>) {
     for mut ops in &mut query {
         ops.poll();
+        log_save_errors(&mut ops, "chunk entities");
     }
 }
 

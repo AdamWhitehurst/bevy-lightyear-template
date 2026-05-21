@@ -1,9 +1,10 @@
-use bevy::log::info_span;
+use bevy::log::{error, info_span};
 use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
+use std::fmt::Debug;
 #[allow(unused_imports)]
 use tracy_client::plot;
 
@@ -154,6 +155,16 @@ pub struct PendingSave {
 
 /// Maximum save tasks drained from queue per frame.
 const MAX_SAVE_SPAWNS_PER_FRAME: usize = 16;
+
+fn log_save_errors<K, V>(ops: &mut PendingStoreOps<K, V>, context: &str)
+where
+    K: Send + Sync + Debug + 'static,
+    V: Send + Sync + 'static,
+{
+    for (key, error) in ops.save_errors.drain(..) {
+        error!("Failed to save {context} at {key:?}: {error}");
+    }
+}
 
 /// Tracks which chunks have in-flight work to prevent overlapping gen/remesh.
 #[derive(Component, Default)]
@@ -547,6 +558,7 @@ pub fn drain_pending_saves(
 ) {
     for (mut pending, chunk_store, mut chunk_ops) in &mut map_query {
         chunk_ops.poll();
+        log_save_errors(&mut chunk_ops, "chunk data");
 
         let mut spawned = 0;
         while !pending.queue.is_empty() && spawned < MAX_SAVE_SPAWNS_PER_FRAME {

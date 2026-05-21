@@ -22,3 +22,6 @@
 [submodule "git/blossom"]
 	path = git/blossom
 	url = https://github.com/hzrd149/blossom
+[submodule "git/bevy-persistence"]
+	path = git/bevy-persistence
+	url = https://github.com/AdamWhitehurst/bevy-persistence.git

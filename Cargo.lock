@@ -785,6 +785,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy-persistence"
+version = "0.1.0"
+source = "git+https://github.com/AdamWhitehurst/bevy-persistence.git#245754b4cc89d7bf05d0e92513c82d19cd3b5045"
+dependencies = [
+ "bevy",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bevy_a11y"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2597,6 +2607,7 @@ dependencies = [
  "approx",
  "avian3d",
  "bevy",
+ "bevy-persistence",
  "bevy_egui",
  "client_lightyear",
  "dev",
@@ -2604,7 +2615,6 @@ dependencies = [
  "lightyear",
  "mock_instant",
  "nostr_client",
- "persistence",
  "protocol",
  "render",
  "tempfile",
@@ -6613,13 +6623,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
-name = "persistence"
-version = "0.1.0"
-dependencies = [
- "bevy",
-]
-
-[[package]]
 name = "petgraph"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7662,6 +7665,7 @@ dependencies = [
  "approx",
  "avian3d",
  "bevy",
+ "bevy-persistence",
  "bincode 1.3.3",
  "client",
  "getrandom 0.3.4",
@@ -7670,7 +7674,6 @@ dependencies = [
  "mock_instant",
  "ndshape",
  "nostr_client",
- "persistence",
  "protocol",
  "ron 0.12.0",
  "serde",
@@ -8728,13 +8731,13 @@ version = "0.1.0"
 dependencies = [
  "approx",
  "bevy",
+ "bevy-persistence",
  "bincode 1.3.3",
  "block-mesh",
  "grid-tree",
  "ndcopy",
  "ndshape",
  "noise",
- "persistence",
  "serde",
  "tempfile",
  "tracy-client",
