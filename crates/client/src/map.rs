@@ -158,6 +158,7 @@ pub struct VoxelPredictionState {
 /// A pending terrain edit prediction awaiting server acknowledgment.
 pub struct VoxelPrediction {
     pub sequence: u32,
+    pub map_id: MapInstanceId,
     pub changes: Vec<PredictedVoxelChange>,
     pub kind: TerrainPredictionKind,
 }
@@ -209,6 +210,8 @@ impl Plugin for ClientMapPlugin {
                     handle_section_blocks_update,
                     handle_voxel_edit_ack,
                     handle_voxel_edit_reject,
+                    #[cfg(feature = "spawn-panel")]
+                    sync_terrain_edit_history_active_map,
                     #[cfg(feature = "spawn-panel")]
                     handle_world_object_placement_ack,
                     #[cfg(feature = "spawn-panel")]
@@ -271,6 +274,19 @@ impl Plugin for ClientMapPlugin {
                     .after(TransformSystems::Propagate),
             );
     }
+}
+
+#[cfg(feature = "spawn-panel")]
+fn sync_terrain_edit_history_active_map(
+    mut history: ResMut<TerrainEditHistory>,
+    player_query: Query<&MapInstanceId, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+) {
+    let Ok(map_id) = player_query.single() else {
+        trace!("sync_terrain_edit_history_active_map: no predicted controlled player map");
+        history.active_map = None;
+        return;
+    };
+    history.active_map = Some(map_id.clone());
 }
 
 pub fn attach_chunk_ticket_to_player(
@@ -365,18 +381,21 @@ pub fn handle_unload_column(
 /// Applies voxel edit broadcasts from the server, skipping positions with pending predictions.
 fn handle_voxel_broadcasts(
     mut receiver: Query<&mut MessageReceiver<VoxelEditBroadcast>>,
-    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    registry: Res<MapRegistry>,
     mut voxel_world: VoxelWorld,
     prediction_state: Res<VoxelPredictionState>,
 ) {
-    let Ok(chunk_ticket) = player_query.single() else {
-        trace!("handle_voxel_broadcasts: no predicted player with ChunkTicket");
-        return;
-    };
     for mut message_receiver in receiver.iter_mut() {
         for broadcast in message_receiver.receive() {
+            let Some(&map_entity) = registry.0.get(&broadcast.map_id) else {
+                trace!(
+                    "handle_voxel_broadcasts: map {:?} not registered",
+                    broadcast.map_id
+                );
+                continue;
+            };
             let has_pending_prediction =
-                has_pending_prediction_at(&prediction_state, broadcast.position);
+                has_pending_prediction_at(&prediction_state, &broadcast.map_id, broadcast.position);
             if has_pending_prediction {
                 trace!(
                     "handle_voxel_broadcasts: skipping broadcast at {:?} (pending prediction)",
@@ -391,7 +410,7 @@ fn handle_voxel_broadcasts(
                 broadcast.voxel
             );
             voxel_world.set_voxel(
-                chunk_ticket.map_entity,
+                map_entity,
                 broadcast.position,
                 WorldVoxel::from(broadcast.voxel),
             );
@@ -402,18 +421,22 @@ fn handle_voxel_broadcasts(
 /// Handles batched block updates from server.
 fn handle_section_blocks_update(
     mut receivers: Query<&mut MessageReceiver<SectionBlocksUpdate>>,
-    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    registry: Res<MapRegistry>,
     mut voxel_world: VoxelWorld,
     prediction_state: Res<VoxelPredictionState>,
 ) {
-    let Ok(chunk_ticket) = player_query.single() else {
-        trace!("handle_section_blocks_update: no predicted player with ChunkTicket");
-        return;
-    };
     for mut receiver in receivers.iter_mut() {
         for update in receiver.receive() {
+            let Some(&map_entity) = registry.0.get(&update.map_id) else {
+                trace!(
+                    "handle_section_blocks_update: map {:?} not registered",
+                    update.map_id
+                );
+                continue;
+            };
             for (pos, voxel) in &update.changes {
-                let has_pending_prediction = has_pending_prediction_at(&prediction_state, *pos);
+                let has_pending_prediction =
+                    has_pending_prediction_at(&prediction_state, &update.map_id, *pos);
                 if has_pending_prediction {
                     trace!(
                         "handle_section_blocks_update: skipping change at {:?} (pending prediction)",
@@ -421,16 +444,21 @@ fn handle_section_blocks_update(
                     );
                     continue;
                 }
-                voxel_world.set_voxel(chunk_ticket.map_entity, *pos, WorldVoxel::from(*voxel));
+                voxel_world.set_voxel(map_entity, *pos, WorldVoxel::from(*voxel));
             }
         }
     }
 }
 
-fn has_pending_prediction_at(prediction_state: &VoxelPredictionState, position: IVec3) -> bool {
+fn has_pending_prediction_at(
+    prediction_state: &VoxelPredictionState,
+    map_id: &MapInstanceId,
+    position: IVec3,
+) -> bool {
     prediction_state
         .pending
         .iter()
+        .filter(|prediction| prediction.map_id == *map_id)
         .flat_map(|prediction| prediction.changes.iter())
         .any(|change| change.position == position)
 }
@@ -615,7 +643,10 @@ fn predicted_voxel_for_brush_mode(
 
 #[cfg(feature = "spawn-panel")]
 fn handle_terrain_brush_input(
-    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    player_query: Query<
+        (&ChunkTicket, &MapInstanceId),
+        (With<Predicted>, With<Controlled>, With<CharacterMarker>),
+    >,
     mut voxel_world: VoxelWorld,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
@@ -632,8 +663,10 @@ fn handle_terrain_brush_input(
         reset_brush_stroke_state(&mut stroke_state);
         return;
     }
-    let Ok(chunk_ticket) = player_query.single() else {
-        trace!("handle_terrain_brush_input: no predicted player with ChunkTicket");
+    let Ok((chunk_ticket, map_id)) = player_query.single() else {
+        trace!(
+            "handle_terrain_brush_input: no predicted player with ChunkTicket and MapInstanceId"
+        );
         reset_brush_stroke_state(&mut stroke_state);
         return;
     };
@@ -703,6 +736,7 @@ fn handle_terrain_brush_input(
     );
     prediction_state.pending.push(VoxelPrediction {
         sequence,
+        map_id: map_id.clone(),
         changes,
         kind: TerrainPredictionKind::NewEdit,
     });
@@ -710,6 +744,7 @@ fn handle_terrain_brush_input(
     for mut sender in message_sender.iter_mut() {
         sender.send::<VoxelChannel>(VoxelBrushEditRequest {
             sequence,
+            map_id: map_id.clone(),
             anchor,
             shape: settings.shape,
             width: settings.width,
@@ -824,7 +859,10 @@ fn reset_brush_stroke_state(stroke_state: &mut TerrainBrushStrokeState) {
 
 #[cfg(not(feature = "spawn-panel"))]
 fn handle_voxel_input(
-    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    player_query: Query<
+        (&ChunkTicket, &MapInstanceId),
+        (With<Predicted>, With<Controlled>, With<CharacterMarker>),
+    >,
     mut voxel_world: VoxelWorld,
     camera_query: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     window_query: Query<&Window, With<PrimaryWindow>>,
@@ -834,8 +872,8 @@ fn handle_voxel_input(
     mut message_sender: Query<&mut MessageSender<VoxelEditRequest>>,
     mut prediction_state: ResMut<VoxelPredictionState>,
 ) {
-    let Ok(chunk_ticket) = player_query.single() else {
-        trace!("handle_voxel_input: no predicted player with ChunkTicket");
+    let Ok((chunk_ticket, map_id)) = player_query.single() else {
+        trace!("handle_voxel_input: no predicted player with ChunkTicket and MapInstanceId");
         return;
     };
     let Ok(action_state) = action_query.single() else {
@@ -889,6 +927,7 @@ fn handle_voxel_input(
 
     prediction_state.pending.push(VoxelPrediction {
         sequence,
+        map_id: map_id.clone(),
         changes: vec![PredictedVoxelChange {
             position,
             old_voxel,
@@ -2066,7 +2105,7 @@ fn handle_voxel_edit_ack(
             let Some(index) = prediction_state
                 .pending
                 .iter()
-                .position(|p| p.sequence == ack.sequence)
+                .position(|p| p.sequence == ack.sequence && p.map_id == ack.map_id)
             else {
                 trace!(
                     "handle_voxel_edit_ack: ack seq={} had no pending prediction",
@@ -2083,19 +2122,23 @@ fn handle_voxel_edit_ack(
 
 #[cfg(feature = "spawn-panel")]
 fn record_acknowledged_prediction(history: &mut TerrainEditHistory, prediction: &VoxelPrediction) {
+    let map_history = history.by_map.entry(prediction.map_id.clone()).or_default();
     match prediction.kind {
         TerrainPredictionKind::NewEdit => {
-            history.undo.push(acknowledged_record(prediction));
-            history.redo.clear();
+            map_history.undo.push(acknowledged_record(prediction));
+            map_history.redo.clear();
         }
-        TerrainPredictionKind::Undo => history.redo.push(reversed_acknowledged_record(prediction)),
-        TerrainPredictionKind::Redo => history.undo.push(acknowledged_record(prediction)),
+        TerrainPredictionKind::Undo => map_history
+            .redo
+            .push(reversed_acknowledged_record(prediction)),
+        TerrainPredictionKind::Redo => map_history.undo.push(acknowledged_record(prediction)),
     }
 }
 
 #[cfg(feature = "spawn-panel")]
 fn acknowledged_record(prediction: &VoxelPrediction) -> TerrainEditRecord {
     TerrainEditRecord {
+        map_id: prediction.map_id.clone(),
         changes: prediction
             .changes
             .iter()
@@ -2111,6 +2154,7 @@ fn acknowledged_record(prediction: &VoxelPrediction) -> TerrainEditRecord {
 #[cfg(feature = "spawn-panel")]
 fn reversed_acknowledged_record(prediction: &VoxelPrediction) -> TerrainEditRecord {
     TerrainEditRecord {
+        map_id: prediction.map_id.clone(),
         changes: prediction
             .changes
             .iter()
@@ -2169,6 +2213,7 @@ fn prediction_from_concrete_changes(
         .collect();
     VoxelPrediction {
         sequence,
+        map_id: record.map_id.clone(),
         changes: predicted,
         kind,
     }
@@ -2179,38 +2224,29 @@ fn handle_terrain_undo_redo_input(
     mut history: ResMut<TerrainEditHistory>,
     mut prediction_state: ResMut<VoxelPredictionState>,
     mut voxel_world: VoxelWorld,
-    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    player_query: Query<
+        (&ChunkTicket, &MapInstanceId),
+        (With<Predicted>, With<Controlled>, With<CharacterMarker>),
+    >,
     mut message_sender: Query<&mut MessageSender<VoxelConcreteEditRequest>>,
 ) {
-    let operation = if history.undo_requested {
+    let Ok((chunk_ticket, active_map_id)) = player_query.single() else {
+        trace!("handle_terrain_undo_redo_input: no predicted player with map context");
         history.undo_requested = false;
-        history.undo.pop().map(|record| {
-            let changes = inverse_changes(&record);
-            (TerrainPredictionKind::Undo, record, changes)
-        })
-    } else if history.redo_requested {
         history.redo_requested = false;
-        history.redo.pop().map(|record| {
-            let changes = reapply_changes(&record);
-            (TerrainPredictionKind::Redo, record, changes)
-        })
-    } else {
-        None
+        return;
     };
+    let operation = terrain_history_operation(&mut history, active_map_id);
 
     let Some((kind, record, changes)) = operation else {
         trace!("handle_terrain_undo_redo_input: no undo/redo operation requested");
         return;
     };
+    debug_assert_eq!(&record.map_id, active_map_id);
     if changes.is_empty() {
         trace!("handle_terrain_undo_redo_input: requested record has no changes");
         return;
     }
-    let Ok(chunk_ticket) = player_query.single() else {
-        trace!("handle_terrain_undo_redo_input: no predicted player");
-        restore_unacked_history_record(&mut history, kind, record);
-        return;
-    };
 
     let sequence = prediction_state.next();
     voxel_world.set_voxels(
@@ -2228,22 +2264,36 @@ fn handle_terrain_undo_redo_input(
     for mut sender in message_sender.iter_mut() {
         sender.send::<VoxelChannel>(VoxelConcreteEditRequest {
             sequence,
+            map_id: record.map_id.clone(),
             changes: changes.clone(),
         });
     }
 }
 
 #[cfg(feature = "spawn-panel")]
-fn restore_unacked_history_record(
+fn terrain_history_operation(
     history: &mut TerrainEditHistory,
-    kind: TerrainPredictionKind,
-    record: TerrainEditRecord,
-) {
-    match kind {
-        TerrainPredictionKind::Undo => history.undo.push(record),
-        TerrainPredictionKind::Redo => history.redo.push(record),
-        TerrainPredictionKind::NewEdit => history.undo.push(record),
+    active_map_id: &MapInstanceId,
+) -> Option<(TerrainPredictionKind, TerrainEditRecord, Vec<VoxelChange>)> {
+    if history.undo_requested {
+        history.undo_requested = false;
+        let map_history = history.by_map.get_mut(active_map_id)?;
+        return map_history.undo.pop().map(|record| {
+            debug_assert_eq!(&record.map_id, active_map_id);
+            let changes = inverse_changes(&record);
+            (TerrainPredictionKind::Undo, record, changes)
+        });
     }
+    if history.redo_requested {
+        history.redo_requested = false;
+        let map_history = history.by_map.get_mut(active_map_id)?;
+        return map_history.redo.pop().map(|record| {
+            debug_assert_eq!(&record.map_id, active_map_id);
+            let changes = reapply_changes(&record);
+            (TerrainPredictionKind::Redo, record, changes)
+        });
+    }
+    None
 }
 
 /// Processes server rejections, rolling back predicted voxels to server state.
@@ -2251,29 +2301,32 @@ fn handle_voxel_edit_reject(
     mut receivers: Query<&mut MessageReceiver<VoxelEditReject>>,
     mut prediction_state: ResMut<VoxelPredictionState>,
     mut voxel_world: VoxelWorld,
-    player_query: Query<&ChunkTicket, (With<Predicted>, With<Controlled>, With<CharacterMarker>)>,
+    registry: Res<MapRegistry>,
 ) {
-    let Ok(chunk_ticket) = player_query.single() else {
-        trace!("handle_voxel_edit_reject: no predicted player");
-        return;
-    };
-
     for mut receiver in &mut receivers {
         for reject in receiver.receive() {
             warn!(
                 "handle_voxel_edit_reject: rejected seq={} at {:?}, correct={:?}",
                 reject.sequence, reject.position, reject.correct_voxel
             );
+            let Some(&map_entity) = registry.0.get(&reject.map_id) else {
+                trace!(
+                    "handle_voxel_edit_reject: map {:?} not registered",
+                    reject.map_id
+                );
+                continue;
+            };
             if rollback_prediction(
                 reject.sequence,
+                &reject.map_id,
                 &mut prediction_state,
                 &mut voxel_world,
-                chunk_ticket.map_entity,
+                map_entity,
             ) {
                 continue;
             }
             voxel_world.set_voxel(
-                chunk_ticket.map_entity,
+                map_entity,
                 reject.position,
                 WorldVoxel::from(reject.correct_voxel),
             );
@@ -2283,6 +2336,7 @@ fn handle_voxel_edit_reject(
 
 fn rollback_prediction(
     sequence: u32,
+    map_id: &MapInstanceId,
     prediction_state: &mut VoxelPredictionState,
     voxel_world: &mut VoxelWorld,
     map_entity: Entity,
@@ -2290,7 +2344,7 @@ fn rollback_prediction(
     let Some(index) = prediction_state
         .pending
         .iter()
-        .position(|p| p.sequence == sequence)
+        .position(|p| p.sequence == sequence && p.map_id == *map_id)
     else {
         trace!("rollback_prediction: no pending prediction for seq={sequence}");
         return false;
@@ -2309,12 +2363,13 @@ fn rollback_prediction(
 #[cfg(test)]
 fn rollback_prediction_changes(
     sequence: u32,
+    map_id: &MapInstanceId,
     prediction_state: &mut VoxelPredictionState,
 ) -> Option<Vec<(IVec3, VoxelType)>> {
     let index = prediction_state
         .pending
         .iter()
-        .position(|p| p.sequence == sequence)?;
+        .position(|p| p.sequence == sequence && p.map_id == *map_id)?;
     let prediction = prediction_state.pending.remove(index);
     Some(
         prediction
@@ -2332,6 +2387,7 @@ mod tests {
     fn prediction(sequence: u32, positions: impl IntoIterator<Item = IVec3>) -> VoxelPrediction {
         VoxelPrediction {
             sequence,
+            map_id: MapInstanceId::Overworld,
             changes: positions
                 .into_iter()
                 .map(|position| PredictedVoxelChange {
@@ -2372,8 +2428,16 @@ mod tests {
             [IVec3::new(5, 10, 15), IVec3::new(6, 10, 15)],
         ));
 
-        assert!(has_pending_prediction_at(&state, IVec3::new(6, 10, 15)));
-        assert!(!has_pending_prediction_at(&state, IVec3::new(1, 2, 3)));
+        assert!(has_pending_prediction_at(
+            &state,
+            &MapInstanceId::Overworld,
+            IVec3::new(6, 10, 15)
+        ));
+        assert!(!has_pending_prediction_at(
+            &state,
+            &MapInstanceId::Overworld,
+            IVec3::new(1, 2, 3)
+        ));
     }
 
     #[test]
@@ -2405,6 +2469,7 @@ mod tests {
         let mut state = VoxelPredictionState::default();
         state.pending.push(VoxelPrediction {
             sequence: 9,
+            map_id: MapInstanceId::Overworld,
             changes: vec![
                 PredictedVoxelChange {
                     position: IVec3::new(1, 0, 0),
@@ -2421,7 +2486,7 @@ mod tests {
         });
 
         assert_eq!(
-            rollback_prediction_changes(9, &mut state),
+            rollback_prediction_changes(9, &MapInstanceId::Overworld, &mut state),
             Some(vec![
                 (IVec3::new(1, 0, 0), VoxelType::Air),
                 (IVec3::new(2, 0, 0), VoxelType::Solid(7)),
@@ -2460,12 +2525,64 @@ mod tests {
 
     fn terrain_record() -> TerrainEditRecord {
         TerrainEditRecord {
+            map_id: MapInstanceId::Overworld,
             changes: vec![AcknowledgedVoxelChange {
                 position: IVec3::new(1, 2, 3),
                 old_voxel: VoxelType::Air,
                 new_voxel: VoxelType::Solid(4),
             }],
         }
+    }
+
+    fn homebase_map_id() -> MapInstanceId {
+        MapInstanceId::Homebase {
+            owner: protocol::NostrPublicKey([7; 32]),
+        }
+    }
+
+    #[test]
+    fn terrain_history_operation_is_scoped_to_active_map() {
+        let homebase = homebase_map_id();
+        let mut history = TerrainEditHistory::default();
+        history.undo_requested = true;
+        history
+            .by_map
+            .entry(MapInstanceId::Overworld)
+            .or_default()
+            .undo
+            .push(terrain_record());
+
+        assert!(terrain_history_operation(&mut history, &homebase).is_none());
+        assert_eq!(
+            history
+                .by_map
+                .get(&MapInstanceId::Overworld)
+                .expect("overworld history should remain present")
+                .undo
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn acknowledged_predictions_record_into_their_own_map_history() {
+        let homebase = homebase_map_id();
+        let mut history = TerrainEditHistory::default();
+        let mut prediction = prediction(10, [IVec3::new(3, 0, 0)]);
+        prediction.map_id = homebase.clone();
+
+        record_acknowledged_prediction(&mut history, &prediction);
+
+        assert!(history.by_map.get(&MapInstanceId::Overworld).is_none());
+        assert_eq!(
+            history
+                .by_map
+                .get(&homebase)
+                .expect("homebase history should be created")
+                .undo
+                .len(),
+            1
+        );
     }
 
     #[test]

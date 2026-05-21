@@ -109,10 +109,10 @@ pub struct PendingVoxelEdit {
     pub map_id: MapInstanceId,
 }
 
-/// Accumulates voxel edits per chunk during a tick for batching.
+/// Accumulates voxel edits per map and chunk during a tick for batching.
 #[derive(Resource, Default)]
 pub struct PendingVoxelBroadcasts {
-    pub per_chunk: HashMap<IVec3, Vec<PendingVoxelEdit>>,
+    pub per_chunk: HashMap<(MapInstanceId, IVec3), Vec<PendingVoxelEdit>>,
 }
 
 /// Tracks a map entity's load lifecycle.
@@ -725,6 +725,7 @@ pub(crate) fn resolve_player_map(
 fn is_edit_valid(
     request: &VoxelEditRequest,
     map_entity: Entity,
+    map_id: &MapInstanceId,
     client_entity: Entity,
     voxel_world: &VoxelWorld,
     reject_senders: &mut Query<&mut MessageSender<VoxelEditReject>>,
@@ -736,6 +737,7 @@ fn is_edit_valid(
     if let Ok(mut sender) = reject_senders.get_mut(client_entity) {
         sender.send::<VoxelChannel>(VoxelEditReject {
             sequence: request.sequence,
+            map_id: map_id.clone(),
             position: request.position,
             correct_voxel: current_voxel.into(),
         });
@@ -768,11 +770,13 @@ fn apply_voxel_edit(
 fn send_edit_ack(
     client_entity: Entity,
     sequence: u32,
+    map_id: MapInstanceId,
     ack_senders: &mut Query<&mut MessageSender<VoxelEditAck>>,
 ) {
     if let Ok(mut sender) = ack_senders.get_mut(client_entity) {
         sender.send::<VoxelChannel>(VoxelEditAck {
             sequence,
+            map_id,
             changes: Vec::new(),
         });
     } else {
@@ -787,7 +791,12 @@ fn queue_edit_broadcast(
     pending: &mut PendingVoxelBroadcasts,
 ) {
     let chunk_pos = voxel_map_engine::prelude::voxel_to_chunk_pos(edit.position, chunk_size);
-    pending.per_chunk.entry(chunk_pos).or_default().push(edit);
+    let map_id = edit.map_id.clone();
+    pending
+        .per_chunk
+        .entry((map_id, chunk_pos))
+        .or_default()
+        .push(edit);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1404,6 +1413,7 @@ pub fn handle_voxel_edit_requests(
             if !is_edit_valid(
                 &request,
                 map_entity,
+                &player_map_id,
                 client_entity,
                 &voxel_world,
                 &mut reject_senders,
@@ -1418,7 +1428,12 @@ pub fn handle_voxel_edit_requests(
                 &mut dirty_state,
                 &time,
             );
-            send_edit_ack(client_entity, request.sequence, &mut ack_senders);
+            send_edit_ack(
+                client_entity,
+                request.sequence,
+                player_map_id.clone(),
+                &mut ack_senders,
+            );
             let chunk_size = voxel_world
                 .chunk_size(map_entity)
                 .expect("map entity has VoxelMapInstance");
@@ -1458,6 +1473,21 @@ pub fn handle_voxel_brush_edit_requests(
                 );
                 continue;
             };
+            if !request_map_matches_player(&request.map_id, &player_map_id) {
+                warn!(
+                    "handle_voxel_brush_edit_requests: rejecting map mismatch request={:?} player={:?}",
+                    request.map_id, player_map_id
+                );
+                send_voxel_edit_reject(
+                    client_entity,
+                    request.sequence,
+                    request.map_id.clone(),
+                    request.anchor,
+                    voxel_world.get_voxel(map_entity, request.anchor).into(),
+                    &mut reject_senders,
+                );
+                continue;
+            }
 
             if !validate_voxel_brush_edit(&request) {
                 warn!(
@@ -1467,6 +1497,7 @@ pub fn handle_voxel_brush_edit_requests(
                 send_voxel_edit_reject(
                     client_entity,
                     request.sequence,
+                    player_map_id.clone(),
                     request.anchor,
                     voxel_world.get_voxel(map_entity, request.anchor).into(),
                     &mut reject_senders,
@@ -1480,7 +1511,13 @@ pub fn handle_voxel_brush_edit_requests(
                     "handle_voxel_brush_edit_requests: sequence {} produced no concrete changes",
                     request.sequence
                 );
-                send_brush_edit_ack(client_entity, request.sequence, changes, &mut ack_senders);
+                send_brush_edit_ack(
+                    client_entity,
+                    request.sequence,
+                    player_map_id.clone(),
+                    changes,
+                    &mut ack_senders,
+                );
                 continue;
             }
 
@@ -1494,6 +1531,7 @@ pub fn handle_voxel_brush_edit_requests(
             send_brush_edit_ack(
                 client_entity,
                 request.sequence,
+                player_map_id.clone(),
                 changes.clone(),
                 &mut ack_senders,
             );
@@ -1538,19 +1576,35 @@ pub fn handle_voxel_concrete_edit_requests(
                 );
                 continue;
             };
+            let reject_position = request
+                .changes
+                .first()
+                .map(|change| change.position)
+                .unwrap_or(IVec3::ZERO);
+            if !request_map_matches_player(&request.map_id, &player_map_id) {
+                warn!(
+                    "handle_voxel_concrete_edit_requests: rejecting map mismatch request={:?} player={:?}",
+                    request.map_id, player_map_id
+                );
+                send_voxel_edit_reject(
+                    client_entity,
+                    request.sequence,
+                    request.map_id.clone(),
+                    reject_position,
+                    voxel_world.get_voxel(map_entity, reject_position).into(),
+                    &mut reject_senders,
+                );
+                continue;
+            }
             if !validate_voxel_concrete_edit(&request) {
                 warn!(
                     "handle_voxel_concrete_edit_requests: rejecting invalid concrete request sequence {}",
                     request.sequence
                 );
-                let reject_position = request
-                    .changes
-                    .first()
-                    .map(|change| change.position)
-                    .unwrap_or(IVec3::ZERO);
                 send_voxel_edit_reject(
                     client_entity,
                     request.sequence,
+                    player_map_id.clone(),
                     reject_position,
                     voxel_world.get_voxel(map_entity, reject_position).into(),
                     &mut reject_senders,
@@ -1568,6 +1622,7 @@ pub fn handle_voxel_concrete_edit_requests(
             send_brush_edit_ack(
                 client_entity,
                 request.sequence,
+                player_map_id.clone(),
                 request.changes.clone(),
                 &mut ack_senders,
             );
@@ -1647,11 +1702,16 @@ fn apply_voxel_changes(
 fn send_brush_edit_ack(
     client_entity: Entity,
     sequence: u32,
+    map_id: MapInstanceId,
     changes: Vec<VoxelChange>,
     ack_senders: &mut Query<&mut MessageSender<VoxelEditAck>>,
 ) {
     if let Ok(mut sender) = ack_senders.get_mut(client_entity) {
-        sender.send::<VoxelChannel>(VoxelEditAck { sequence, changes });
+        sender.send::<VoxelChannel>(VoxelEditAck {
+            sequence,
+            map_id,
+            changes,
+        });
     } else {
         warn!("send_brush_edit_ack: no ack sender for {client_entity:?}");
     }
@@ -1660,6 +1720,7 @@ fn send_brush_edit_ack(
 fn send_voxel_edit_reject(
     client_entity: Entity,
     sequence: u32,
+    map_id: MapInstanceId,
     position: IVec3,
     correct_voxel: VoxelType,
     reject_senders: &mut Query<&mut MessageSender<VoxelEditReject>>,
@@ -1667,12 +1728,20 @@ fn send_voxel_edit_reject(
     if let Ok(mut sender) = reject_senders.get_mut(client_entity) {
         sender.send::<VoxelChannel>(VoxelEditReject {
             sequence,
+            map_id,
             position,
             correct_voxel,
         });
     } else {
         warn!("send_voxel_edit_reject: no reject sender for {client_entity:?}");
     }
+}
+
+fn request_map_matches_player(
+    request_map_id: &MapInstanceId,
+    player_map_id: &MapInstanceId,
+) -> bool {
+    request_map_id == player_map_id
 }
 
 /// Validates a concrete voxel edit request. Returns false if the whole request should be rejected.
@@ -1712,12 +1781,12 @@ pub fn flush_voxel_broadcasts(
         return;
     }
 
-    for (chunk_pos, edits) in pending.per_chunk.drain() {
-        let Some(first) = edits.first() else {
+    for ((map_id, chunk_pos), edits) in pending.per_chunk.drain() {
+        let Some(_first) = edits.first() else {
             continue;
         };
-        let Some(&room_entity) = room_registry.0.get(&first.map_id) else {
-            warn!("flush_voxel_broadcasts: no room for map {:?}", first.map_id);
+        let Some(&room_entity) = room_registry.0.get(&map_id) else {
+            warn!("flush_voxel_broadcasts: no room for map {:?}", map_id);
             continue;
         };
         let Ok(room) = rooms.get(room_entity) else {
@@ -1739,6 +1808,7 @@ pub fn flush_voxel_broadcasts(
             sender
                 .send_to_entities::<_, VoxelChannel>(
                     &VoxelEditBroadcast {
+                        map_id: map_id.clone(),
                         position: edit.position,
                         voxel: edit.voxel,
                     },
@@ -1750,7 +1820,11 @@ pub fn flush_voxel_broadcasts(
                 edits.iter().map(|e| (e.position, e.voxel)).collect();
             sender
                 .send_to_entities::<_, VoxelChannel>(
-                    &SectionBlocksUpdate { chunk_pos, changes },
+                    &SectionBlocksUpdate {
+                        map_id: map_id.clone(),
+                        chunk_pos,
+                        changes,
+                    },
                     &targets,
                 )
                 .ok();
@@ -2230,7 +2304,7 @@ mod tests {
         let mut pending = PendingVoxelBroadcasts::default();
         pending
             .per_chunk
-            .entry(IVec3::ZERO)
+            .entry((MapInstanceId::Overworld, IVec3::ZERO))
             .or_default()
             .push(make_edit(IVec3::new(1, 2, 3), VoxelType::Solid(1)));
 
@@ -2246,7 +2320,10 @@ mod tests {
     #[test]
     fn multiple_changes_in_same_chunk_takes_batched_path() {
         let mut pending = PendingVoxelBroadcasts::default();
-        let entry = pending.per_chunk.entry(IVec3::ZERO).or_default();
+        let entry = pending
+            .per_chunk
+            .entry((MapInstanceId::Overworld, IVec3::ZERO))
+            .or_default();
         entry.push(make_edit(IVec3::new(1, 2, 3), VoxelType::Solid(1)));
         entry.push(make_edit(IVec3::new(4, 5, 6), VoxelType::Air));
 
@@ -2282,6 +2359,7 @@ mod tests {
     fn brush_request(width: u32, height: u32) -> VoxelBrushEditRequest {
         VoxelBrushEditRequest {
             sequence: 1,
+            map_id: MapInstanceId::Overworld,
             anchor: IVec3::ZERO,
             shape: voxel_map_engine::prelude::TerrainBrushShape::Rect,
             width,
@@ -2346,9 +2424,26 @@ mod tests {
     }
 
     #[test]
+    fn request_map_must_match_player_map() {
+        let homebase = MapInstanceId::Homebase {
+            owner: NostrPublicKey([9; 32]),
+        };
+
+        assert!(request_map_matches_player(
+            &MapInstanceId::Overworld,
+            &MapInstanceId::Overworld
+        ));
+        assert!(!request_map_matches_player(
+            &homebase,
+            &MapInstanceId::Overworld
+        ));
+    }
+
+    #[test]
     fn concrete_request_validation_rejects_empty_changes() {
         let request = VoxelConcreteEditRequest {
             sequence: 42,
+            map_id: MapInstanceId::Overworld,
             changes: Vec::new(),
         };
 
@@ -2359,6 +2454,7 @@ mod tests {
     fn concrete_request_validation_rejects_oversized_payloads() {
         let request = VoxelConcreteEditRequest {
             sequence: 42,
+            map_id: MapInstanceId::Overworld,
             changes: (0..=MAX_BRUSH_VOXELS)
                 .map(|index| VoxelChange {
                     position: IVec3::new(index as i32, 0, 0),
@@ -2374,6 +2470,7 @@ mod tests {
     fn concrete_request_validation_accepts_changes() {
         let request = VoxelConcreteEditRequest {
             sequence: 42,
+            map_id: MapInstanceId::Overworld,
             changes: vec![VoxelChange {
                 position: IVec3::new(1, 2, 3),
                 voxel: VoxelType::Solid(7),
@@ -2388,12 +2485,12 @@ mod tests {
         let mut pending = PendingVoxelBroadcasts::default();
         pending
             .per_chunk
-            .entry(IVec3::ZERO)
+            .entry((MapInstanceId::Overworld, IVec3::ZERO))
             .or_default()
             .push(make_edit(IVec3::new(1, 2, 3), VoxelType::Solid(1)));
         pending
             .per_chunk
-            .entry(IVec3::ONE)
+            .entry((MapInstanceId::Overworld, IVec3::ONE))
             .or_default()
             .push(make_edit(IVec3::new(17, 18, 19), VoxelType::Solid(2)));
 
@@ -2413,7 +2510,7 @@ mod tests {
         let mut pending = PendingVoxelBroadcasts::default();
         pending
             .per_chunk
-            .entry(IVec3::ZERO)
+            .entry((MapInstanceId::Overworld, IVec3::ZERO))
             .or_default()
             .push(make_edit(IVec3::new(1, 2, 3), VoxelType::Solid(1)));
 

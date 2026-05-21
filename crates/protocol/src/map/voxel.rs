@@ -2,6 +2,8 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use voxel_map_engine::prelude::{TerrainBrushMode, TerrainBrushShape, VoxelType};
 
+use super::MapInstanceId;
+
 /// Channel for voxel editing messages
 pub struct VoxelChannel;
 
@@ -27,6 +29,7 @@ pub struct VoxelChange {
 #[type_path = "protocol::map"]
 pub struct VoxelBrushEditRequest {
     pub sequence: u32,
+    pub map_id: MapInstanceId,
     pub anchor: IVec3,
     pub shape: TerrainBrushShape,
     pub width: u32,
@@ -40,6 +43,7 @@ pub struct VoxelBrushEditRequest {
 #[type_path = "protocol::map"]
 pub struct VoxelConcreteEditRequest {
     pub sequence: u32,
+    pub map_id: MapInstanceId,
     pub changes: Vec<VoxelChange>,
 }
 
@@ -47,6 +51,7 @@ pub struct VoxelConcreteEditRequest {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
 #[type_path = "protocol::map"]
 pub struct VoxelEditBroadcast {
+    pub map_id: MapInstanceId,
     pub position: IVec3,
     pub voxel: VoxelType,
 }
@@ -56,6 +61,7 @@ pub struct VoxelEditBroadcast {
 #[type_path = "protocol::map"]
 pub struct VoxelEditAck {
     pub sequence: u32,
+    pub map_id: MapInstanceId,
     pub changes: Vec<VoxelChange>,
 }
 
@@ -64,6 +70,7 @@ pub struct VoxelEditAck {
 #[type_path = "protocol::map"]
 pub struct VoxelEditReject {
     pub sequence: u32,
+    pub map_id: MapInstanceId,
     pub position: IVec3,
     pub correct_voxel: VoxelType,
 }
@@ -72,6 +79,7 @@ pub struct VoxelEditReject {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Reflect, Message)]
 #[type_path = "protocol::map"]
 pub struct SectionBlocksUpdate {
+    pub map_id: MapInstanceId,
     pub chunk_pos: IVec3,
     pub changes: Vec<(IVec3, VoxelType)>,
 }

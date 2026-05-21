@@ -1,5 +1,8 @@
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 use bevy_egui::egui;
+use protocol::MapInstanceId;
 use voxel_map_engine::prelude::{TerrainBrushMode, TerrainBrushShape, VoxelType};
 
 /// How held terrain brush input repeats while the pointer is down.
@@ -29,15 +32,23 @@ pub struct TerrainBrushSettings {
 /// Client-side history of acknowledged terrain edits.
 #[derive(Resource, Default, Clone, Debug)]
 pub struct TerrainEditHistory {
-    pub undo: Vec<TerrainEditRecord>,
-    pub redo: Vec<TerrainEditRecord>,
+    pub by_map: HashMap<MapInstanceId, MapTerrainEditHistory>,
+    pub active_map: Option<MapInstanceId>,
     pub undo_requested: bool,
     pub redo_requested: bool,
+}
+
+/// Undo and redo stacks scoped to one map instance.
+#[derive(Default, Clone, Debug)]
+pub struct MapTerrainEditHistory {
+    pub undo: Vec<TerrainEditRecord>,
+    pub redo: Vec<TerrainEditRecord>,
 }
 
 /// One acknowledged terrain operation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TerrainEditRecord {
+    pub map_id: MapInstanceId,
     pub changes: Vec<AcknowledgedVoxelChange>,
 }
 
@@ -80,15 +91,21 @@ pub fn draw_terrain_controls(
     settings: &mut TerrainBrushSettings,
     history: &mut TerrainEditHistory,
 ) {
+    let map_history = history
+        .active_map
+        .as_ref()
+        .and_then(|map_id| history.by_map.get(map_id));
+    let can_undo = map_history.is_some_and(|history| !history.undo.is_empty());
+    let can_redo = map_history.is_some_and(|history| !history.redo.is_empty());
     ui.horizontal(|ui| {
         if ui
-            .add_enabled(!history.undo.is_empty(), egui::Button::new("Undo"))
+            .add_enabled(can_undo, egui::Button::new("Undo"))
             .clicked()
         {
             history.undo_requested = true;
         }
         if ui
-            .add_enabled(!history.redo.is_empty(), egui::Button::new("Redo"))
+            .add_enabled(can_redo, egui::Button::new("Redo"))
             .clicked()
         {
             history.redo_requested = true;
