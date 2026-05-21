@@ -19,3 +19,6 @@
 [submodule "git/block-mesh-rs"]
 	path = git/block-mesh-rs
 	url = https://github.com/AdamWhitehurst/block-mesh-rs.git
+[submodule "git/blossom"]
+	path = git/blossom
+	url = https://github.com/hzrd149/blossom
