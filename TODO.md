@@ -17,14 +17,13 @@
   - [x] manages nostr relays
   - [ ] read events
   - [x] post events
-  - [ ] update events
+  - [x] update events
   - [ ] delete events
   - [ ] login + ui
   - [ ] new keys + ui
-  - [ ] server discovery + ui
+  - [x] server discovery + ui
   - [ ] map ownership tied to nostr identities. Overworld = server's, Homebase = client's
   - [ ] chat messaging, includes map id
-- [ ] Nostr Node/Relay? May not be needed if can just use publicly available ones
 
 - [ ] Singleplayer
   - [ ] Persistence
@@ -34,14 +33,12 @@
 ## Considering
 
 - [ ] Guiding player character, ability characters follow
-- moving cloud background skybox at max depth
 - process distance sprite rigs at half the rate for performance?
 - Social system that hooks into dialogue system
 - Expose, split bevy-lightyear-template:
   - readme: how to add assets: animations, world objects, etc.
   - readme: built-in claude qrspi skills
   - stand-alone modules
-- agent skills: component design, system design, networking, physics knowledge
 - dampen player stats by distance from spawn?
 - update world object system on hot reload by first remove WorldObjectId's components using old loaded Def, load new Def, insert_if_new(...) ?
 - client --autoconnect flag
