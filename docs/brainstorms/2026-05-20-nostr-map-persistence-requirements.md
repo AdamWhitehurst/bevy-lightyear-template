@@ -75,7 +75,7 @@ This is v1 **map/layout persistence**, not full Home-Base simulation persistence
 - R20. A server restart should restore the latest valid overworld state from either Nostr or filesystem.
 - R21. V1 sync status may be internal/log/debug-visible plus a simple system-readable enum; polished player-facing conflict UI is out of scope unless separately required.
 - R22. Map transition requests that need remote persistence data must enter a server-owned transition preparing state before the player is relocated/frozen into the destination map. The server may delay starting the existing map transition while it fetches, validates, and selects Nostr/Blossom/filesystem data.
-- R23. Nostr/Blossom-specific loading must stay in server or persistence integration code; `voxel_map_engine` must remain backend-agnostic and must not depend on `nostr_client`.
+- R23. Nostr/Blossom-specific transport and publication should be provided by `nostr_client` behind an optional persistence feature, so both client and server can integrate through the same Nostr/Blossom persistence API. `voxel_map_engine` must remain backend-agnostic and must not depend on `nostr_client`.
 - R24. Server map lifecycle must gate transition progress on map readiness. `ensure_map_exists` may spawn the target map in a non-ready state such as `CheckingRemote`, `LoadingBlossom`, or `Reconciling`; chunk generation, chunk push, and transition completion must wait for `MapLoadState::Ready`.
 - R25. If transition start messages require seed/dimensions before the map is ready, planning must define whether manifest/meta must be fetched before `MapTransitionStart` is sent or whether seed/dimensions are stable independently of remote save data.
 
@@ -120,7 +120,7 @@ This is v1 **map/layout persistence**, not full Home-Base simulation persistence
 - Remote persistence fetches should be coordinated by a server-side transition preparing state before the existing map transition begins; this keeps players in their current map while save selection runs.
 - Server map lifecycle should gate transition progress: `MapLoadState` can grow states such as `CheckingRemote`, `LoadingBlossom`, and `Reconciling`, and chunk generation, chunk push, and transition completion should wait for `Ready`.
 - `MapTransitionStart` needs seed/dimensions, so planning must decide whether manifest/meta is fetched before sending it or whether seed/dimensions are stable independently.
-- `voxel_map_engine` must not know about Nostr or Blossom. Backend-specific fetch/reconcile behavior belongs in server/persistence integration code, with the voxel engine consuming only selected, validated map data through backend-agnostic persistence boundaries.
+- `voxel_map_engine` must not know about Nostr or Blossom. Nostr/Blossom transport, publication, relay queries, Blossom upload/download, and signed manifest handling belong in `nostr_client` behind an optional persistence feature that both client and server can use; server/client game code still owns authority, validation, reconciliation, and map lifecycle decisions through backend-agnostic persistence boundaries.
 
 ---
 
@@ -141,7 +141,7 @@ This is v1 **map/layout persistence**, not full Home-Base simulation persistence
 
 - [Resolved] V1 freshness uses a monotonic revision chain: each save records a revision and previous save hash; divergent or ambiguous chains are rejected/quarantined rather than silently overwritten.
 - [Resolved] V1 Nostr map persistence uses manifest events plus chunk/entity payload references and supports chunk-level updates for all map types. Large payloads are stored in Blossom blobs addressed by sha256; Nostr events carry the signed revision-chain manifest, ownership metadata, content hashes, and Blossom retrieval hints.
-- [Resolved] Transition-time remote loading uses a server-owned transition preparing state before player relocation/freezing. Nostr/Blossom integration stays outside `voxel_map_engine`; the voxel engine remains backend-agnostic.
+- [Resolved] Transition-time remote loading uses a server-owned transition preparing state before player relocation/freezing. Nostr/Blossom integration stays outside `voxel_map_engine`; shared transport/publication support lives in `nostr_client` behind an optional persistence feature that both client and server can use.
 - [Resolved] Map entity lifecycle uses readiness gating: `ensure_map_exists` may create a non-ready map, remote/filesystem reconciliation advances `MapLoadState`, and chunk generation, chunk push, and transition completion wait for `MapLoadState::Ready`.
 - [Affects R4, R12, R21, R22, R24][User decision] What minimum sync states and stale/divergent-state actions should exist before gameplay proceeds?
 
