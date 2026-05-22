@@ -1,176 +1,155 @@
-# Bevy Lightyear Template
+# Untitled Brawler
 
-Multi-transport networked game template using Bevy and Lightyear.
+Untitled Brawler is a multiplayer 2.5D brawler prototype built with Rust, Bevy, Lightyear, and a custom voxel map engine.
 
-**Game Vision**: See [VISION.md](VISION.md) for the game design document.
+See [VISION.md](VISION.md) for the long-term game vision.
 
-## Features
+## Current Features
 
-- **Server**: Authoritative server supporting UDP, WebTransport, and WebSocket
-- **Native Client**: Desktop client connecting via UDP
-- **WASM Client**: Browser client connecting via WebTransport/WebSocket
-- **Voxel Map System**: Networked voxel terrain (voxel_map_engine, in progress)
-- **Ability System**: Data-driven abilities loaded from RON assets with networked replication
+- Server-authoritative multiplayer over WebTransport with Lightyear prediction/replication.
+- Native and WASM clients that connect to the same authoritative server.
+- Nostr identity, server discovery, and connection authentication.
+- Persistent voxel maps with Overworld and per-player Homebase instances.
+- Server-authoritative terrain sculpting, world-object placement, editing, and persistence.
+- Data-driven abilities, combat phases, hit detection, health, death, and respawn.
+- Sprite-rig character rendering and RON-loaded animation assets.
+- In-game dev inspector for physics debug, world inspection, spawn tools, and terrain tools.
 
-## Quick Start
+## Prerequisites
 
-### 1. Setup
+- Rust toolchain from `rust-toolchain.toml`
+- `openssl` for local WebTransport certificates
+- `cargo-make` for aliases that call `cargo make`
+- `wasm-pack` and Firefox for WASM tests
+
+Initial setup:
 
 ```bash
 sh scripts/setup.sh
 ```
 
-This installs dependencies and generates certificates.
+This installs the WASM target, installs Bevy CLI, and generates local certificates.
 
-### 2. Configure Nostr identities
+## Running
 
-Nostr `nsec1...` values are plaintext private keys. Do not commit them, paste them into logs, or share them. The server and client use them differently:
-
-#### Server identity
-
-The server signs its relay announcement with a durable Nostr key. Provide it with either:
-
-- `SERVER_NSEC`, which takes precedence, or
-- `keys/server.nsec`, used as the local development fallback.
-
-Both sources may contain either a raw `nsec1...` secret or an encrypted NIP-49 `ncryptsec1...` value. If you use `ncryptsec1...`, also set `SERVER_NSEC_PASSPHRASE`.
+Start the server:
 
 ```bash
-# One-shot env var
 SERVER_NSEC='nsec1...' cargo server
-
-# Or local file fallback
-mkdir -p keys
-printf '%s\n' 'nsec1...' > keys/server.nsec
-chmod 600 keys/server.nsec
-cargo server
-
-# Encrypted server key
-SERVER_NSEC='ncryptsec1...' SERVER_NSEC_PASSPHRASE='...' cargo server
 ```
 
-#### Client identity
-
-The native client starts on the Nostr Login screen:
-
-- **Generate** creates a new Nostr key, encrypts it with the passphrase you enter, and stores only encrypted identity data in `worlds/identity.bin`.
-- **Import** accepts an existing `nsec1...`, encrypts it with the passphrase you enter, and stores only encrypted identity data in `worlds/identity.bin`.
-- On later launches, enter the same passphrase on **Unlock** to reuse the same public key and durable identity.
-- To reset the native client identity, stop the client and delete `worlds/identity.bin`.
-
-The web client can Generate or Import for the current browser session, but it does not write `worlds/identity.bin`.
-
-Relay discovery uses custom Nostr kind `30078` with identifier tag `#d=untitled-brawler`; clients ignore expired announcements. Discovery uses the default public relay list unless `NOSTR_RELAYS` is set to a comma-separated list of `wss://...` relay URLs:
+If the server identity is encrypted, also set:
 
 ```bash
-NOSTR_RELAYS='wss://relay.damus.io,wss://nos.lol' cargo client
+NOSTR_IDENTITY_PASSPHRASE='...' SERVER_NSEC='ncryptsec1...' cargo server
 ```
 
-### 3. Run Server
-
-```bash
-cargo server
-```
-
-Server listens on:
-
-- UDP: `0.0.0.0:5000`
-- WebTransport: `0.0.0.0:5001`
-- WebSocket: `0.0.0.0:5002`
-
-### 4. Run Native Client
+Start the native client:
 
 ```bash
 cargo client
 ```
 
-Connects to server via UDP on `127.0.0.1:5000`.
-
-### 5. Run WASM Client
+Start the web client:
 
 ```bash
-bevy run --bin web
+cargo web
 ```
 
-Opens browser to HTTPS dev server. Client connects via WebTransport on `127.0.0.1:5001`.
+The server listens on WebTransport at `0.0.0.0:5001`. Native and web clients default to `127.0.0.1:5001`.
 
-**Note**: Accept the self-signed certificate warning in your browser.
+Useful variants:
 
-## Project Structure
-
-```
-bevy-lightyear-template/
-├── crates/
-│   ├── protocol/       # Shared network protocol, voxel map, and ability types
-│   ├── server/         # Authoritative server with voxel world
-│   ├── client/         # Native client with voxel rendering
-│   ├── web/            # WASM client
-│   ├── render/         # 3D rendering systems
-│   ├── sprite_rig/     # 2D sprite rig animation system
-│   ├── ui/             # UI components
-│   └── dev/            # Development tooling (physics debug, runtime toggles)
-├── assets/             # Game assets (ability definitions, etc.)
-├── certificates/       # TLS certificates (generated)
-├── scripts/            # Build and run scripts
-├── doc/                # Documentation and plans
-├── crates/voxel_map_engine/ # Custom voxel engine (replacing bevy_voxel_world)
-└── git/                # Git submodules (lightyear, etc.)
+```bash
+cargo server-log      # run server and tee clean logs to server.log
+cargo client-log      # run client and tee clean logs to client.log
+cargo server-tracy    # run server with tracy feature
+cargo client-tracy    # run client with tracy feature
 ```
 
-## Development
+## Nostr Identities
 
-### Cargo Aliases
+Do not commit or log `nsec1...` private keys.
 
-- `cargo server` - Run server
-- `cargo client` - Run native client
-- `cargo check-all` - Check all crates
-- `cargo build-all` - Build all native targets
-- `cargo web-build` - Build WASM client
+- Server identity comes from `SERVER_NSEC` first, otherwise from an encrypted profile identity.
+- Encrypted `ncryptsec1...` or profile identities require `NOSTR_IDENTITY_PASSPHRASE`.
+- Client identity is created or imported from the login screen, then stored encrypted under the Nostr config directory.
+- Use profiles when running multiple identities locally:
 
-### Dev Inspector
+```bash
+cargo server -- --nostr-identity dev-server
+cargo client -- --nostr-identity alice
+```
 
-Press `F4` to toggle the dev inspector root menu. With the spawn panel enabled, press `F6` or use the root menu to open it. Dev hotkeys route through client-local `RawClientActions` and are suppressed while UI/text owns keyboard input. Def-driven world-object placement is server-authoritative: select an object, arm placement, preview the terrain target, then click terrain in-game. The same panel can select existing replicated world objects by arming cursor pick and clicking in-game or by nearby list, then request authoritative delete, move, or yaw rotation edits that persist across chunk reloads. World-object and terrain pointer commands use client-local Leafwing `RawClientActions` before ownership gating. The Terrain tab provides activatable brush sculpting controls, rectangular width/height settings, mode-applied left-click brush strokes, discrete/continuous stroke modes with continuous frame-rate throttling, initial-hit-face stroke locking, UI-click suppression, latched pointer ownership so UI-started drags do not sculpt, a voxel footprint preview, server-authoritative Fill Air/Remove/Paint Existing/Replace All brush strokes, and acknowledged Undo/Redo while in Terrain editing mode; material 1 renders brown and material 2 renders grey.
+Server discovery uses Nostr kind `30078` with identifier `untitled-brawler`. Override relays with:
 
-### Certificate Regeneration
+```bash
+NOSTR_RELAYS='wss://relay.damus.io,wss://nos.lol' cargo client
+```
 
-Certificates expire after 14 days. Regenerate with:
+## Development Commands
+
+```bash
+cargo check-all       # cargo check --workspace
+cargo build-all       # build native workspace crates, excluding web
+cargo web-build       # release build for wasm32-unknown-unknown
+cargo test-native     # native tests, excluding web
+cargo test-wasm       # wasm-pack Firefox tests for crates/web
+cargo test-all        # native then WASM tests
+```
+
+Regenerate local certificates:
 
 ```bash
 sh certificates/generate.sh
+# or
+cargo make generate-certs
 ```
 
-### WASM Development
+## Controls
 
-Bevy CLI provides hot reload for WASM development:
+- `WASD` / left gamepad stick: move
+- `Space` / gamepad south: jump
+- `Q` / `E`: rotate camera
+- `1`-`4`: ability slots
+- Left/right mouse: place/remove terrain or interact with armed edit tools
+- `Delete`: delete selected world object
+- `F3`: physics debug
+- `F4`: dev inspector root
+- `F5`: world inspector
+- `F6`: spawn panel
 
-```bash
-# From project root:
-bevy run --bin web
+Gameplay hotkeys are filtered through client-local input ownership so focused UI/text input does not trigger gameplay actions.
 
-# Or with auto-open in browser:
-bevy run --bin web --open
-```
+## Assets and Game Data
 
-## Ability System
+- Abilities: `assets/abilities.manifest.ron` and `assets/abilities/*.ability.ron`
+- Default ability loadout: `assets/default.ability_slots.ron`
+- Terrain definitions: `assets/terrain.manifest.ron` and `assets/terrain/*.terrain.ron`
+- World objects: `assets/objects.manifest.ron` and `assets/objects/*.object.ron`
+- Voxel models: `assets/models.manifest.ron` and `assets/models/**`
+- Sprite rigs/animations: `assets/rigs/**` and `assets/anims/**`
 
-Abilities are defined in `assets/abilities.ron` and loaded at startup. Each character has 4 ability slots mapped to keys 1-4. Ability hotkeys first populate client-local `RawClientActions`, then keyboard ownership filters them into Lightyear-buffered `NetworkedPlayerActions`; UI/text keyboard ownership suppresses ability activation before input buffering. Movement, jump, Q/E camera rotation, and camera yaw follow the same keyboard ownership filter.
+## Project Structure
 
-### Hotkeys
-
-- `1` - Ability slot 1 when gameplay owns keyboard input
-- `2` - Ability slot 2 when gameplay owns keyboard input
-- `3` - Ability slot 3 when gameplay owns keyboard input
-- `4` - Ability slot 4 when gameplay owns keyboard input
-- `F3` - Toggle physics debug wireframes when gameplay owns keyboard input
-- `F4` - Toggle dev inspector root menu when gameplay owns keyboard input
-- `F5` - Toggle world inspector when gameplay owns keyboard input
-- `F6` - Toggle spawn panel when gameplay owns keyboard input
-
-### Defining Abilities
-
-Edit `assets/abilities.ron` to add or modify abilities. Each ability has:
-
-- Phase durations (startup, active, recovery) in ticks (64 ticks = 1 second)
-- Cooldown in ticks
-- Effects list with triggers: `OnTick` (fires once on a specified Active-phase tick offset, defaults to tick 0), `WhileActive` (fires every tick), `OnHit` (fires when a hitbox/projectile hits a target), `OnEnd` (fires on Active exit), or `OnInput` (fires on semantic ability input during Active for combo chaining). `OnInput` asset entries use `input: Slot(0)` through `Slot(3)` for ability slots; runtime maps them onto filtered `NetworkedPlayerActions`.
-- Effect types: `Melee`, `Projectile`, `AreaOfEffect`, `SetVelocity`, `Damage`, `ApplyForce`, `Ability` (spawns sub-ability), `Teleport`, `Shield`, or `Buff`
+| Path | Purpose |
+| --- | --- |
+| `crates/protocol` | Shared replicated gameplay types, messages, abilities, terrain/object assets, auth, and transitions. |
+| `crates/server` | Authoritative server gameplay, map lifecycle, persistence, world objects, and Nostr announcements. |
+| `crates/client` | Native client app, input ownership, map rendering/editing integration, auth, and identity persistence. |
+| `crates/web` | WASM client entrypoint. |
+| `crates/client_lightyear` | Native WebTransport client networking setup. |
+| `crates/client_web_lightyear` | WASM WebTransport client networking setup. |
+| `crates/server_lightyear` | WebTransport server networking setup. |
+| `crates/render` | Camera, lighting, health bars, sprite-rig rendering, and visual helpers. |
+| `crates/ui` | Login, server list, menus, HUD, and map-switch UI. |
+| `crates/dev` | Dev inspector, physics debug, spawn/world/terrain panels. |
+| `crates/voxel_map_engine` | Voxel terrain generation, chunk lifecycle, meshing, brush edits, and map internals. |
+| `crates/sprite_rig` | Sprite rig assets, animation loading, and billboarded rig spawning. |
+| `crates/nostr_client` | Nostr relay pool, encrypted identity, server announcements, and auth helpers. |
+| `assets` | Game data, sprites, rigs, animations, terrain, objects, and voxel models. |
+| `worlds` | Local generated/persisted world data. |
+| `docs` | Brainstorms, task plans, bug notes, and deeper design documents. |
+| `git` | Checked-out dependency sources and submodules. |
+| `certificates` | Local WebTransport certificates and digest. |
+| `scripts` | Setup and helper scripts. |
