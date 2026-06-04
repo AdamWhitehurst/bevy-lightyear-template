@@ -14,12 +14,13 @@ use nostr_map_persistence::manifest::{ManifestPayloadSlot, PayloadClass, Payload
 use nostr_map_persistence::{
     compute_descriptor_root, compute_manifest_hash, encode_chunk_entities_payload,
     encode_chunk_payload, encode_map_entities_payload, encode_map_meta_payload, finalize_manifest,
-    manifest_to_json, validate_homebase_manifest_attestation, BlossomBlobPutStore,
-    HomebasePayloadScope, HomebasePublicationAttestation, ManifestHash, ManifestPayloadDescriptor,
-    MapPersistenceRejection, MapRevision, NostrMapManifest, CHUNK_ENTITIES_SCHEMA_VERSION,
-    MAP_ENTITIES_SCHEMA_VERSION, MAP_META_SCHEMA_VERSION,
+    manifest_to_json, upload_prepared_slots, validate_homebase_manifest_attestation,
+    BlossomBlobPutStore, HomebasePayloadScope, HomebasePublicationAttestation, ManifestHash,
+    ManifestPayloadDescriptor, MapPersistenceRejection, MapRevision, NostrMapManifest,
+    PreparedPublishSlot, CHUNK_ENTITIES_SCHEMA_VERSION, MAP_ENTITIES_SCHEMA_VERSION,
+    MAP_META_SCHEMA_VERSION,
 };
-use persistence::{AsyncStore, Store, StoreBackend};
+use persistence::{Store, StoreBackend};
 use protocol::map::{
     HomebaseAttestationRequest, HomebaseAttestationResponse, HomebasePublished, MapChannel,
     SavedEntity,
@@ -862,19 +863,18 @@ async fn upload_and_build_unsigned_manifest(
     descriptor_root: [u8; 32],
     attestation: HomebasePublicationAttestation,
 ) -> Result<(String, [u8; 32]), MapPersistenceRejection> {
-    let mut payloads = Vec::with_capacity(present_payloads.len() + tombstoned.len());
-    for (mut descriptor, bytes) in present_payloads {
-        if let ManifestPayloadSlot::Present { blob } = &mut descriptor.slot {
-            let mut get_url = base_url.clone();
-            get_url.set_path(&hex::encode(blob.sha256));
-            blob.urls = vec![get_url.to_string()];
-            blob_store.save(blob, &bytes).await.map_err(|e| {
-                MapPersistenceRejection::Unavailable(format!("upload homebase blob: {e}"))
-            })?;
-        }
-        payloads.push(descriptor);
+    let mut prepared = Vec::with_capacity(present_payloads.len() + tombstoned.len());
+    for (descriptor, bytes) in present_payloads {
+        prepared.push(PreparedPublishSlot::from_present_descriptor(
+            descriptor, bytes, &base_url,
+        )?);
     }
-    payloads.extend(tombstoned);
+    prepared.extend(
+        tombstoned
+            .into_iter()
+            .map(PreparedPublishSlot::from_descriptor),
+    );
+    let payloads = upload_prepared_slots(&blob_store, prepared).await?;
 
     let manifest = finalize_manifest(
         payloads,

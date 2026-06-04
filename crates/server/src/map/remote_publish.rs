@@ -8,9 +8,9 @@ use bevy::tasks::Task;
 use nostr_client::BlobRef;
 use nostr_map_persistence::{
     build_signed_map_manifest_event, encode_chunk_entities_payload, encode_chunk_payload,
-    encode_map_entities_payload, encode_map_meta_payload, finalize_manifest, upload_publish_slot,
-    ManifestHash, ManifestPayloadDescriptor, ManifestPayloadSlot, MapPersistenceRejection,
-    MapRevision, NostrManifestPublishStore, PayloadClass, PayloadKey,
+    encode_map_entities_payload, encode_map_meta_payload, finalize_manifest, prepare_publish_slot,
+    upload_prepared_slots, ManifestHash, ManifestPayloadDescriptor, ManifestPayloadSlot,
+    MapPersistenceRejection, MapRevision, NostrManifestPublishStore, PayloadClass, PayloadKey,
 };
 use persistence::{
     AsyncStore, AsyncStoreBackend, PendingAsyncStoreOps, PersistenceError, SaveOpId, Store,
@@ -272,23 +272,18 @@ pub async fn prepare_server_map_publish_entry(
 ) -> Result<crate::persistence::RemotePublishJournalEntry, MapPersistenceRejection> {
     let map_id = MapInstanceId::Overworld;
     let owner = identity.protocol_public_key();
-    let mut payloads = Vec::new();
+    let mut prepared = Vec::with_capacity(draft.chunks.len() + draft.chunk_entities.len() + 2);
 
-    upload_publish_slot(
-        &mut payloads,
-        blob_store,
+    prepared.push(prepare_publish_slot(
         public_blossom_base_url,
         PayloadClass::MapMeta,
         PayloadKey::Singleton,
         1,
         draft.meta.clone(),
         encode_server_map_meta,
-    )
-    .await?;
+    )?);
     for (chunk_pos, slot) in draft.chunks.clone() {
-        upload_publish_slot(
-            &mut payloads,
-            blob_store,
+        prepared.push(prepare_publish_slot(
             public_blossom_base_url,
             PayloadClass::TerrainChunk,
             PayloadKey::Chunk {
@@ -299,13 +294,10 @@ pub async fn prepare_server_map_publish_entry(
             voxel_map_engine::persistence::CHUNK_SAVE_VERSION,
             slot,
             encode_chunk_payload,
-        )
-        .await?;
+        )?);
     }
     for (chunk_pos, slot) in draft.chunk_entities.clone() {
-        upload_publish_slot(
-            &mut payloads,
-            blob_store,
+        prepared.push(prepare_publish_slot(
             public_blossom_base_url,
             PayloadClass::ChunkEntities,
             PayloadKey::Chunk {
@@ -316,20 +308,17 @@ pub async fn prepare_server_map_publish_entry(
             3,
             slot,
             encode_chunk_entities_payload,
-        )
-        .await?;
+        )?);
     }
-    upload_publish_slot(
-        &mut payloads,
-        blob_store,
+    prepared.push(prepare_publish_slot(
         public_blossom_base_url,
         PayloadClass::MapEntities,
         PayloadKey::Singleton,
         1,
         draft.map_entities.clone(),
         encode_map_entities_payload,
-    )
-    .await?;
+    )?);
+    let payloads = upload_prepared_slots(blob_store, prepared).await?;
 
     let manifest = finalize_manifest(
         payloads,

@@ -5990,6 +5990,7 @@ version = "0.1.0"
 dependencies = [
  "bevy-persistence",
  "bincode 1.3.3",
+ "futures",
  "futures-lite",
  "hex",
  "nostr-sdk",

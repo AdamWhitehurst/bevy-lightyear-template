@@ -16,6 +16,7 @@ hex = "0.4"
 sha2 = "0.10"
 thiserror = "2"
 url = "2"
+futures = "0.3"
 
 [dev-dependencies]
 futures-lite = "2"

@@ -13,8 +13,9 @@ pub use attestation::{
 };
 pub use payloads::{
     encode_chunk_entities_payload, encode_chunk_payload, encode_map_entities_payload,
-    encode_map_meta_payload, upload_publish_slot, CHUNK_ENTITIES_SCHEMA_VERSION,
-    MAP_ENTITIES_SCHEMA_VERSION, MAP_META_SCHEMA_VERSION,
+    encode_map_meta_payload, prepare_publish_slot, upload_prepared_slots, PreparedPublishSlot,
+    CHUNK_ENTITIES_SCHEMA_VERSION, MAP_ENTITIES_SCHEMA_VERSION, MAP_META_SCHEMA_VERSION,
+    MAX_CONCURRENT_BLOB_TRANSFERS,
 };
 pub use protocol::{HomebasePayloadScope, HomebasePublicationAttestation};
 pub use validation::validate_homebase_manifest_attestation;

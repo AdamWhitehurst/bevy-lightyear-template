@@ -124,10 +124,47 @@ pub struct RawMapEntitiesPayload {
     pub bytes: Vec<u8>,
 }
 
-/// Raw present payload collection fetched from a manifest.
+/// Raw present payload collection whose bytes are verified against their
+/// content-addressed descriptors.
+///
+/// The private field forces construction through [`RawMapPayloads::from_unverified`]
+/// (which hashes) or the crate-internal verified path, so downstream validation can
+/// trust the bytes without re-hashing every blob.
 #[derive(Clone, Debug)]
 pub struct RawMapPayloads {
-    pub present_payloads: Vec<(ManifestPayloadDescriptor, Vec<u8>)>,
+    present_payloads: Vec<(ManifestPayloadDescriptor, Vec<u8>)>,
+}
+
+impl RawMapPayloads {
+    /// Wraps payload bytes already hash-verified at fetch time
+    /// (`fetch_and_verify_blob`), skipping a redundant re-hash.
+    pub(crate) fn from_verified(
+        present_payloads: Vec<(ManifestPayloadDescriptor, Vec<u8>)>,
+    ) -> Self {
+        Self { present_payloads }
+    }
+
+    /// Verifies untrusted payload bytes against each descriptor's content-addressed
+    /// blob reference before wrapping them.
+    pub fn from_unverified(
+        present_payloads: Vec<(ManifestPayloadDescriptor, Vec<u8>)>,
+    ) -> Result<Self, MapPersistenceRejection> {
+        for (descriptor, bytes) in &present_payloads {
+            let ManifestPayloadSlot::Present { blob } = &descriptor.slot else {
+                return Err(MapPersistenceRejection::Invalid(
+                    "raw payload bytes supplied for non-present descriptor".to_string(),
+                ));
+            };
+            nostr_client::blobs::verify_blob_bytes(blob.sha256, Some(blob.size), bytes.clone())
+                .map_err(|error| MapPersistenceRejection::Invalid(error.to_string()))?;
+        }
+        Ok(Self { present_payloads })
+    }
+
+    /// Consumes the verified payload bytes.
+    pub(crate) fn into_present_payloads(self) -> Vec<(ManifestPayloadDescriptor, Vec<u8>)> {
+        self.present_payloads
+    }
 }
 
 /// Complete raw map save assembled from a validated manifest chain.

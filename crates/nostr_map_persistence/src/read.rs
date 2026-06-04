@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use futures::stream::{StreamExt, TryStreamExt};
 use nostr_client::events::{NostrEventClient, NostrEventKind, NostrEventQuery};
 use protocol::{MapInstanceId, NostrPublicKey};
 use thiserror::Error;
@@ -290,11 +291,7 @@ pub async fn download_payloads(
         )));
     }
 
-    let blob_policy = nostr_client::blobs::BlobFetchPolicy {
-        max_bytes: policy.max_blob_bytes,
-        allowed_hosts: policy.allowed_blossom_hosts.clone(),
-    };
-    let mut present_payloads = Vec::with_capacity(descriptor_count);
+    let mut pending_blobs = Vec::with_capacity(descriptor_count);
     for manifest in manifest_chain {
         verify_descriptor_root(manifest)?;
         for descriptor in &manifest.payloads {
@@ -306,9 +303,7 @@ pub async fn download_payloads(
             }
             match &descriptor.slot {
                 ManifestPayloadSlot::Present { blob } => {
-                    let verified =
-                        nostr_client::blobs::fetch_and_verify_blob(blob, &blob_policy).await?;
-                    present_payloads.push((descriptor.clone(), verified.bytes));
+                    pending_blobs.push((descriptor.clone(), blob.clone()));
                 }
                 ManifestPayloadSlot::Empty
                 | ManifestPayloadSlot::Absent
@@ -316,7 +311,26 @@ pub async fn download_payloads(
             }
         }
     }
-    Ok(RawMapPayloads { present_payloads })
+
+    // Blobs are content-addressed and independent, so they download concurrently
+    // (bounded); each is hash-verified by `fetch_and_verify_blob`.
+    let blob_policy = nostr_client::blobs::BlobFetchPolicy {
+        max_bytes: policy.max_blob_bytes,
+        allowed_hosts: policy.allowed_blossom_hosts.clone(),
+    };
+    let present_payloads = futures::stream::iter(pending_blobs)
+        .map(|(descriptor, blob)| {
+            let blob_policy = &blob_policy;
+            async move {
+                let verified =
+                    nostr_client::blobs::fetch_and_verify_blob(&blob, blob_policy).await?;
+                Ok::<_, RemotePersistenceError>((descriptor, verified.bytes))
+            }
+        })
+        .buffered(crate::payloads::MAX_CONCURRENT_BLOB_TRANSFERS)
+        .try_collect()
+        .await?;
+    Ok(RawMapPayloads::from_verified(present_payloads))
 }
 
 /// Validates raw payloads against a manifest chain and assembles a raw save.
@@ -333,7 +347,7 @@ pub fn validate_remote_map_save(
     }
 
     let mut bytes_by_descriptor = BTreeMap::new();
-    for (descriptor, bytes) in payloads.present_payloads {
+    for (descriptor, bytes) in payloads.into_present_payloads() {
         let ManifestPayloadSlot::Present { blob } = &descriptor.slot else {
             return Err(MapPersistenceRejection::Invalid(
                 "raw payload bytes supplied for non-present descriptor".to_string(),
@@ -696,14 +710,33 @@ mod tests {
         let manifest = manifest_with_payloads(owner, 1, None, vec![meta_descriptor(b"meta")]);
         let rejection = validate_remote_map_save(
             vec![manifest],
-            RawMapPayloads {
-                present_payloads: Vec::new(),
-            },
+            RawMapPayloads::from_unverified(Vec::new()).expect("empty payloads verify"),
             MapPersistencePolicy::default(),
             RawSaveBase::Empty,
         )
         .expect_err("missing bytes rejected");
         assert!(matches!(rejection, MapPersistenceRejection::Incomplete(_)));
+    }
+
+    #[test]
+    fn map_persistence_raw_payloads_from_unverified_rejects_tampered_bytes() {
+        let descriptor = meta_descriptor(b"meta");
+        let rejection = RawMapPayloads::from_unverified(vec![(descriptor, b"evil".to_vec())])
+            .expect_err("tampered bytes rejected");
+        assert!(matches!(rejection, MapPersistenceRejection::Invalid(_)));
+    }
+
+    #[test]
+    fn map_persistence_raw_payloads_from_unverified_rejects_non_present_descriptor() {
+        let descriptor = ManifestPayloadDescriptor {
+            class: PayloadClass::MapMeta,
+            key: PayloadKey::Singleton,
+            slot: ManifestPayloadSlot::Tombstoned,
+            schema_version: 1,
+        };
+        let rejection = RawMapPayloads::from_unverified(vec![(descriptor, b"meta".to_vec())])
+            .expect_err("bytes for non-present descriptor rejected");
+        assert!(matches!(rejection, MapPersistenceRejection::Invalid(_)));
     }
 
     #[test]
@@ -755,9 +788,8 @@ mod tests {
         let manifest = manifest_with_payloads(owner, 1, None, vec![descriptor.clone()]);
         let save = validate_remote_map_save(
             vec![manifest],
-            RawMapPayloads {
-                present_payloads: vec![(descriptor, bytes.clone())],
-            },
+            RawMapPayloads::from_unverified(vec![(descriptor, bytes.clone())])
+                .expect("matching payload bytes verify"),
             MapPersistencePolicy::default(),
             RawSaveBase::Empty,
         )
