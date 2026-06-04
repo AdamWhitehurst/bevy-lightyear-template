@@ -353,15 +353,15 @@ pub fn validate_remote_map_save(
                 "raw payload bytes supplied for non-present descriptor".to_string(),
             ));
         };
-        let verified = nostr_client::blobs::verify_blob_bytes(blob.sha256, Some(blob.size), bytes)
-            .map_err(|error| MapPersistenceRejection::Invalid(error.to_string()))?;
+        // Bytes are hash-verified at `RawMapPayloads` construction (fetch-time for the
+        // download path, `from_unverified` otherwise), so no re-hash is needed here.
         bytes_by_descriptor.insert(
             (
                 descriptor.class.clone(),
                 descriptor.key.clone(),
                 blob.sha256,
             ),
-            verified.bytes,
+            bytes,
         );
     }
 
