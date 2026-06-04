@@ -42,6 +42,7 @@
 
 ## Considering
 
+- entity targetting w/ camera facing axis of action (180 degree rule)
 - Out of scope (flagging, not fixing): the FsLocalUnpublishedPublishDraftStore is pinned the same way and could lose unpublished drafts across a restore — same bug class
 - [ ] Guiding player character, ability characters follow
 - process distance sprite rigs at half the rate for performance?
