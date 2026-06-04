@@ -9,9 +9,9 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 use nostr_map_persistence::{
-    ManifestHash, ManifestPayloadDescriptor, MapPersistenceRejection, MapRevision, PayloadClass,
-    PayloadKey, PayloadSlotState, RawChunkEntitiesPayload, RawChunkPayload, RawMapEntitiesPayload,
-    RawMapMetaPayload, RawValidatedMapDelta, RawValidatedMapSave,
+    ManifestHash, ManifestPayloadDescriptor, MapPersistenceRejection, MapRevision, PayloadKey,
+    PayloadSlotState, RawChunkEntitiesPayload, RawChunkPayload, RawMapEntitiesPayload,
+    RawMapMetaPayload, RawValidatedMapSave,
 };
 use persistence::{PersistenceError, SaveOpId, Store, StoreBackend};
 use protocol::map::SavedEntity;
@@ -21,7 +21,11 @@ use sha2::{Digest, Sha256};
 use voxel_map_engine::config::WorldObjectSpawn;
 use voxel_map_engine::persistence::fs_chunk::FsChunkStore;
 use voxel_map_engine::persistence::fs_chunk_entities::FsChunkEntitiesStore;
-use voxel_map_engine::persistence::{chunk_file_path, entity_file_path, ChunkFileEnvelope};
+use voxel_map_engine::persistence::{
+    chunk_file_path, entity_file_path, ChunkFileEnvelope,
+    EntityFileEnvelope as ChunkEntityFileEnvelope,
+    ENTITY_SAVE_VERSION as CHUNK_ENTITY_SAVE_VERSION,
+};
 
 pub(crate) const META_VERSION: u32 = 1;
 
@@ -42,16 +46,6 @@ pub struct ServerValidatedMapSave {
     pub chunk_entities: Vec<(IVec3, Vec<WorldObjectSpawn>)>,
     pub map_entities: Option<Vec<SavedEntity>>,
     pub revision: MapRevision,
-}
-
-/// Server-decoded map delta accepted by persistence preflight.
-#[derive(Clone, Debug)]
-pub struct ServerValidatedMapDelta {
-    pub revision: MapRevision,
-    pub meta: PayloadSlotState<MapMeta>,
-    pub chunks: Vec<(IVec3, PayloadSlotState<ChunkFileEnvelope>)>,
-    pub chunk_entities: Vec<(IVec3, PayloadSlotState<Vec<WorldObjectSpawn>>)>,
-    pub map_entities: PayloadSlotState<Vec<SavedEntity>>,
 }
 
 impl TryFrom<RawValidatedMapSave> for ServerValidatedMapSave {
@@ -88,42 +82,6 @@ impl TryFrom<RawValidatedMapSave> for ServerValidatedMapSave {
     }
 }
 
-impl TryFrom<RawValidatedMapDelta> for ServerValidatedMapDelta {
-    type Error = MapPersistenceRejection;
-
-    fn try_from(raw: RawValidatedMapDelta) -> Result<Self, Self::Error> {
-        Ok(Self {
-            revision: raw.revision,
-            meta: try_map_slot(raw.meta, decode_map_meta_payload)?,
-            chunks: try_map_keyed_slots(raw.chunks, decode_chunk_envelope)?,
-            chunk_entities: try_map_keyed_slots(raw.chunk_entities, decode_chunk_entities_payload)?,
-            map_entities: try_map_slot(raw.map_entities, decode_map_entities_payload)?,
-        })
-    }
-}
-
-fn try_map_slot<T, U>(
-    slot: PayloadSlotState<T>,
-    decode: impl FnOnce(T) -> Result<U, MapPersistenceRejection>,
-) -> Result<PayloadSlotState<U>, MapPersistenceRejection> {
-    match slot {
-        PayloadSlotState::Present(value) => Ok(PayloadSlotState::Present(decode(value)?)),
-        PayloadSlotState::Empty => Ok(PayloadSlotState::Empty),
-        PayloadSlotState::Absent => Ok(PayloadSlotState::Absent),
-        PayloadSlotState::Tombstoned => Ok(PayloadSlotState::Tombstoned),
-    }
-}
-
-fn try_map_keyed_slots<T, U>(
-    slots: Vec<(PayloadKey, PayloadSlotState<T>)>,
-    decode_value: impl Fn(T) -> Result<U, MapPersistenceRejection>,
-) -> Result<Vec<(IVec3, PayloadSlotState<U>)>, MapPersistenceRejection> {
-    slots
-        .into_iter()
-        .map(|(key, slot)| Ok((chunk_key_to_ivec3(key)?, try_map_slot(slot, &decode_value)?)))
-        .collect()
-}
-
 fn chunk_key_to_ivec3(key: PayloadKey) -> Result<IVec3, MapPersistenceRejection> {
     match key {
         PayloadKey::Chunk { x, y, z } => Ok(IVec3::new(x, y, z)),
@@ -158,16 +116,8 @@ fn decode_chunk_entities_payload(
     if payload.bytes.is_empty() {
         return Ok(Vec::new());
     }
-    #[derive(Deserialize)]
-    struct ChunkEntityPayloadEnvelope {
-        version: u32,
-        spawns: Vec<WorldObjectSpawn>,
-    }
-    const CHUNK_ENTITY_SAVE_VERSION: u32 = 3;
-    let envelope = zstd_bincode_decode::<ChunkEntityPayloadEnvelope>(
-        &payload.bytes,
-        "chunk entities payload",
-    )?;
+    let envelope =
+        zstd_bincode_decode::<ChunkEntityFileEnvelope>(&payload.bytes, "chunk entities payload")?;
     if envelope.version != CHUNK_ENTITY_SAVE_VERSION {
         return Err(MapPersistenceRejection::Invalid(format!(
             "chunk entities payload version mismatch: expected {CHUNK_ENTITY_SAVE_VERSION}, got {}",
@@ -294,31 +244,11 @@ pub struct FsAcceptedMapHeadStore {
 
 impl Store<(), MapRevision> for FsAcceptedMapHeadStore {
     fn load(&self, _key: &()) -> Result<Option<MapRevision>, PersistenceError> {
-        let path = self.path();
-        if !path.exists() {
-            trace!(?path, "accepted map head file is absent");
-            return Ok(None);
-        }
-        let bytes = fs::read(&path)
-            .map_err(|e| PersistenceError::Deserialize(format!("read accepted head: {e}")))?;
-        let revision = bincode::deserialize(&bytes).map_err(|e| {
-            PersistenceError::Deserialize(format!("deserialize accepted head: {e}"))
-        })?;
-        Ok(Some(revision))
+        load_optional_bincode(&self.path())
     }
 
     fn save(&self, _key: &(), revision: &MapRevision) -> Result<(), PersistenceError> {
-        let path = self.path();
-        fs::create_dir_all(path.parent().expect("accepted head path has parent"))
-            .map_err(|e| PersistenceError::Serialize(format!("mkdir accepted head parent: {e}")))?;
-        let bytes = bincode::serialize(revision)
-            .map_err(|e| PersistenceError::Serialize(format!("serialize accepted head: {e}")))?;
-        let tmp_path = path.with_extension("bin.tmp");
-        fs::write(&tmp_path, bytes)
-            .map_err(|e| PersistenceError::Serialize(format!("write accepted head tmp: {e}")))?;
-        fs::rename(&tmp_path, &path)
-            .map_err(|e| PersistenceError::Serialize(format!("rename accepted head: {e}")))?;
-        Ok(())
+        atomic_save_bincode(&self.path(), revision)
     }
 }
 
@@ -336,30 +266,11 @@ pub struct FsLocalMapHeadStore {
 
 impl Store<(), LocalMapHead> for FsLocalMapHeadStore {
     fn load(&self, _key: &()) -> Result<Option<LocalMapHead>, PersistenceError> {
-        let path = self.path();
-        if !path.exists() {
-            trace!(?path, "local map head file is absent");
-            return Ok(None);
-        }
-        let bytes = fs::read(&path)
-            .map_err(|e| PersistenceError::Deserialize(format!("read local head: {e}")))?;
-        let head = bincode::deserialize(&bytes)
-            .map_err(|e| PersistenceError::Deserialize(format!("deserialize local head: {e}")))?;
-        Ok(Some(head))
+        load_optional_bincode(&self.path())
     }
 
     fn save(&self, _key: &(), head: &LocalMapHead) -> Result<(), PersistenceError> {
-        let path = self.path();
-        fs::create_dir_all(path.parent().expect("local head path has parent"))
-            .map_err(|e| PersistenceError::Serialize(format!("mkdir local head parent: {e}")))?;
-        let bytes = bincode::serialize(head)
-            .map_err(|e| PersistenceError::Serialize(format!("serialize local head: {e}")))?;
-        let tmp_path = path.with_extension("bin.tmp");
-        fs::write(&tmp_path, bytes)
-            .map_err(|e| PersistenceError::Serialize(format!("write local head tmp: {e}")))?;
-        fs::rename(&tmp_path, &path)
-            .map_err(|e| PersistenceError::Serialize(format!("rename local head: {e}")))?;
-        Ok(())
+        atomic_save_bincode(&self.path(), head)
     }
 }
 
@@ -390,30 +301,11 @@ pub struct FsMapChangeSetStore {
 
 impl Store<(), MapChangeSet> for FsMapChangeSetStore {
     fn load(&self, _key: &()) -> Result<Option<MapChangeSet>, PersistenceError> {
-        let path = self.path();
-        if !path.exists() {
-            trace!(?path, "map change-set file is absent");
-            return Ok(None);
-        }
-        let bytes = fs::read(&path)
-            .map_err(|e| PersistenceError::Deserialize(format!("read change set: {e}")))?;
-        let change_set = bincode::deserialize(&bytes)
-            .map_err(|e| PersistenceError::Deserialize(format!("deserialize change set: {e}")))?;
-        Ok(Some(change_set))
+        load_optional_bincode(&self.path())
     }
 
     fn save(&self, _key: &(), value: &MapChangeSet) -> Result<(), PersistenceError> {
-        let path = self.path();
-        fs::create_dir_all(path.parent().expect("change set path has parent"))
-            .map_err(|e| PersistenceError::Serialize(format!("mkdir change set parent: {e}")))?;
-        let bytes = bincode::serialize(value)
-            .map_err(|e| PersistenceError::Serialize(format!("serialize change set: {e}")))?;
-        let tmp_path = path.with_extension("bin.tmp");
-        fs::write(&tmp_path, bytes)
-            .map_err(|e| PersistenceError::Serialize(format!("write change set tmp: {e}")))?;
-        fs::rename(&tmp_path, &path)
-            .map_err(|e| PersistenceError::Serialize(format!("rename change set: {e}")))?;
-        Ok(())
+        atomic_save_bincode(&self.path(), value)
     }
 }
 
@@ -1098,170 +990,6 @@ pub fn install_active_revision_store_backends(
         StoreBackend::new(FsChunkEntitiesStore { map_dir }),
     ));
     Ok(())
-}
-
-/// Base state used when replaying a remote delta chain.
-pub enum SaveBase {
-    Empty,
-    Snapshot(ServerValidatedMapSave),
-}
-
-/// Replays validated deltas over a base snapshot to produce a complete map save.
-pub fn assemble_validated_map_save(
-    base: SaveBase,
-    chain: Vec<ServerValidatedMapDelta>,
-) -> Result<ServerValidatedMapSave, MapPersistenceRejection> {
-    fn upsert_slot<K: PartialEq, V>(slots: &mut Vec<(K, V)>, key: K, value: V) {
-        if let Some(index) = slots.iter().position(|(existing, _)| existing == &key) {
-            slots[index].1 = value;
-        } else {
-            slots.push((key, value));
-        }
-    }
-
-    fn remove_slot<K: PartialEq, V>(slots: &mut Vec<(K, V)>, key: &K) {
-        slots.retain(|(existing, _)| existing != key);
-    }
-
-    fn apply_required_slot<T>(
-        current: &mut Option<T>,
-        slot: PayloadSlotState<T>,
-        class: PayloadClass,
-    ) -> Result<(), MapPersistenceRejection> {
-        match slot {
-            PayloadSlotState::Present(value) => *current = Some(value),
-            PayloadSlotState::Absent => {
-                trace!(?class, "delta slot absent; preserving previous value")
-            }
-            PayloadSlotState::Tombstoned => *current = None,
-            PayloadSlotState::Empty => {
-                return Err(MapPersistenceRejection::Invalid(format!(
-                    "empty slot is invalid for required payload class {class:?}"
-                )));
-            }
-        }
-        Ok(())
-    }
-
-    fn apply_entity_slot<T: Default>(
-        current: &mut Option<T>,
-        slot: PayloadSlotState<T>,
-        class: PayloadClass,
-    ) {
-        match slot {
-            PayloadSlotState::Present(value) => *current = Some(value),
-            PayloadSlotState::Empty => *current = Some(T::default()),
-            PayloadSlotState::Absent => trace!(
-                ?class,
-                "entity delta slot absent; preserving previous value"
-            ),
-            PayloadSlotState::Tombstoned => *current = None,
-        }
-    }
-
-    fn apply_keyed_required_slot<K: PartialEq + std::fmt::Debug, T>(
-        slots: &mut Vec<(K, T)>,
-        key: K,
-        slot: PayloadSlotState<T>,
-        class: PayloadClass,
-    ) -> Result<(), MapPersistenceRejection> {
-        match slot {
-            PayloadSlotState::Present(value) => upsert_slot(slots, key, value),
-            PayloadSlotState::Absent => trace!(
-                ?class,
-                ?key,
-                "keyed delta slot absent; preserving previous value"
-            ),
-            PayloadSlotState::Tombstoned => remove_slot(slots, &key),
-            PayloadSlotState::Empty => {
-                return Err(MapPersistenceRejection::Invalid(format!(
-                    "empty slot is invalid for required payload class {class:?} at {key:?}"
-                )));
-            }
-        }
-        Ok(())
-    }
-
-    fn apply_keyed_entity_slot<K: PartialEq + std::fmt::Debug, T: Default>(
-        slots: &mut Vec<(K, T)>,
-        key: K,
-        slot: PayloadSlotState<T>,
-        class: PayloadClass,
-    ) {
-        match slot {
-            PayloadSlotState::Present(value) => upsert_slot(slots, key, value),
-            PayloadSlotState::Empty => upsert_slot(slots, key, T::default()),
-            PayloadSlotState::Absent => trace!(
-                ?class,
-                ?key,
-                "keyed entity delta slot absent; preserving previous value"
-            ),
-            PayloadSlotState::Tombstoned => remove_slot(slots, &key),
-        }
-    }
-
-    let (
-        mut meta,
-        mut chunks,
-        mut chunk_entities,
-        mut map_entities,
-        mut revision,
-        mut expected_previous_hash,
-    ) = match base {
-        SaveBase::Empty => (None, Vec::new(), Vec::new(), None, None, None),
-        SaveBase::Snapshot(snapshot) => (
-            Some(snapshot.meta),
-            snapshot.chunks,
-            snapshot.chunk_entities,
-            snapshot.map_entities,
-            Some(snapshot.revision.clone()),
-            Some(snapshot.revision.manifest_hash),
-        ),
-    };
-
-    for delta in chain {
-        if delta.revision.previous_hash != expected_previous_hash {
-            return Err(MapPersistenceRejection::Divergent(format!(
-                "delta revision {} previous hash {:?} does not match expected {:?}",
-                delta.revision.revision, delta.revision.previous_hash, expected_previous_hash
-            )));
-        }
-        apply_required_slot(&mut meta, delta.meta, PayloadClass::MapMeta)?;
-        for (chunk_pos, slot) in delta.chunks {
-            apply_keyed_required_slot(&mut chunks, chunk_pos, slot, PayloadClass::TerrainChunk)?;
-        }
-        for (chunk_pos, slot) in delta.chunk_entities {
-            apply_keyed_entity_slot(
-                &mut chunk_entities,
-                chunk_pos,
-                slot,
-                PayloadClass::ChunkEntities,
-            );
-        }
-        apply_entity_slot(
-            &mut map_entities,
-            delta.map_entities,
-            PayloadClass::MapEntities,
-        );
-        expected_previous_hash = Some(delta.revision.manifest_hash);
-        revision = Some(delta.revision);
-    }
-
-    let revision = revision.ok_or_else(|| {
-        MapPersistenceRejection::Incomplete(
-            "cannot assemble map save without a base or delta revision".into(),
-        )
-    })?;
-    let meta = meta.ok_or_else(|| {
-        MapPersistenceRejection::Incomplete("assembled map save is missing metadata".into())
-    })?;
-    Ok(ServerValidatedMapSave {
-        meta,
-        chunks,
-        chunk_entities,
-        map_entities,
-        revision,
-    })
 }
 
 fn create_revision_staging_dir(

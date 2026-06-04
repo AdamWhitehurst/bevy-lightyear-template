@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use bevy::prelude::*;
-use nostr_map_persistence::MapPersistenceRejection;
 use persistence::{PendingStoreOps, StoreBackend};
 use protocol::map::SavedEntity;
 use protocol::{MapInstanceId, MapRegistry, NostrPublicKey};
@@ -45,9 +44,7 @@ pub fn ensure_map_exists(
                 };
             }
             MapLoadState::Blocked(reason) => return MapPreparation::Blocked(reason.clone()),
-            MapLoadState::CheckingPersistence
-            | MapLoadState::AwaitingMeta
-            | MapLoadState::AwaitingEntities => {
+            MapLoadState::CheckingPersistence | MapLoadState::AwaitingEntities => {
                 if state.is_changed() {
                     trace!(
                         ?map_id,
@@ -133,9 +130,4 @@ fn transition_params(config: &VoxelMapConfig, dimensions: &MapDimensions) -> Map
         chunk_size: dimensions.chunk_size,
         column_y_range: dimensions.column_y_range,
     }
-}
-
-/// Convert a rejection into a preparation state without losing the detailed reason.
-pub fn blocked_preparation(reason: MapPersistenceRejection) -> MapPreparation {
-    MapPreparation::Blocked(reason)
 }

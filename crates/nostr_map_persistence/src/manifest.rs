@@ -196,27 +196,6 @@ pub fn manifest_hash_hex(hash: ManifestHash) -> String {
     hash.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-/// Parses a lowercase/uppercase hexadecimal manifest hash.
-pub fn parse_manifest_hash_hex(text: &str) -> Result<ManifestHash, ManifestVerificationError> {
-    let bytes = hex_decode_32(text).ok_or_else(|| {
-        ManifestVerificationError::Invalid(format!("invalid manifest hash hex: {text}"))
-    })?;
-    Ok(bytes)
-}
-
-fn hex_decode_32(text: &str) -> Option<[u8; 32]> {
-    if text.len() != 64 {
-        return None;
-    }
-    let mut out = [0; 32];
-    for (index, chunk) in text.as_bytes().chunks_exact(2).enumerate() {
-        let hi = (chunk[0] as char).to_digit(16)? as u8;
-        let lo = (chunk[1] as char).to_digit(16)? as u8;
-        out[index] = (hi << 4) | lo;
-    }
-    Some(out)
-}
-
 /// Returns canonical bytes for deterministic descriptor ordering.
 pub fn manifest_payload_descriptor_order(descriptor: &ManifestPayloadDescriptor) -> Vec<u8> {
     serde_json::to_vec(descriptor)

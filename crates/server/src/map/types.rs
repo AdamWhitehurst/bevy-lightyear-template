@@ -8,7 +8,6 @@ use crate::persistence::{MapMeta, ServerValidatedMapSave};
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub enum MapLoadState {
     CheckingPersistence,
-    AwaitingMeta,
     AwaitingEntities,
     Blocked(MapPersistenceRejection),
     Ready,
@@ -41,14 +40,6 @@ pub enum MapPreflightKind {
 pub struct PendingMapPreflight {
     pub target_map_id: MapInstanceId,
     pub kind: MapPreflightKind,
-}
-
-/// Completed persistence preflight decision produced by the preflight state machine.
-#[derive(Clone, Debug)]
-pub struct MapPersistencePreflightResult {
-    pub target_map_id: MapInstanceId,
-    pub kind: MapPreflightKind,
-    pub decision: MapPersistencePreflightDecision,
 }
 
 /// Seed, generation version, and bounds for a map transition message.

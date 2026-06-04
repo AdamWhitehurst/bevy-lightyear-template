@@ -43,11 +43,11 @@ pub fn parse_chunk_filename(name: &str) -> Option<IVec3> {
     Some(IVec3::new(x, y, z))
 }
 
-pub(crate) const ENTITY_SAVE_VERSION: u32 = 3;
+pub const ENTITY_SAVE_VERSION: u32 = 3;
 
 /// Versioned envelope wrapping per-chunk entity spawn data on disk.
 #[derive(Serialize, Deserialize)]
-pub(crate) struct EntityFileEnvelope {
+pub struct EntityFileEnvelope {
     pub version: u32,
     pub spawns: Vec<WorldObjectSpawn>,
 }

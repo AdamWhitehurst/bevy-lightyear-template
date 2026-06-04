@@ -254,16 +254,6 @@ pub async fn upload_blob(
             descriptor.sha256
         )));
     }
-    let actual_sha256 = hex::decode(&descriptor.sha256)
-        .map_err(|error| BlobWriteError::InvalidResponse(format!("invalid sha256: {error}")))?;
-    let actual_sha256: [u8; 32] = actual_sha256
-        .try_into()
-        .map_err(|_| BlobWriteError::InvalidResponse("sha256 must be 32 bytes".to_string()))?;
-    if actual_sha256 != sha256 {
-        return Err(BlobWriteError::InvalidResponse(
-            "uploaded blob hash mismatch".to_string(),
-        ));
-    }
     if descriptor.size != size {
         return Err(BlobWriteError::InvalidResponse(format!(
             "uploaded blob size mismatch: expected {size}, got {}",
@@ -271,7 +261,7 @@ pub async fn upload_blob(
         )));
     }
     Ok(BlobRef {
-        sha256: actual_sha256,
+        sha256,
         size: descriptor.size,
         content_type: descriptor.content_type,
         urls: vec![descriptor.url],

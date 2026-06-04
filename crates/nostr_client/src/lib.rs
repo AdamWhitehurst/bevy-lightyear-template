@@ -12,13 +12,7 @@ pub use announcement::{
     SERVER_ANNOUNCEMENT_TTL_SECS, SERVER_ANNOUNCEMENT_VERSION,
 };
 pub use auth::{build_identity_proof, verify_identity_proof, NOSTR_KIND_AUTH};
-pub use blobs::{
-    upload_blob, BlobFetchPolicy, BlobReadError, BlobRef, BlobWriteError, BlossomAuth,
-    BlossomAuthToken, VerifiedBlob, NOSTR_KIND_BLOSSOM_AUTH,
-};
-pub use events::{
-    publish_event, NostrEventDraft, NostrEventKind, NostrEventQuery, NostrTag, VerifiedNostrEvent,
-};
+pub use blobs::{BlobRef, BlossomAuth, VerifiedBlob};
 pub use identity::{
     client_id_from_public_key, client_identity_dir, decode_nsec_or_ncryptsec,
     generate_encrypted_identity, identity_file_path, identity_file_path_in_dir,

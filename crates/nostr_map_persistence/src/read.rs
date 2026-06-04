@@ -12,7 +12,7 @@ use crate::manifest::{
     RawMapMetaPayload, RawMapPayloads, RawSaveBase, RawValidatedMapDelta, RawValidatedMapSave,
     MANIFEST_HASH_TAG, MAP_TAG, NOSTR_KIND_MAP_MANIFEST,
 };
-use crate::policy::{ManifestTieBreak, MapPersistencePolicy, NostrMapQueryPolicy};
+use crate::policy::{MapPersistencePolicy, NostrMapQueryPolicy};
 
 /// Result of comparing a remote manifest chain to a local accepted head.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -266,19 +266,10 @@ pub async fn latest_visible_manifest(
         manifests.push(verify_manifest_event_with_hash(&event_json, owner, map_id)?);
     }
     manifests.sort_by(|left, right| {
-        let ordering = left
-            .manifest
+        left.manifest
             .revision
             .cmp(&right.manifest.revision)
-            .then_with(|| left.manifest_hash.cmp(&right.manifest_hash));
-        match policy.tie_break {
-            ManifestTieBreak::HighestHash => ordering,
-            ManifestTieBreak::LowestHash => left
-                .manifest
-                .revision
-                .cmp(&right.manifest.revision)
-                .then_with(|| right.manifest_hash.cmp(&left.manifest_hash)),
-        }
+            .then_with(|| left.manifest_hash.cmp(&right.manifest_hash))
     });
     Ok(manifests.pop().map(|verified| verified.manifest))
 }

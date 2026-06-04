@@ -377,20 +377,11 @@ fn init_overworld_entity(
 }
 
 /// Poll async meta loads, configure map entities when meta arrives.
-fn poll_map_meta(
-    mut commands: Commands,
-    mut query: Query<(
-        Entity,
-        &MapInstanceId,
-        &mut PendingStoreOps<(), MapMeta>,
-        &StoreBackend<(), MapMeta, FsMapMetaStore>,
-        &mut MapLoadState,
-    )>,
-    terrain_registry: Res<TerrainDefRegistry>,
-    type_registry: Res<AppTypeRegistry>,
+fn forward_map_meta_save_completions(
+    mut query: Query<(Entity, &MapInstanceId, &mut PendingStoreOps<(), MapMeta>)>,
     mut save_completed: MessageWriter<remote_publish::MapPayloadSaveCompleted>,
 ) {
-    for (entity, map_id, mut ops, store, mut state) in &mut query {
+    for (entity, map_id, mut ops) in &mut query {
         ops.poll();
         log_save_errors(&mut ops, "map metadata");
         for completion in ops.completed_saves.drain(..) {
@@ -406,60 +397,6 @@ fn poll_map_meta(
                     "map metadata save completion has no publish save id"
                 );
             }
-        }
-
-        if *state != MapLoadState::AwaitingMeta {
-            continue;
-        }
-
-        // First frame: kick off the load
-        if ops.completed_loads.is_empty() && !ops.has_pending() && ops.load_errors.is_empty() {
-            ops.spawn_load(&store.0, ());
-            return;
-        }
-
-        if let Some((_, meta_opt)) = ops.completed_loads.pop() {
-            let (seed, gen_version) = match meta_opt {
-                Some(meta) => {
-                    info!(
-                        "Loaded map meta: seed={}, gen_version={}",
-                        meta.seed, meta.generation_version
-                    );
-                    (meta.seed, meta.generation_version)
-                }
-                None => {
-                    info!("No saved meta found, using defaults: seed={DEFAULT_OVERWORLD_SEED}");
-                    (DEFAULT_OVERWORLD_SEED, GENERATION_VERSION)
-                }
-            };
-
-            configure_map_from_meta(
-                &mut commands,
-                entity,
-                map_id,
-                seed,
-                gen_version,
-                &store.0.map_dir,
-                &terrain_registry,
-                &type_registry,
-            );
-
-            *state = MapLoadState::AwaitingEntities;
-        }
-
-        for (_, e) in ops.load_errors.drain(..) {
-            warn!("Failed to load map meta: {e}, using defaults");
-            configure_map_from_meta(
-                &mut commands,
-                entity,
-                map_id,
-                DEFAULT_OVERWORLD_SEED,
-                GENERATION_VERSION,
-                &store.0.map_dir,
-                &terrain_registry,
-                &type_registry,
-            );
-            *state = MapLoadState::AwaitingEntities;
         }
     }
 }
@@ -1174,7 +1111,6 @@ impl Plugin for ServerMapPlugin {
             .init_resource::<homebase_publication::PendingHomebaseAttestations>()
             .init_resource::<homebase_publication::InFlightHomebasePublishes>()
             .add_message::<remote_publish::MapPayloadSaveCompleted>()
-            .add_message::<remote_publish::MapPayloadSaveFailed>()
             .add_systems(
                 OnEnter(AppState::Ready),
                 (configure_remote_map_read_context, init_overworld_entity).chain(),
@@ -1184,7 +1120,7 @@ impl Plugin for ServerMapPlugin {
                 (
                     spawn_map_preflight_tasks.run_if(in_state(AppState::Ready)),
                     poll_map_persistence_preflight.run_if(in_state(AppState::Ready)),
-                    poll_map_meta.run_if(in_state(AppState::Ready)),
+                    forward_map_meta_save_completions.run_if(in_state(AppState::Ready)),
                     poll_map_entities.run_if(in_state(AppState::Ready)),
                     commit_ready_map_preflights.run_if(in_state(AppState::Ready)),
                     (

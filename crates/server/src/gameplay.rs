@@ -434,6 +434,11 @@ pub fn process_pending_initial_spawns(
             entity: overworld_entity,
             params,
         } => {
+            let overworld_spawn_pos = respawn_query
+                .iter()
+                .find(|(_, mid)| **mid == MapInstanceId::Overworld)
+                .map(|(p, _)| p.0)
+                .unwrap_or(DEFAULT_SPAWN_POS);
             for (client_entity, pending_spawn) in &pending_clients {
                 let character_entity = spawn_authenticated_character_entity(
                     &mut commands,
@@ -441,17 +446,16 @@ pub fn process_pending_initial_spawns(
                     pending_spawn.remote_id,
                     &character_query,
                     overworld_entity,
-                    &respawn_query,
+                    overworld_spawn_pos,
                 );
                 commit_initial_overworld_spawn(
                     &mut commands,
                     character_entity,
                     client_entity,
-                    overworld_entity,
                     params.clone(),
                     &mut room_registry,
                     &mut start_senders,
-                    &respawn_query,
+                    overworld_spawn_pos,
                 );
                 commands
                     .entity(client_entity)
@@ -482,7 +486,7 @@ fn spawn_authenticated_character_entity(
     remote_id: RemoteId,
     character_query: &Query<Entity, (With<CharacterMarker>, Without<DummyTarget>)>,
     overworld_entity: Entity,
-    respawn_query: &Query<(&Position, &MapInstanceId), With<RespawnPoint>>,
+    spawn_pos: Vec3,
 ) -> Entity {
     let peer_id = remote_id.0;
     let num_characters = character_query.iter().count();
@@ -494,11 +498,6 @@ fn spawn_authenticated_character_entity(
         css::CRIMSON,
     ];
     let color = available_colors[num_characters % available_colors.len()];
-    let spawn_pos = respawn_query
-        .iter()
-        .find(|(_, mid)| **mid == MapInstanceId::Overworld)
-        .map(|(p, _)| p.0)
-        .unwrap_or(DEFAULT_SPAWN_POS);
 
     commands
         .spawn((
@@ -535,11 +534,10 @@ fn commit_initial_overworld_spawn(
     commands: &mut Commands,
     character_entity: Entity,
     client_entity: Entity,
-    _overworld_entity: Entity,
     params: crate::map::MapTransitionParams,
     room_registry: &mut RoomRegistry,
     start_senders: &mut Query<&mut MessageSender<protocol::map::MapTransitionStart>>,
-    respawn_query: &Query<(&Position, &MapInstanceId), With<RespawnPoint>>,
+    spawn_pos: Vec3,
 ) {
     let room = room_registry.get_or_create(&MapInstanceId::Overworld, commands);
     commands
@@ -551,11 +549,6 @@ fn commit_initial_overworld_spawn(
             relocated_entities: vec![character_entity],
         });
 
-    let spawn_pos = respawn_query
-        .iter()
-        .find(|(_, mid)| **mid == MapInstanceId::Overworld)
-        .map(|(p, _)| p.0)
-        .unwrap_or(DEFAULT_SPAWN_POS);
     let mut sender = start_senders
         .get_mut(client_entity)
         .expect("Client entity must have MessageSender<MapTransitionStart>");

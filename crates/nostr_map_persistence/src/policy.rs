@@ -3,13 +3,6 @@ use std::time::Duration;
 
 use crate::PayloadClass;
 
-/// Tie-break strategy for same-revision manifests visible from relays.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ManifestTieBreak {
-    LowestHash,
-    HighestHash,
-}
-
 /// Map payload and Blossom download policy.
 #[derive(Clone, Debug)]
 pub struct MapPersistencePolicy {
@@ -43,7 +36,6 @@ pub struct NostrMapQueryPolicy {
     pub relays: Vec<String>,
     pub timeout: Duration,
     pub limit: usize,
-    pub tie_break: ManifestTieBreak,
 }
 
 impl Default for NostrMapQueryPolicy {
@@ -52,7 +44,6 @@ impl Default for NostrMapQueryPolicy {
             relays: Vec::new(),
             timeout: Duration::from_secs(5),
             limit: 32,
-            tie_break: ManifestTieBreak::HighestHash,
         }
     }
 }

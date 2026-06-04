@@ -43,15 +43,6 @@ pub struct MapPayloadSaveCompleted {
     pub key: MapPayloadSaveKey,
 }
 
-/// Normalized failed payload save completion consumed by remote publishing.
-#[derive(Message, Clone, Debug)]
-pub struct MapPayloadSaveFailed {
-    pub map_entity: Entity,
-    pub save_id: SaveOpId,
-    pub key: MapPayloadSaveKey,
-    pub error: String,
-}
-
 /// Server-owned unpublished publish drafts waiting for remote journal conversion.
 #[derive(Component, Default)]
 pub struct PendingRemotePublishDeltas {
@@ -482,12 +473,6 @@ pub fn apply_publish_results(
             return Err(save_error);
         }
         let (_, error) = publish_ops.save_errors.remove(0);
-        trace!(
-            ?map_id,
-            ?manifest_hash,
-            %error,
-            "remote manifest publish failed"
-        );
         error!(
             ?map_id,
             ?manifest_hash,
@@ -806,7 +791,6 @@ pub fn normalize_chunk_save_completions(
     mut completed: MessageReader<ChunkSaveCompleted>,
     mut failed: MessageReader<ChunkSaveFailed>,
     mut completed_writer: MessageWriter<MapPayloadSaveCompleted>,
-    mut failed_writer: MessageWriter<MapPayloadSaveFailed>,
 ) {
     for event in completed.read() {
         let Some(save_id) = event.save_id else {
@@ -819,15 +803,12 @@ pub fn normalize_chunk_save_completions(
         });
     }
     for event in failed.read() {
-        let Some(save_id) = event.save_id else {
-            continue;
-        };
-        failed_writer.write(MapPayloadSaveFailed {
-            map_entity: event.map_entity,
-            save_id,
-            key: MapPayloadSaveKey::TerrainChunk(event.position),
-            error: event.error.clone(),
-        });
+        error!(
+            ?event.map_entity,
+            position = ?event.position,
+            error = %event.error,
+            "terrain chunk save failed"
+        );
     }
 }
 
@@ -877,27 +858,6 @@ pub fn handle_completed_map_payload_save_for_publish(
             .queue
             .push_back(draft);
     }
-}
-
-/// Loads durable unpublished drafts into each map's pending publish queue.
-pub fn recover_unpublished_publish_drafts(
-    mut maps: Query<(
-        &MapInstanceId,
-        &StoreBackend<SaveOpId, LocalUnpublishedPublishDraft, FsLocalUnpublishedPublishDraftStore>,
-        &mut PendingRemotePublishDeltas,
-    )>,
-) -> Result<(), PersistenceError> {
-    for (map_id, draft_store, mut deltas) in &mut maps {
-        for persisted in draft_store.0.load_all()? {
-            if persisted.map_id != *map_id {
-                return Err(PersistenceError::Deserialize(
-                    "unpublished draft map id does not match owning map".to_string(),
-                ));
-            }
-            deltas.queue.push_back(persisted.draft);
-        }
-    }
-    Ok(())
 }
 
 #[cfg(test)]
