@@ -9,14 +9,14 @@ use nostr_client::BlobRef;
 use nostr_map_persistence::{
     build_signed_map_manifest_event, encode_chunk_entities_payload, encode_chunk_payload,
     encode_map_entities_payload, encode_map_meta_payload, finalize_manifest, upload_publish_slot,
-    ManifestHash, ManifestPayloadDescriptor, ManifestPayloadSlot, MapManifestSigner,
-    MapPersistenceRejection, MapRevision, NostrManifestPublishStore, PayloadClass, PayloadKey,
+    ManifestHash, ManifestPayloadDescriptor, ManifestPayloadSlot, MapPersistenceRejection,
+    MapRevision, NostrManifestPublishStore, PayloadClass, PayloadKey,
 };
 use persistence::{
     AsyncStore, AsyncStoreBackend, PendingAsyncStoreOps, PersistenceError, SaveOpId, Store,
     StoreBackend,
 };
-use protocol::{MapInstanceId, NostrPublicKey};
+use protocol::MapInstanceId;
 use sha2::{Digest, Sha256};
 use voxel_map_engine::prelude::{ChunkSaveCompleted, ChunkSaveFailed};
 
@@ -237,24 +237,6 @@ struct RemotePublishPrepareFailure {
 type RemotePublishPrepareResult =
     Result<crate::persistence::RemotePublishJournalEntry, RemotePublishPrepareFailure>;
 
-/// Local adapter implementing map manifest signing for the configured server identity.
-struct ServerManifestSigner<'a>(&'a nostr_client::NostrKeys);
-
-impl MapManifestSigner for ServerManifestSigner<'_> {
-    fn public_key(&self) -> NostrPublicKey {
-        self.0.protocol_public_key()
-    }
-
-    fn sign_map_manifest_event(
-        &self,
-        draft: nostr_client::events::NostrEventDraft,
-    ) -> Result<String, nostr_map_persistence::RemotePersistenceError> {
-        self.0
-            .sign_event(&draft)
-            .map_err(nostr_map_persistence::RemotePersistenceError::from)
-    }
-}
-
 /// Builds the local head that should advance after a durable unpublished draft exists.
 pub fn local_head_from_unpublished_draft(persisted: &LocalUnpublishedPublishDraft) -> LocalMapHead {
     let mut hasher = Sha256::new();
@@ -298,8 +280,7 @@ pub async fn prepare_server_map_publish_entry(
     public_blossom_base_url: &url::Url,
 ) -> Result<crate::persistence::RemotePublishJournalEntry, MapPersistenceRejection> {
     let map_id = MapInstanceId::Overworld;
-    let signer = ServerManifestSigner(identity);
-    let owner = signer.public_key();
+    let owner = identity.protocol_public_key();
     let mut payloads = Vec::new();
 
     upload_publish_slot(
@@ -369,8 +350,9 @@ pub async fn prepare_server_map_publish_entry(
     )?;
     let descriptor_root = manifest.descriptor_root;
     let payloads = manifest.payloads.clone();
-    let (new_manifest_hash, signed_event_json) = build_signed_map_manifest_event(&signer, manifest)
-        .map_err(|error| MapPersistenceRejection::Invalid(error.to_string()))?;
+    let (new_manifest_hash, signed_event_json) =
+        build_signed_map_manifest_event(identity, manifest)
+            .map_err(|error| MapPersistenceRejection::Invalid(error.to_string()))?;
     let local_revision = MapRevision {
         revision: draft.local_revision_number,
         previous_hash: previous_remote_manifest_hash,

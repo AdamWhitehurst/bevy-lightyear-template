@@ -9,37 +9,16 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task};
 use leafwing_input_manager::prelude::ActionState;
 use lightyear::prelude::{Controlled, MessageReceiver, MessageSender};
-use nostr_client::events::NostrEventDraft;
 use nostr_client::{NostrKeys, RelayPool};
 
 use crate::input::raw::RawClientActions;
 use nostr_map_persistence::{
-    build_signed_map_manifest_event, manifest_from_json, ManifestHash, MapManifestSigner,
-    NostrManifestPublishStore, RemotePersistenceError,
+    build_signed_map_manifest_event, manifest_from_json, ManifestHash, NostrManifestPublishStore,
 };
 use persistence::AsyncStore;
 use protocol::map::{
     HomebaseAttestationRequest, HomebaseAttestationResponse, HomebasePublished, MapChannel,
 };
-use protocol::NostrPublicKey;
-
-/// Signs homebase manifest events with the player's Nostr identity.
-struct ClientManifestSigner<'a>(&'a NostrKeys);
-
-impl MapManifestSigner for ClientManifestSigner<'_> {
-    fn public_key(&self) -> NostrPublicKey {
-        self.0.protocol_public_key()
-    }
-
-    fn sign_map_manifest_event(
-        &self,
-        draft: NostrEventDraft,
-    ) -> Result<String, RemotePersistenceError> {
-        self.0
-            .sign_event(&draft)
-            .map_err(RemotePersistenceError::from)
-    }
-}
 
 /// In-flight relay publication tasks for signed homebase manifests, each tagged with the server's
 /// manifest hash to echo back as confirmation once the event reaches relays.
@@ -122,8 +101,7 @@ fn sign_homebase_manifest(
     unsigned_manifest_json: &str,
 ) -> Result<(ManifestHash, String), String> {
     let manifest = manifest_from_json(unsigned_manifest_json).map_err(|error| error.to_string())?;
-    build_signed_map_manifest_event(&ClientManifestSigner(identity), manifest)
-        .map_err(|error| error.to_string())
+    build_signed_map_manifest_event(identity, manifest).map_err(|error| error.to_string())
 }
 
 /// Drains completed relay publications; on success, confirms to the server so it advances the
@@ -158,7 +136,7 @@ mod tests {
         compute_descriptor_root, manifest_to_json, HomebasePayloadScope,
         HomebasePublicationAttestation, NostrMapManifest, MAP_MANIFEST_SCHEMA_VERSION,
     };
-    use protocol::MapInstanceId;
+    use protocol::{MapInstanceId, NostrPublicKey};
 
     fn unsigned_homebase_manifest_json(owner: NostrPublicKey) -> String {
         let map_id = MapInstanceId::Homebase { owner };

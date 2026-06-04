@@ -1,4 +1,5 @@
 use nostr_client::events::NostrEventDraft;
+use nostr_client::NostrKeys;
 use protocol::{HomebasePublicationAttestation, MapInstanceId, NostrPublicKey};
 
 use crate::manifest::{
@@ -18,6 +19,20 @@ pub trait MapManifestSigner {
         &self,
         draft: NostrEventDraft,
     ) -> Result<String, RemotePersistenceError>;
+}
+
+impl MapManifestSigner for NostrKeys {
+    fn public_key(&self) -> NostrPublicKey {
+        self.protocol_public_key()
+    }
+
+    fn sign_map_manifest_event(
+        &self,
+        draft: NostrEventDraft,
+    ) -> Result<String, RemotePersistenceError> {
+        self.sign_event(&draft)
+            .map_err(RemotePersistenceError::from)
+    }
 }
 
 /// Computes the map manifest hash embedded in a signed event JSON string.
