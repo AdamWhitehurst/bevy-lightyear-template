@@ -29,16 +29,26 @@ impl AsyncStore<BlobRef, Vec<u8>> for BlossomBlobPutStore {
         value: &'a Vec<u8>,
     ) -> BoxedStoreFuture<'a, Result<(), PersistenceError>> {
         Box::pin(async move {
-            nostr_client::blobs::verify_blob_bytes(key.sha256, Some(key.size), value.clone())
-                .map_err(|error| {
-                    PersistenceError::Serialize(format!("verify upload blob bytes: {error}"))
-                })?;
-            let uploaded =
-                nostr_client::blobs::upload_blob(&self.upload_url, value.clone(), &self.auth)
-                    .await
-                    .map_err(|error| {
-                        PersistenceError::Serialize(format!("upload Blossom blob: {error}"))
-                    })?;
+            // Cheap fail-fast before the network call; content integrity is enforced by
+            // the post-upload descriptor comparison below (the server hashes the body),
+            // so no local re-hash of the bytes is needed.
+            if value.len() as u64 != key.size {
+                return Err(PersistenceError::Serialize(format!(
+                    "upload blob size mismatch: blob ref says {} bytes, value has {}",
+                    key.size,
+                    value.len()
+                )));
+            }
+            let uploaded = nostr_client::blobs::upload_blob(
+                &self.upload_url,
+                value.clone(),
+                key.sha256,
+                &self.auth,
+            )
+            .await
+            .map_err(|error| {
+                PersistenceError::Serialize(format!("upload Blossom blob: {error}"))
+            })?;
             if uploaded.sha256 != key.sha256 || uploaded.size != key.size {
                 return Err(PersistenceError::Serialize(format!(
                     "uploaded blob ref mismatch: expected {} bytes {:?}, got {} bytes {:?}",
@@ -54,6 +64,28 @@ impl AsyncStore<BlobRef, Vec<u8>> for BlossomBlobPutStore {
 #[derive(Clone)]
 pub struct NostrManifestPublishStore {
     pub client: nostr_client::events::NostrEventClient,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blossom_put_store_rejects_size_mismatch_before_upload() {
+        let store = BlossomBlobPutStore {
+            upload_url: "https://blossom.test/upload".to_string(),
+            auth: nostr_client::BlossomAuth::from_keys(&nostr_client::NostrKeys::generate()),
+        };
+        let key = BlobRef {
+            sha256: [1; 32],
+            size: 999,
+            content_type: "application/octet-stream".to_string(),
+            urls: Vec::new(),
+        };
+        let error = futures_lite::future::block_on(store.save(&key, &vec![1, 2, 3]))
+            .expect_err("size mismatch rejected before any network call");
+        assert!(error.to_string().contains("size mismatch"));
+    }
 }
 
 impl AsyncStore<ManifestHash, String> for NostrManifestPublishStore {

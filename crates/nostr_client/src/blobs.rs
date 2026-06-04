@@ -198,11 +198,21 @@ pub fn verify_blob_bytes(
 }
 
 /// Uploads bytes to a Blossom-compatible endpoint and returns a content-addressed reference.
+///
+/// `sha256` is the caller's precomputed content hash; recomputing it here would
+/// re-digest bytes the publish path already hashed to build the blob ref. A wrong
+/// hash still fails loudly: the server-returned descriptor hash is compared below.
 pub async fn upload_blob(
     upload_url: &str,
     bytes: Vec<u8>,
+    sha256: [u8; 32],
     auth: &BlossomAuth,
 ) -> Result<BlobRef, BlobWriteError> {
+    debug_assert_eq!(
+        <[u8; 32]>::from(Sha256::digest(&bytes)),
+        sha256,
+        "uploaded bytes must match the precomputed content hash"
+    );
     let url = url::Url::parse(upload_url)
         .map_err(|error| BlobWriteError::InvalidUrl(error.to_string()))?;
     if url.scheme() != "https" && cfg!(not(test)) {
@@ -211,7 +221,6 @@ pub async fn upload_blob(
         )));
     }
     let size = bytes.len() as u64;
-    let sha256: [u8; 32] = Sha256::digest(&bytes).into();
     let sha256_hex = hex::encode(sha256);
     let token = auth.upload_token(&url, &sha256_hex)?;
     // Build the client and issue the request inside `await_network` so the whole reqwest
