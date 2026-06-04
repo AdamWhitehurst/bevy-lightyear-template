@@ -30,8 +30,6 @@ pub struct HomebasePayloadScope {
     /// Terrain chunks published as `Tombstoned` (reverted to generated; folds out on restore).
     pub tombstoned_chunks: Vec<IVec3>,
     pub chunk_entities: Vec<IVec3>,
-    /// Chunk-entity slots published as `Tombstoned`.
-    pub tombstoned_chunk_entities: Vec<IVec3>,
     pub includes_meta: bool,
     pub includes_map_entities: bool,
 }

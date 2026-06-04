@@ -32,8 +32,7 @@ pub use manifest::{
 pub use nostr_client::BlobRef;
 pub use policy::{MapPersistencePolicy, NostrMapQueryPolicy};
 pub use publish::{
-    build_homebase_manifest_event, build_signed_map_manifest_event,
-    manifest_hash_from_signed_event_json, ClientHomebaseUpdate, MapManifestSigner,
+    build_signed_map_manifest_event, manifest_hash_from_signed_event_json, MapManifestSigner,
 };
 pub use read::{
     assemble_raw_validated_map_save, download_payloads, fetch_manifest_ancestors,
