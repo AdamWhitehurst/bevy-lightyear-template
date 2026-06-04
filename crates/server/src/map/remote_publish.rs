@@ -272,17 +272,24 @@ pub async fn prepare_server_map_publish_entry(
 ) -> Result<crate::persistence::RemotePublishJournalEntry, MapPersistenceRejection> {
     let map_id = MapInstanceId::Overworld;
     let owner = identity.protocol_public_key();
-    let mut prepared = Vec::with_capacity(draft.chunks.len() + draft.chunk_entities.len() + 2);
+    let ServerMapPublishDraft {
+        local_revision_number,
+        meta,
+        chunks,
+        chunk_entities,
+        map_entities,
+    } = draft;
+    let mut prepared = Vec::with_capacity(chunks.len() + chunk_entities.len() + 2);
 
     prepared.push(prepare_publish_slot(
         public_blossom_base_url,
         PayloadClass::MapMeta,
         PayloadKey::Singleton,
         1,
-        draft.meta.clone(),
+        meta,
         encode_server_map_meta,
     )?);
-    for (chunk_pos, slot) in draft.chunks.clone() {
+    for (chunk_pos, slot) in chunks {
         prepared.push(prepare_publish_slot(
             public_blossom_base_url,
             PayloadClass::TerrainChunk,
@@ -296,7 +303,7 @@ pub async fn prepare_server_map_publish_entry(
             encode_chunk_payload,
         )?);
     }
-    for (chunk_pos, slot) in draft.chunk_entities.clone() {
+    for (chunk_pos, slot) in chunk_entities {
         prepared.push(prepare_publish_slot(
             public_blossom_base_url,
             PayloadClass::ChunkEntities,
@@ -315,7 +322,7 @@ pub async fn prepare_server_map_publish_entry(
         PayloadClass::MapEntities,
         PayloadKey::Singleton,
         1,
-        draft.map_entities.clone(),
+        map_entities,
         encode_map_entities_payload,
     )?);
     let payloads = upload_prepared_slots(blob_store, prepared).await?;
@@ -324,7 +331,7 @@ pub async fn prepare_server_map_publish_entry(
         payloads,
         map_id.clone(),
         owner,
-        draft.local_revision_number,
+        local_revision_number,
         previous_remote_manifest_hash,
         None,
     )?;
@@ -334,7 +341,7 @@ pub async fn prepare_server_map_publish_entry(
         build_signed_map_manifest_event(identity, manifest)
             .map_err(|error| MapPersistenceRejection::Invalid(error.to_string()))?;
     let local_revision = MapRevision {
-        revision: draft.local_revision_number,
+        revision: local_revision_number,
         previous_hash: previous_remote_manifest_hash,
         manifest_hash: new_manifest_hash,
     };
@@ -346,7 +353,7 @@ pub async fn prepare_server_map_publish_entry(
         new_manifest_hash,
         payloads,
         advances_local_head: LocalMapHead {
-            local_revision_number: draft.local_revision_number,
+            local_revision_number,
             active_content_hash: descriptor_root,
             accepted_remote_manifest_hash: Some(new_manifest_hash),
         },
@@ -852,7 +859,70 @@ pub fn handle_completed_map_payload_save_for_publish(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nostr_map_persistence::{manifest_hash_from_signed_event_json, PayloadSlotState};
+    use persistence::BoxedStoreFuture;
     use std::collections::HashSet;
+
+    /// Blob store double that accepts every upload.
+    #[derive(Clone)]
+    struct AcceptingBlobStore;
+
+    impl AsyncStore<BlobRef, Vec<u8>> for AcceptingBlobStore {
+        fn load<'a>(
+            &'a self,
+            _key: &'a BlobRef,
+        ) -> BoxedStoreFuture<'a, Result<Option<Vec<u8>>, PersistenceError>> {
+            Box::pin(async { Ok(None) })
+        }
+
+        fn save<'a>(
+            &'a self,
+            _key: &'a BlobRef,
+            _value: &'a Vec<u8>,
+        ) -> BoxedStoreFuture<'a, Result<(), PersistenceError>> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    #[test]
+    fn remote_publish_prepare_entry_uploads_and_signs_manifest() {
+        let identity = nostr_client::NostrKeys::generate();
+        let draft = ServerMapPublishDraft {
+            local_revision_number: 1,
+            meta: PayloadSlotState::Present(MapMeta {
+                version: 1,
+                seed: 7,
+                generation_version: 1,
+                spawn_points: Vec::new(),
+            }),
+            chunks: Vec::new(),
+            chunk_entities: vec![(IVec3::ZERO, PayloadSlotState::Present(Vec::new()))],
+            map_entities: PayloadSlotState::Present(Vec::new()),
+        };
+        let base_url = url::Url::parse("https://blossom.test/").unwrap();
+
+        let entry = bevy::tasks::block_on(prepare_server_map_publish_entry(
+            &identity,
+            draft,
+            None,
+            &AcceptingBlobStore,
+            &base_url,
+        ))
+        .expect("prepare publish entry");
+
+        assert_eq!(entry.local_revision.revision, 1);
+        assert_eq!(entry.advances_local_head.local_revision_number, 1);
+        assert_eq!(entry.previous_remote_manifest_hash, None);
+        assert_eq!(entry.payloads.len(), 3);
+        let signed_hash = manifest_hash_from_signed_event_json(
+            entry
+                .signed_event_json
+                .as_ref()
+                .expect("entry carries signed event JSON"),
+        )
+        .expect("signed event verifies");
+        assert_eq!(signed_hash, entry.new_manifest_hash);
+    }
 
     fn chunk_descriptor(class: PayloadClass, x: i32, y: i32, z: i32) -> ManifestPayloadDescriptor {
         ManifestPayloadDescriptor {
