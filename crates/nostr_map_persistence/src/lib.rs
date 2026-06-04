@@ -27,8 +27,8 @@ pub use manifest::{
     ManifestPayloadSlot, MapPersistenceRejection, MapRevision, NostrMapManifest, PayloadClass,
     PayloadKey, PayloadSlotState, RawChunkEntitiesPayload, RawChunkPayload, RawMapEntitiesPayload,
     RawMapMetaPayload, RawMapPayloads, RawSaveBase, RawValidatedMapDelta, RawValidatedMapSave,
-    MANIFEST_HASH_TAG, MAP_MANIFEST_SCHEMA_VERSION, MAP_TAG, NOSTR_KIND_MAP_MANIFEST,
-    PREVIOUS_MANIFEST_HASH_TAG,
+    VerifiedManifest, MANIFEST_HASH_TAG, MAP_MANIFEST_SCHEMA_VERSION, MAP_TAG,
+    NOSTR_KIND_MAP_MANIFEST, PREVIOUS_MANIFEST_HASH_TAG,
 };
 pub use nostr_client::BlobRef;
 pub use policy::{MapPersistencePolicy, NostrMapQueryPolicy};

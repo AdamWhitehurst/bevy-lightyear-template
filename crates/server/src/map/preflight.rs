@@ -256,11 +256,11 @@ fn spawn_remote_preflight_task(
             fetch_manifest_ancestors(&event_client, &head, None, query_policy.clone()).await?;
         match verify_revision_chain(&chain, None)? {
             RevisionDecision::AtAcceptedHead => return Ok(None),
-            RevisionDecision::Descendant(_) => {}
+            RevisionDecision::Descendant => {}
         }
         if matches!(target_map_id, MapInstanceId::Homebase { .. }) {
-            for manifest in &chain {
-                super::homebase_publication::validate_homebase_manifest_import(manifest)?;
+            for verified in &chain {
+                super::homebase_publication::validate_homebase_manifest_import(&verified.manifest)?;
             }
         }
         let payloads = download_payloads(&chain, persistence_policy.clone()).await?;

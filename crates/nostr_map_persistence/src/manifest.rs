@@ -251,8 +251,8 @@ pub fn finalize_manifest(
     previous_hash: Option<ManifestHash>,
     homebase_attestation: Option<protocol::HomebasePublicationAttestation>,
 ) -> Result<NostrMapManifest, MapPersistenceRejection> {
-    payloads.sort_by_key(manifest_payload_descriptor_order);
-    let descriptor_root = compute_descriptor_root(&payloads)
+    payloads.sort_by_cached_key(manifest_payload_descriptor_order);
+    let descriptor_root = sorted_descriptor_root(&payloads)
         .map_err(|error| MapPersistenceRejection::Invalid(error.to_string()))?;
     Ok(NostrMapManifest {
         map_id,
@@ -266,17 +266,24 @@ pub fn finalize_manifest(
     })
 }
 
-/// Computes the descriptor root for a payload descriptor list.
+/// Computes the descriptor root for a payload descriptor list in any order.
 pub fn compute_descriptor_root(
     payloads: &[ManifestPayloadDescriptor],
 ) -> Result<[u8; 32], ManifestVerificationError> {
     let mut payloads = payloads.iter().collect::<Vec<_>>();
-    payloads.sort_by_key(|a| manifest_payload_descriptor_order(a));
+    payloads.sort_by_cached_key(|a| manifest_payload_descriptor_order(a));
+    sorted_descriptor_root(&payloads)
+}
 
+/// Computes the descriptor root over an already canonically-sorted descriptor list.
+fn sorted_descriptor_root<D: std::borrow::Borrow<ManifestPayloadDescriptor>>(
+    payloads: &[D],
+) -> Result<[u8; 32], ManifestVerificationError> {
     let mut hasher = Sha256::new();
     hasher.update(DESCRIPTOR_ROOT_DOMAIN);
     hasher.update((payloads.len() as u64).to_be_bytes());
     for descriptor in payloads {
+        let descriptor = descriptor.borrow();
         hasher.update(
             serde_json::to_vec(&descriptor.class)
                 .map_err(ManifestVerificationError::CanonicalSerialization)?,
@@ -341,12 +348,11 @@ pub fn compute_manifest_hash(
     Ok(hasher.finalize().into())
 }
 
-/// Builds the tags required for a signed manifest event.
+/// Builds the tags required for a signed manifest event from a precomputed manifest hash.
 pub fn manifest_event_tags(
     manifest: &NostrMapManifest,
-) -> Result<Vec<NostrTag>, ManifestVerificationError> {
-    verify_descriptor_root(manifest)?;
-    let manifest_hash = compute_manifest_hash(manifest)?;
+    manifest_hash: ManifestHash,
+) -> Vec<NostrTag> {
     let map_key = map_tag_value(manifest.owner, &manifest.map_id);
     let manifest_hash_text = manifest_hash_hex(manifest_hash);
     let mut tags = vec![
@@ -361,63 +367,41 @@ pub fn manifest_event_tags(
             manifest_hash_hex(previous_hash),
         ));
     }
-    Ok(tags)
+    tags
 }
 
-/// Builds an unsigned Nostr event draft for a manifest.
+/// Builds an unsigned Nostr event draft for a manifest with a precomputed manifest hash.
 pub fn manifest_event_draft(
     manifest: &NostrMapManifest,
+    manifest_hash: ManifestHash,
 ) -> Result<NostrEventDraft, ManifestVerificationError> {
     Ok(NostrEventDraft {
         kind: NostrEventKind::Custom(NOSTR_KIND_MAP_MANIFEST),
         content: serde_json::to_string(manifest)
             .map_err(ManifestVerificationError::CanonicalSerialization)?,
-        tags: manifest_event_tags(manifest)?,
+        tags: manifest_event_tags(manifest, manifest_hash),
     })
 }
 
 /// Verifies raw event JSON and returns manifest content.
+///
+/// Thin wrapper over [`verify_manifest_event_with_hash`] for callers that do not
+/// need the content hash.
 pub fn verify_manifest_event(
     event_json: &str,
     expected_owner: NostrPublicKey,
     expected_map_id: &MapInstanceId,
 ) -> Result<NostrMapManifest, ManifestVerificationError> {
-    let event = nostr_client::events::verify_event_json(event_json)?;
-    if event.kind != NostrEventKind::Custom(NOSTR_KIND_MAP_MANIFEST) {
-        return Err(ManifestVerificationError::Invalid(format!(
-            "expected kind {NOSTR_KIND_MAP_MANIFEST}, got {:?}",
-            event.kind
-        )));
-    }
-    if event.pubkey != expected_owner {
-        return Err(ManifestVerificationError::Invalid(
-            "manifest signer does not match expected owner".to_string(),
-        ));
-    }
-    let manifest: NostrMapManifest = serde_json::from_str(&event.content)
-        .map_err(ManifestVerificationError::CanonicalSerialization)?;
-    if manifest.owner != expected_owner || &manifest.map_id != expected_map_id {
-        return Err(ManifestVerificationError::Invalid(
-            "manifest owner/map id does not match query".to_string(),
-        ));
-    }
-    if manifest.schema_version != MAP_MANIFEST_SCHEMA_VERSION {
-        return Err(ManifestVerificationError::Invalid(format!(
-            "unsupported manifest schema version {}",
-            manifest.schema_version
-        )));
-    }
-    verify_descriptor_root(&manifest)?;
-    verify_manifest_event_tags(&event, &manifest)?;
-    Ok(manifest)
+    Ok(verify_manifest_event_with_hash(event_json, expected_owner, expected_map_id)?.manifest)
 }
 
-/// Verifies the required indexed tags on a signed manifest event.
+/// Verifies the required indexed tags on a signed manifest event against a
+/// precomputed manifest hash.
 pub fn verify_manifest_event_tags(
     event: &VerifiedNostrEvent,
     manifest: &NostrMapManifest,
+    manifest_hash: ManifestHash,
 ) -> Result<(), ManifestVerificationError> {
-    let manifest_hash = compute_manifest_hash(manifest)?;
     let manifest_hash_text = manifest_hash_hex(manifest_hash);
     let map_key = map_tag_value(manifest.owner, &manifest.map_id);
     let expected_d = format!("{map_key}:{manifest_hash_text}");
@@ -472,13 +456,43 @@ fn require_one(
 }
 
 /// Verifies raw event JSON and returns the manifest plus its content hash.
+///
+/// The manifest hash and descriptor root are each computed exactly once and the
+/// hash is carried on the returned [`VerifiedManifest`] so downstream stages can
+/// reuse it instead of recomputing.
 pub fn verify_manifest_event_with_hash(
     event_json: &str,
     expected_owner: NostrPublicKey,
     expected_map_id: &MapInstanceId,
 ) -> Result<VerifiedManifest, ManifestVerificationError> {
-    let manifest = verify_manifest_event(event_json, expected_owner, expected_map_id)?;
+    let event = nostr_client::events::verify_event_json(event_json)?;
+    if event.kind != NostrEventKind::Custom(NOSTR_KIND_MAP_MANIFEST) {
+        return Err(ManifestVerificationError::Invalid(format!(
+            "expected kind {NOSTR_KIND_MAP_MANIFEST}, got {:?}",
+            event.kind
+        )));
+    }
+    if event.pubkey != expected_owner {
+        return Err(ManifestVerificationError::Invalid(
+            "manifest signer does not match expected owner".to_string(),
+        ));
+    }
+    let manifest: NostrMapManifest = serde_json::from_str(&event.content)
+        .map_err(ManifestVerificationError::CanonicalSerialization)?;
+    if manifest.owner != expected_owner || &manifest.map_id != expected_map_id {
+        return Err(ManifestVerificationError::Invalid(
+            "manifest owner/map id does not match query".to_string(),
+        ));
+    }
+    if manifest.schema_version != MAP_MANIFEST_SCHEMA_VERSION {
+        return Err(ManifestVerificationError::Invalid(format!(
+            "unsupported manifest schema version {}",
+            manifest.schema_version
+        )));
+    }
+    verify_descriptor_root(&manifest)?;
     let manifest_hash = compute_manifest_hash(&manifest)?;
+    verify_manifest_event_tags(&event, &manifest, manifest_hash)?;
     Ok(VerifiedManifest {
         manifest,
         manifest_hash,
@@ -632,7 +646,7 @@ mod tests {
     }
 
     fn signed_manifest_event(manifest: &NostrMapManifest, secret: SecretKey) -> String {
-        manifest_event_draft(manifest)
+        manifest_event_draft(manifest, compute_manifest_hash(manifest).unwrap())
             .unwrap()
             .sign_with_secret(secret)
             .unwrap()
@@ -683,7 +697,7 @@ mod tests {
         let event_json = NostrEventDraft {
             kind: NostrEventKind::Custom(1),
             content: serde_json::to_string(&manifest).unwrap(),
-            tags: manifest_event_tags(&manifest).unwrap(),
+            tags: manifest_event_tags(&manifest, compute_manifest_hash(&manifest).unwrap()),
         }
         .sign_with_secret(secret)
         .unwrap();
@@ -697,7 +711,7 @@ mod tests {
     fn map_persistence_manifest_rejects_tag_tampering() {
         let (secret, owner) = owner();
         let manifest = manifest(owner);
-        let mut tags = manifest_event_tags(&manifest).unwrap();
+        let mut tags = manifest_event_tags(&manifest, compute_manifest_hash(&manifest).unwrap());
         tags.retain(|tag| tag.name != MAP_TAG);
         let event_json = NostrEventDraft {
             kind: NostrEventKind::Custom(NOSTR_KIND_MAP_MANIFEST),

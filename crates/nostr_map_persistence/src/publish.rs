@@ -41,7 +41,11 @@ pub fn manifest_hash_from_signed_event_json(
     let event = nostr_client::events::verify_event_json(event_json)?;
     let manifest: NostrMapManifest = serde_json::from_str(&event.content)
         .map_err(|error| RemotePersistenceError::Invalid(error.to_string()))?;
-    compute_descriptor_root(&manifest.payloads)?;
+    if compute_descriptor_root(&manifest.payloads)? != manifest.descriptor_root {
+        return Err(RemotePersistenceError::Invalid(
+            "signed manifest descriptor root mismatch".to_string(),
+        ));
+    }
     compute_manifest_hash(&manifest).map_err(RemotePersistenceError::from)
 }
 
@@ -60,7 +64,7 @@ pub fn build_signed_map_manifest_event(
 
     manifest.descriptor_root = compute_descriptor_root(&manifest.payloads)?;
     let manifest_hash = compute_manifest_hash(&manifest)?;
-    let draft = manifest_event_draft(&manifest)?;
+    let draft = manifest_event_draft(&manifest, manifest_hash)?;
     let signed_event_json = identity.sign_map_manifest_event(draft)?;
 
     let verified =

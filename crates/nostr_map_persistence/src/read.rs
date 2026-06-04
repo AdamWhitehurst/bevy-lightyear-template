@@ -6,12 +6,12 @@ use protocol::{MapInstanceId, NostrPublicKey};
 use thiserror::Error;
 
 use crate::manifest::{
-    compute_manifest_hash, manifest_hash_hex, map_tag_value, verify_descriptor_root,
-    verify_manifest_event_with_hash, ManifestHash, ManifestPayloadDescriptor, ManifestPayloadSlot,
-    MapPersistenceRejection, MapRevision, NostrMapManifest, PayloadClass, PayloadKey,
-    PayloadSlotState, RawChunkEntitiesPayload, RawChunkPayload, RawMapEntitiesPayload,
-    RawMapMetaPayload, RawMapPayloads, RawSaveBase, RawValidatedMapDelta, RawValidatedMapSave,
-    MANIFEST_HASH_TAG, MAP_TAG, NOSTR_KIND_MAP_MANIFEST,
+    manifest_hash_hex, map_tag_value, verify_descriptor_root, verify_manifest_event_with_hash,
+    ManifestHash, ManifestPayloadDescriptor, ManifestPayloadSlot, MapPersistenceRejection,
+    MapRevision, PayloadClass, PayloadKey, PayloadSlotState, RawChunkEntitiesPayload,
+    RawChunkPayload, RawMapEntitiesPayload, RawMapMetaPayload, RawMapPayloads, RawSaveBase,
+    RawValidatedMapDelta, RawValidatedMapSave, VerifiedManifest, MANIFEST_HASH_TAG, MAP_TAG,
+    NOSTR_KIND_MAP_MANIFEST,
 };
 use crate::policy::{MapPersistencePolicy, NostrMapQueryPolicy};
 
@@ -19,7 +19,7 @@ use crate::policy::{MapPersistencePolicy, NostrMapQueryPolicy};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RevisionDecision {
     AtAcceptedHead,
-    Descendant(Vec<NostrMapManifest>),
+    Descendant,
 }
 
 /// Remote read-path failures.
@@ -84,28 +84,29 @@ impl From<RemotePersistenceError> for MapPersistenceRejection {
 }
 
 /// Verifies a remote manifest chain descends from the accepted local head.
+///
+/// Uses the content hashes computed once at event verification, so no manifest
+/// is re-serialized or re-hashed here.
 pub fn verify_revision_chain(
-    manifest_chain: &[NostrMapManifest],
+    manifest_chain: &[VerifiedManifest],
     accepted_head: Option<MapRevision>,
 ) -> Result<RevisionDecision, MapPersistenceRejection> {
-    if manifest_chain.is_empty() {
+    let Some(head) = manifest_chain.first() else {
         return Err(MapPersistenceRejection::Incomplete(
             "manifest chain is empty".to_string(),
         ));
-    }
+    };
 
-    let head_hash = compute_manifest_hash(&manifest_chain[0])
-        .map_err(|error| MapPersistenceRejection::Invalid(error.to_string()))?;
     if let Some(accepted) = &accepted_head {
-        if head_hash == accepted.manifest_hash {
-            if manifest_chain[0].revision != accepted.revision {
+        if head.manifest_hash == accepted.manifest_hash {
+            if head.manifest.revision != accepted.revision {
                 return Err(MapPersistenceRejection::Invalid(
                     "accepted manifest hash has mismatched revision number".to_string(),
                 ));
             }
             return Ok(RevisionDecision::AtAcceptedHead);
         }
-        if manifest_chain[0].revision <= accepted.revision {
+        if head.manifest.revision <= accepted.revision {
             return Err(MapPersistenceRejection::Divergent(
                 "remote candidate is not newer than accepted head".to_string(),
             ));
@@ -115,14 +116,12 @@ pub fn verify_revision_chain(
     for pair in manifest_chain.windows(2) {
         let child = &pair[0];
         let parent = &pair[1];
-        let parent_hash = compute_manifest_hash(parent)
-            .map_err(|error| MapPersistenceRejection::Invalid(error.to_string()))?;
-        if child.previous_hash != Some(parent_hash) {
+        if child.manifest.previous_hash != Some(parent.manifest_hash) {
             return Err(MapPersistenceRejection::Divergent(
                 "manifest chain previous_hash does not match parent hash".to_string(),
             ));
         }
-        if parent.revision >= child.revision {
+        if parent.manifest.revision >= child.manifest.revision {
             return Err(MapPersistenceRejection::Invalid(
                 "manifest revision numbers must strictly increase".to_string(),
             ));
@@ -133,15 +132,15 @@ pub fn verify_revision_chain(
         .last()
         .expect("manifest_chain was checked non-empty");
     match accepted_head {
-        Some(accepted) if tail.previous_hash != Some(accepted.manifest_hash) => {
+        Some(accepted) if tail.manifest.previous_hash != Some(accepted.manifest_hash) => {
             Err(MapPersistenceRejection::Divergent(
                 "manifest chain does not descend from accepted head".to_string(),
             ))
         }
-        None if tail.previous_hash.is_some() => Err(MapPersistenceRejection::Incomplete(
+        None if tail.manifest.previous_hash.is_some() => Err(MapPersistenceRejection::Incomplete(
             "manifest chain without accepted head must include genesis".to_string(),
         )),
-        _ => Ok(RevisionDecision::Descendant(manifest_chain.to_vec())),
+        _ => Ok(RevisionDecision::Descendant),
     }
 }
 
@@ -152,7 +151,7 @@ pub async fn fetch_manifest_by_hash(
     map_id: &MapInstanceId,
     manifest_hash: ManifestHash,
     policy: NostrMapQueryPolicy,
-) -> Result<Option<NostrMapManifest>, RemotePersistenceError> {
+) -> Result<Option<VerifiedManifest>, RemotePersistenceError> {
     let events = client
         .query(
             NostrEventQuery::new()
@@ -167,7 +166,7 @@ pub async fn fetch_manifest_by_hash(
     for event_json in events {
         let verified = verify_manifest_event_with_hash(&event_json, owner, map_id)?;
         if verified.manifest_hash == manifest_hash {
-            matches.push(verified.manifest);
+            matches.push(verified);
         }
     }
     match matches.len() {
@@ -182,25 +181,24 @@ pub async fn fetch_manifest_by_hash(
 /// Fetches manifest ancestors until the accepted head or genesis is reached.
 pub async fn fetch_manifest_ancestors(
     client: &NostrEventClient,
-    head: &NostrMapManifest,
+    head: &VerifiedManifest,
     accepted_head: Option<MapRevision>,
     policy: NostrMapQueryPolicy,
-) -> Result<Vec<NostrMapManifest>, RemotePersistenceError> {
+) -> Result<Vec<VerifiedManifest>, RemotePersistenceError> {
     let mut chain = vec![head.clone()];
-    let mut current = head.clone();
     let mut seen = BTreeSet::new();
-    seen.insert(compute_manifest_hash(&current)?);
+    seen.insert(head.manifest_hash);
 
     loop {
-        let current_hash = compute_manifest_hash(&current)?;
+        let current = chain.last().expect("chain starts non-empty");
         if accepted_head
             .as_ref()
-            .is_some_and(|accepted| accepted.manifest_hash == current_hash)
+            .is_some_and(|accepted| accepted.manifest_hash == current.manifest_hash)
         {
             return Ok(chain);
         }
 
-        let Some(previous_hash) = current.previous_hash else {
+        let Some(previous_hash) = current.manifest.previous_hash else {
             if accepted_head.is_some() {
                 return Err(RemotePersistenceError::Divergent(
                     "remote chain reached genesis before accepted head".to_string(),
@@ -217,8 +215,8 @@ pub async fn fetch_manifest_ancestors(
 
         let Some(ancestor) = fetch_manifest_by_hash(
             client,
-            current.owner,
-            &current.map_id,
+            current.manifest.owner,
+            &current.manifest.map_id,
             previous_hash,
             policy.clone(),
         )
@@ -228,7 +226,7 @@ pub async fn fetch_manifest_ancestors(
                 previous_hash,
             )));
         };
-        if ancestor.revision >= current.revision {
+        if ancestor.manifest.revision >= current.manifest.revision {
             return Err(RemotePersistenceError::Invalid(
                 "ancestor revision must be lower than child revision".to_string(),
             ));
@@ -238,7 +236,6 @@ pub async fn fetch_manifest_ancestors(
                 "manifest chain contains a hash cycle".to_string(),
             ));
         }
-        current = ancestor.clone();
         chain.push(ancestor);
     }
 }
@@ -249,7 +246,7 @@ pub async fn latest_visible_manifest(
     owner: NostrPublicKey,
     map_id: &MapInstanceId,
     policy: NostrMapQueryPolicy,
-) -> Result<Option<NostrMapManifest>, RemotePersistenceError> {
+) -> Result<Option<VerifiedManifest>, RemotePersistenceError> {
     let map_key = map_tag_value(owner, map_id);
     let events = client
         .query(
@@ -272,17 +269,17 @@ pub async fn latest_visible_manifest(
             .cmp(&right.manifest.revision)
             .then_with(|| left.manifest_hash.cmp(&right.manifest_hash))
     });
-    Ok(manifests.pop().map(|verified| verified.manifest))
+    Ok(manifests.pop())
 }
 
 /// Downloads and verifies all present payload blobs in a manifest chain.
 pub async fn download_payloads(
-    manifest_chain: &[NostrMapManifest],
+    manifest_chain: &[VerifiedManifest],
     policy: MapPersistencePolicy,
 ) -> Result<RawMapPayloads, RemotePersistenceError> {
     let descriptor_count = manifest_chain
         .iter()
-        .map(|manifest| manifest.payloads.len())
+        .map(|verified| verified.manifest.payloads.len())
         .sum::<usize>();
     if descriptor_count > policy.max_payloads {
         return Err(RemotePersistenceError::Invalid(format!(
@@ -292,9 +289,9 @@ pub async fn download_payloads(
     }
 
     let mut pending_blobs = Vec::with_capacity(descriptor_count);
-    for manifest in manifest_chain {
-        verify_descriptor_root(manifest)?;
-        for descriptor in &manifest.payloads {
+    for verified in manifest_chain {
+        verify_descriptor_root(&verified.manifest)?;
+        for descriptor in &verified.manifest.payloads {
             if !policy.allowed_payload_classes.contains(&descriptor.class) {
                 return Err(RemotePersistenceError::Invalid(format!(
                     "payload class {:?} is not allowed",
@@ -335,7 +332,7 @@ pub async fn download_payloads(
 
 /// Validates raw payloads against a manifest chain and assembles a raw save.
 pub fn validate_remote_map_save(
-    manifest_chain: Vec<NostrMapManifest>,
+    manifest_chain: Vec<VerifiedManifest>,
     payloads: RawMapPayloads,
     policy: MapPersistencePolicy,
     base: RawSaveBase,
@@ -366,16 +363,16 @@ pub fn validate_remote_map_save(
     }
 
     let mut deltas = Vec::new();
-    for manifest in manifest_chain.into_iter().rev() {
-        verify_descriptor_root(&manifest)
+    for verified in manifest_chain.into_iter().rev() {
+        verify_descriptor_root(&verified.manifest)
             .map_err(|error| MapPersistenceRejection::Invalid(error.to_string()))?;
-        if manifest.payloads.len() > policy.max_payloads {
+        if verified.manifest.payloads.len() > policy.max_payloads {
             return Err(MapPersistenceRejection::Invalid(
                 "manifest payload count exceeds policy".to_string(),
             ));
         }
         deltas.push(raw_delta_from_manifest(
-            manifest,
+            verified,
             &policy,
             &bytes_by_descriptor,
         )?);
@@ -384,12 +381,15 @@ pub fn validate_remote_map_save(
 }
 
 fn raw_delta_from_manifest(
-    manifest: NostrMapManifest,
+    verified: VerifiedManifest,
     policy: &MapPersistencePolicy,
     bytes_by_descriptor: &BTreeMap<(PayloadClass, PayloadKey, [u8; 32]), Vec<u8>>,
 ) -> Result<RawValidatedMapDelta, MapPersistenceRejection> {
-    let manifest_hash = compute_manifest_hash(&manifest)
-        .map_err(|error| MapPersistenceRejection::Invalid(error.to_string()))?;
+    let VerifiedManifest {
+        manifest,
+        manifest_hash,
+        ..
+    } = verified;
     let revision = MapRevision {
         revision: manifest.revision,
         previous_hash: manifest.previous_hash,
@@ -592,11 +592,21 @@ fn upsert_keyed_payload<T>(target: &mut Vec<(PayloadKey, T)>, key: PayloadKey, p
 mod tests {
     use super::*;
     use crate::manifest::{
-        compute_descriptor_root, manifest_event_draft, ManifestPayloadSlot,
-        MAP_MANIFEST_SCHEMA_VERSION,
+        compute_descriptor_root, compute_manifest_hash, manifest_event_draft, ManifestPayloadSlot,
+        NostrMapManifest, MAP_MANIFEST_SCHEMA_VERSION,
     };
     use nostr_sdk::{Keys, SecretKey};
     use sha2::{Digest, Sha256};
+
+    /// Wraps a test manifest with its computed content hash, as event verification would.
+    fn verified(manifest: NostrMapManifest) -> VerifiedManifest {
+        let manifest_hash = compute_manifest_hash(&manifest).unwrap();
+        VerifiedManifest {
+            manifest,
+            manifest_hash,
+            raw_event_json: String::new(),
+        }
+    }
 
     fn owner() -> (SecretKey, NostrPublicKey) {
         let secret = SecretKey::generate();
@@ -649,8 +659,8 @@ mod tests {
         let head =
             manifest_with_payloads(owner, 2, Some(genesis_hash), vec![meta_descriptor(b"two")]);
         assert!(matches!(
-            verify_revision_chain(&[head, genesis], None),
-            Ok(RevisionDecision::Descendant(_))
+            verify_revision_chain(&[verified(head), verified(genesis)], None),
+            Ok(RevisionDecision::Descendant)
         ));
     }
 
@@ -660,7 +670,7 @@ mod tests {
         let genesis = manifest_with_payloads(owner, 1, None, vec![meta_descriptor(b"one")]);
         let head = manifest_with_payloads(owner, 2, Some([9; 32]), vec![meta_descriptor(b"two")]);
         assert!(matches!(
-            verify_revision_chain(&[head, genesis], None),
+            verify_revision_chain(&[verified(head), verified(genesis)], None),
             Err(MapPersistenceRejection::Divergent(_))
         ));
     }
@@ -673,7 +683,7 @@ mod tests {
         let head =
             manifest_with_payloads(owner, 2, Some(genesis_hash), vec![meta_descriptor(b"two")]);
         assert!(matches!(
-            verify_revision_chain(&[head, genesis], None),
+            verify_revision_chain(&[verified(head), verified(genesis)], None),
             Err(MapPersistenceRejection::Invalid(_))
         ));
     }
@@ -685,23 +695,28 @@ mod tests {
         let genesis_hash = compute_manifest_hash(&genesis).unwrap();
         let head =
             manifest_with_payloads(owner, 2, Some(genesis_hash), vec![meta_descriptor(b"two")]);
-        let genesis_event = manifest_event_draft(&genesis)
-            .unwrap()
-            .sign_with_secret(secret.clone())
-            .unwrap();
-        let head_event = manifest_event_draft(&head)
+        let genesis_event =
+            manifest_event_draft(&genesis, compute_manifest_hash(&genesis).unwrap())
+                .unwrap()
+                .sign_with_secret(secret.clone())
+                .unwrap();
+        let head_event = manifest_event_draft(&head, compute_manifest_hash(&head).unwrap())
             .unwrap()
             .sign_with_secret(secret)
             .unwrap();
         let client = NostrEventClient::from_events(vec![head_event, genesis_event]);
         let chain = futures_lite::future::block_on(fetch_manifest_ancestors(
             &client,
-            &head,
+            &verified(head.clone()),
             None,
             NostrMapQueryPolicy::default(),
         ))
         .expect("ancestor fetch");
-        assert_eq!(chain, vec![head, genesis]);
+        let chain_manifests = chain
+            .iter()
+            .map(|entry| entry.manifest.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(chain_manifests, vec![head, genesis]);
     }
 
     #[test]
@@ -709,7 +724,7 @@ mod tests {
         let (_, owner) = owner();
         let manifest = manifest_with_payloads(owner, 1, None, vec![meta_descriptor(b"meta")]);
         let rejection = validate_remote_map_save(
-            vec![manifest],
+            vec![verified(manifest)],
             RawMapPayloads::from_unverified(Vec::new()).expect("empty payloads verify"),
             MapPersistencePolicy::default(),
             RawSaveBase::Empty,
@@ -787,7 +802,7 @@ mod tests {
         let descriptor = meta_descriptor(&bytes);
         let manifest = manifest_with_payloads(owner, 1, None, vec![descriptor.clone()]);
         let save = validate_remote_map_save(
-            vec![manifest],
+            vec![verified(manifest)],
             RawMapPayloads::from_unverified(vec![(descriptor, bytes.clone())])
                 .expect("matching payload bytes verify"),
             MapPersistencePolicy::default(),
