@@ -1,4 +1,17 @@
-use std::collections::{HashMap, HashSet};
+pub mod homebase_publication;
+pub mod preflight;
+pub mod preparation;
+pub mod remote_publish;
+pub mod switching;
+pub mod types;
+
+pub use homebase_publication::*;
+pub use preflight::*;
+pub use preparation::*;
+pub use switching::*;
+pub use types::*;
+
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -10,27 +23,29 @@ use lightyear::prelude::{
     ControlledBy, MessageReceiver, MessageSender, NetworkVisibility, Room, RoomEvent, RoomTarget,
     ServerMultiMessageSender,
 };
-use protocol::map::{MapSwitchTarget, MapTransitionStart, PlayerMapSwitchRequest};
 use protocol::{
-    CharacterMarker, ChunkChannel, ChunkDataSync, MapInstanceId, MapRegistry, NostrPublicKey,
-    PendingTransition, PlayerIdentity, SectionBlocksUpdate, UnloadColumn, VoxelBrushEditRequest,
-    VoxelChange, VoxelChannel, VoxelConcreteEditRequest, VoxelEditAck, VoxelEditBroadcast,
-    VoxelEditReject, VoxelEditRequest, VoxelType,
+    CharacterMarker, ChunkChannel, ChunkDataSync, MapInstanceId, MapRegistry, SectionBlocksUpdate,
+    UnloadColumn, VoxelBrushEditRequest, VoxelChange, VoxelChannel, VoxelConcreteEditRequest,
+    VoxelEditAck, VoxelEditBroadcast, VoxelEditReject, VoxelEditRequest, VoxelType,
 };
 #[allow(unused_imports)]
 use tracy_client::plot;
 use voxel_map_engine::lifecycle::{self, PendingSaves};
 use voxel_map_engine::prelude::{
-    bounds_to_spawning_distance, brush_footprint, build_generator_from_components, BiomeRules,
-    ChunkTicket, HeightMap, Homebase, MapDimensions, MoistureMap, PlacementRules, RuntimeShape,
-    TerrainBrushMode, VoxelGenerator, VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld,
-    WorldVoxel,
+    brush_footprint, build_generator_from_components, BiomeRules, ChunkTicket, HeightMap,
+    MapDimensions, MoistureMap, PlacementRules, RuntimeShape, TerrainBrushMode, VoxelGenerator,
+    VoxelMapConfig, VoxelMapInstance, VoxelPlugin, VoxelWorld, WorldVoxel,
 };
 
 use crate::persistence::fs_map_entities::FsMapEntitiesStore;
 use crate::persistence::fs_map_meta::FsMapMetaStore;
-use crate::persistence::{map_save_dir, MapMeta, WorldSavePath};
-use persistence::{PendingStoreOps, StoreBackend};
+use crate::persistence::{
+    map_save_dir, recover_map_save_dir_for_loading, FsAcceptedMapHeadStore, FsLocalMapHeadStore,
+    FsLocalUnpublishedPublishDraftStore, FsMapChangeSetStore, FsRemotePublishJournalStore,
+    LocalMapHead, MapChangeSet, MapMeta, RemoteMapPersistenceConfig, RemotePublishJournal,
+    ServerMapPublishDraft, WorldSavePath,
+};
+use persistence::{PendingStoreOps, SaveOpIdAllocator, StoreBackend};
 use protocol::map::{ChunkEntityRef, MapSaveTarget, SavedEntity, SavedEntityKind};
 use protocol::terrain::TerrainDef;
 use protocol::vox_model::{VoxModelAsset, VoxModelRegistry};
@@ -55,8 +70,13 @@ where
     K: Send + Sync + Debug + 'static,
     V: Send + Sync + 'static,
 {
-    for (key, error) in ops.save_errors.drain(..) {
-        error!("Failed to save {context} at {key:?}: {error}");
+    ops.completed_saves
+        .retain(|completion| completion.id.is_some());
+    for failure in ops.save_errors.drain(..) {
+        error!(
+            "Failed to save {context} at {:?}: {}",
+            failure.key, failure.error
+        );
     }
 }
 
@@ -77,8 +97,8 @@ impl RoomRegistry {
     }
 }
 
-const DEFAULT_OVERWORLD_SEED: u64 = 999;
-const GENERATION_VERSION: u32 = 0;
+pub(crate) const DEFAULT_OVERWORLD_SEED: u64 = 999;
+pub(crate) const GENERATION_VERSION: u32 = 0;
 const SAVE_DEBOUNCE_SECONDS: f64 = 1.0;
 const MAX_DIRTY_SECONDS: f64 = 5.0;
 
@@ -88,6 +108,11 @@ pub struct WorldDirtyState {
     pub is_dirty: bool,
     pub last_edit_time: f64,
     pub first_dirty_time: Option<f64>,
+    /// Maps whose saved entities changed since the last save; drives the entity publish slot.
+    pub entities_dirty: HashSet<MapInstanceId>,
+    /// Per-map chunk positions whose per-chunk world objects changed since the last save; drained
+    /// into the durable change-set as chunk-entity publish candidates.
+    pub chunk_entities_dirty: HashMap<MapInstanceId, HashSet<IVec3>>,
 }
 
 impl Default for WorldDirtyState {
@@ -96,7 +121,35 @@ impl Default for WorldDirtyState {
             is_dirty: false,
             last_edit_time: 0.0,
             first_dirty_time: None,
+            entities_dirty: HashSet::new(),
+            chunk_entities_dirty: HashMap::new(),
         }
+    }
+}
+
+impl WorldDirtyState {
+    /// Starts (or extends) the debounced save window for any map content change.
+    pub fn mark_dirty(&mut self, now: f64) {
+        if !self.is_dirty {
+            self.first_dirty_time = Some(now);
+        }
+        self.is_dirty = true;
+        self.last_edit_time = now;
+    }
+
+    /// Records that a map's saved entities changed and schedules a save.
+    pub fn mark_entities_dirty(&mut self, map_id: &MapInstanceId, now: f64) {
+        self.mark_dirty(now);
+        self.entities_dirty.insert(map_id.clone());
+    }
+
+    /// Records that a chunk's per-chunk world objects changed and schedules a save.
+    pub fn mark_chunk_entity_dirty(&mut self, map_id: &MapInstanceId, chunk_pos: IVec3, now: f64) {
+        self.mark_dirty(now);
+        self.chunk_entities_dirty
+            .entry(map_id.clone())
+            .or_default()
+            .insert(chunk_pos);
     }
 }
 
@@ -115,138 +168,257 @@ pub struct PendingVoxelBroadcasts {
     pub per_chunk: HashMap<(MapInstanceId, IVec3), Vec<PendingVoxelEdit>>,
 }
 
-/// Tracks a map entity's load lifecycle.
-#[derive(Component, PartialEq, Eq)]
-pub enum MapLoadState {
-    AwaitingMeta,
-    AwaitingEntities,
-    Ready,
+fn configure_remote_map_read_context(
+    mut commands: Commands,
+    remote_config: Res<RemoteMapPersistenceConfig>,
+    remote_publish_config: Res<remote_publish::RemoteMapPublishConfig>,
+    relay_pool: Option<Res<nostr_client::RelayPool>>,
+    nostr_config: Res<nostr_client::NostrClientConfig>,
+) {
+    if !remote_config.enabled {
+        trace!("remote map restore disabled");
+        return;
+    }
+
+    let relay_pool = relay_pool.expect("SERVER_MAP_REMOTE_READ=1 requires RelayPool resource");
+    let allowed_blossom_hosts = remote_read_allowed_blossom_hosts(&remote_publish_config);
+    let mut persistence_policy = nostr_map_persistence::MapPersistencePolicy::default();
+    persistence_policy.allowed_blossom_hosts = allowed_blossom_hosts.clone();
+    let mut query_policy = nostr_map_persistence::NostrMapQueryPolicy::default();
+    query_policy.relays = nostr_config.relays.clone();
+    query_policy.timeout = remote_config.fallback_timeout;
+
+    commands.insert_resource(crate::persistence::RemoteMapReadContext {
+        event_client: relay_pool.event_client(),
+        query_policy,
+        persistence_policy,
+    });
+    info!(
+        ?allowed_blossom_hosts,
+        "real Nostr/Blossom remote map restore enabled"
+    );
+}
+
+fn remote_read_allowed_blossom_hosts(
+    remote_publish_config: &remote_publish::RemoteMapPublishConfig,
+) -> BTreeSet<String> {
+    let mut hosts = parse_blossom_allowed_hosts(
+        std::env::var("SERVER_BLOSSOM_ALLOWED_HOSTS")
+            .ok()
+            .as_deref(),
+    );
+    if let Some(host) = remote_publish_config
+        .blossom_public_base_url
+        .as_ref()
+        .and_then(|url| url.host_str())
+    {
+        hosts.insert(host.to_ascii_lowercase());
+    } else if let Ok(public_base_url) = std::env::var("SERVER_BLOSSOM_PUBLIC_BASE_URL") {
+        let url = url::Url::parse(&public_base_url)
+            .expect("SERVER_BLOSSOM_PUBLIC_BASE_URL must be a valid URL");
+        let host = url
+            .host_str()
+            .expect("SERVER_BLOSSOM_PUBLIC_BASE_URL must include a host");
+        hosts.insert(host.to_ascii_lowercase());
+    }
+    if hosts.is_empty() {
+        panic!(
+            "remote map restore requires SERVER_BLOSSOM_PUBLIC_BASE_URL or SERVER_BLOSSOM_ALLOWED_HOSTS"
+        );
+    }
+    hosts
+}
+
+fn parse_blossom_allowed_hosts(raw: Option<&str>) -> BTreeSet<String> {
+    raw.map(|value| {
+        value
+            .split(',')
+            .map(str::trim)
+            .filter(|host| !host.is_empty())
+            .map(str::to_ascii_lowercase)
+            .collect()
+    })
+    .unwrap_or_default()
 }
 
 /// Spawn the overworld map entity with store components and begin async meta load.
 fn init_overworld_entity(
     mut commands: Commands,
     mut registry: ResMut<MapRegistry>,
+    mut queue: ResMut<PendingMapPreflights>,
     save_path: Res<WorldSavePath>,
-    server_identity: Res<nostr_client::ServerIdentity>,
+    server_identity: Res<nostr_client::NostrKeys>,
+    remote_config: Res<RemoteMapPersistenceConfig>,
+    remote_publish_config: Res<remote_publish::RemoteMapPublishConfig>,
+    relay_pool: Option<Res<nostr_client::RelayPool>>,
 ) {
-    let map_dir = Arc::new(map_save_dir(&save_path.0, &MapInstanceId::Overworld));
-    let owner = NostrPublicKey(*server_identity.keys.public_key().as_bytes());
+    let canonical_map_dir = map_save_dir(&save_path.0, &MapInstanceId::Overworld);
+    let map_dir = Arc::new(recover_map_save_dir_for_loading(
+        &remote_config,
+        &MapInstanceId::Overworld,
+        &canonical_map_dir,
+    ));
+    let owner = server_identity.protocol_public_key();
+    // Head pointers span revisions, so they live at the map's top-level dir, not inside the
+    // active revision snapshot. This keeps the running publish path reading the same heads the
+    // restore seeds, regardless of fresh-start / restore / existing-world.
+    let head_dir = Arc::new(canonical_map_dir.clone());
+    let accepted_head_store = FsAcceptedMapHeadStore {
+        map_dir: head_dir.clone(),
+    };
+    let local_head_store = FsLocalMapHeadStore { map_dir: head_dir };
+    // The change-set spans revisions like the heads, so root it at the top-level map dir.
+    let change_set_store = FsMapChangeSetStore {
+        map_dir: Arc::new(canonical_map_dir.clone()),
+    };
+    let draft_store = FsLocalUnpublishedPublishDraftStore {
+        map_dir: map_dir.clone(),
+    };
+    let journal_store = FsRemotePublishJournalStore {
+        save_root: save_path.0.clone(),
+    };
+    let mut journal = persistence::Store::load(&journal_store, &MapInstanceId::Overworld)
+        .expect("overworld remote publish journal should load during startup")
+        .unwrap_or_default();
+    let original_journal = journal.clone();
+    remote_publish::reset_inflight_publish_entries(&mut journal);
+    if journal != original_journal {
+        persistence::Store::save(&journal_store, &MapInstanceId::Overworld, &journal)
+            .expect("overworld remote publish journal should persist after startup recovery");
+    }
+    let mut pending_deltas = remote_publish::PendingRemotePublishDeltas::default();
+    for persisted in draft_store
+        .load_all()
+        .expect("overworld unpublished publish drafts should load during startup")
+    {
+        if persisted.map_id != MapInstanceId::Overworld {
+            panic!(
+                "overworld unpublished publish draft has mismatched map id {:?}",
+                persisted.map_id
+            );
+        }
+        if journal.entries.iter().any(|entry| {
+            entry.advances_local_head.local_revision_number >= persisted.draft.local_revision_number
+        }) {
+            trace!(
+                local_revision_number = persisted.draft.local_revision_number,
+                "unpublished publish draft already has a journal entry"
+            );
+            continue;
+        }
+        pending_deltas.queue.push_back(persisted.draft);
+    }
 
-    let map = commands
-        .spawn((
-            MapInstanceId::Overworld,
-            protocol::map::Owner(owner),
-            MapLoadState::AwaitingMeta,
-            Transform::default(),
-            StoreBackend::new(FsMapMetaStore {
-                map_dir: map_dir.clone(),
+    let mut map_commands = commands.spawn((
+        MapInstanceId::Overworld,
+        protocol::map::Owner(owner),
+        MapLoadState::CheckingPersistence,
+        Transform::default(),
+    ));
+    map_commands.insert((
+        StoreBackend::new(FsMapMetaStore {
+            map_dir: map_dir.clone(),
+        }),
+        PendingStoreOps::<(), MapMeta>::default(),
+        StoreBackend::new(FsMapEntitiesStore {
+            map_dir: map_dir.clone(),
+        }),
+        PendingStoreOps::<(), Vec<SavedEntity>>::default(),
+        StoreBackend::new(FsChunkEntitiesStore {
+            map_dir: map_dir.clone(),
+        }),
+        PendingStoreOps::<IVec3, Vec<WorldObjectSpawn>>::default(),
+        StoreBackend::new(FsChunkStore {
+            map_dir: map_dir.clone(),
+        }),
+        PendingStoreOps::<IVec3, ChunkFileEnvelope>::default(),
+    ));
+    map_commands.insert((
+        StoreBackend::new(accepted_head_store),
+        StoreBackend::new(local_head_store),
+        StoreBackend::new(change_set_store),
+        StoreBackend::new(draft_store),
+        StoreBackend::new(journal_store),
+        journal,
+        pending_deltas,
+    ));
+    if remote_publish_config.enabled {
+        let relay_pool = relay_pool
+            .as_ref()
+            .expect("SERVER_MAP_REMOTE_PUBLISH=1 requires NostrClientPlugin RelayPool resource");
+        let upload_url = remote_publish_config
+            .blossom_upload_url
+            .clone()
+            .expect("enabled remote publish config must include Blossom upload URL");
+        map_commands.insert((
+            persistence::AsyncStoreBackend::new(nostr_map_persistence::BlossomBlobPutStore {
+                upload_url,
+                auth: nostr_client::BlossomAuth::from_keys(&server_identity),
             }),
-            PendingStoreOps::<(), MapMeta>::default(),
-            StoreBackend::new(FsMapEntitiesStore {
-                map_dir: map_dir.clone(),
-            }),
-            PendingStoreOps::<(), Vec<SavedEntity>>::default(),
-            StoreBackend::new(FsChunkEntitiesStore {
-                map_dir: map_dir.clone(),
-            }),
-            PendingStoreOps::<IVec3, Vec<WorldObjectSpawn>>::default(),
-            StoreBackend::new(FsChunkStore {
-                map_dir: map_dir.clone(),
-            }),
-            PendingStoreOps::<IVec3, ChunkFileEnvelope>::default(),
-        ))
-        .id();
+            persistence::AsyncStoreBackend::new(remote_publish::ServerManifestPublishStore::new(
+                relay_pool.event_client(),
+                remote_publish_config.fail_first_manifest_publish,
+            )),
+            persistence::PendingAsyncStoreOps::<nostr_map_persistence::ManifestHash, String>::default(
+            ),
+            remote_publish::PendingRemotePublishEntryTasks::default(),
+        ));
+        info!("server-owned Overworld remote publishing enabled");
+    } else {
+        trace!("server-owned Overworld remote publishing disabled");
+    }
+    let map = map_commands.id();
 
     registry.insert(MapInstanceId::Overworld, map);
+    queue.0.push_back(PendingMapPreflight {
+        target_map_id: MapInstanceId::Overworld,
+        kind: MapPreflightKind::StartupOverworld,
+    });
 }
 
 /// Poll async meta loads, configure map entities when meta arrives.
-fn poll_map_meta(
-    mut commands: Commands,
-    mut query: Query<(
-        Entity,
-        &mut PendingStoreOps<(), MapMeta>,
-        &StoreBackend<(), MapMeta, FsMapMetaStore>,
-        &mut MapLoadState,
-    )>,
-    terrain_registry: Res<TerrainDefRegistry>,
-    type_registry: Res<AppTypeRegistry>,
+fn forward_map_meta_save_completions(
+    mut query: Query<(Entity, &MapInstanceId, &mut PendingStoreOps<(), MapMeta>)>,
+    mut save_completed: MessageWriter<remote_publish::MapPayloadSaveCompleted>,
 ) {
-    for (entity, mut ops, store, mut state) in &mut query {
+    for (entity, map_id, mut ops) in &mut query {
         ops.poll();
         log_save_errors(&mut ops, "map metadata");
-
-        if *state != MapLoadState::AwaitingMeta {
-            continue;
-        }
-
-        // First frame: kick off the load
-        if ops.completed_loads.is_empty() && !ops.has_pending() && ops.load_errors.is_empty() {
-            ops.spawn_load(&store.0, ());
-            return;
-        }
-
-        if let Some((_, meta_opt)) = ops.completed_loads.pop() {
-            let (seed, gen_version) = match meta_opt {
-                Some(meta) => {
-                    info!(
-                        "Loaded map meta: seed={}, gen_version={}",
-                        meta.seed, meta.generation_version
-                    );
-                    (meta.seed, meta.generation_version)
-                }
-                None => {
-                    info!("No saved meta found, using defaults: seed={DEFAULT_OVERWORLD_SEED}");
-                    (DEFAULT_OVERWORLD_SEED, GENERATION_VERSION)
-                }
-            };
-
-            configure_map_from_meta(
-                &mut commands,
-                entity,
-                seed,
-                gen_version,
-                &store.0.map_dir,
-                &terrain_registry,
-                &type_registry,
-            );
-
-            *state = MapLoadState::AwaitingEntities;
-        }
-
-        for (_, e) in ops.load_errors.drain(..) {
-            warn!("Failed to load map meta: {e}, using defaults");
-            configure_map_from_meta(
-                &mut commands,
-                entity,
-                DEFAULT_OVERWORLD_SEED,
-                GENERATION_VERSION,
-                &store.0.map_dir,
-                &terrain_registry,
-                &type_registry,
-            );
-            *state = MapLoadState::AwaitingEntities;
+        for completion in ops.completed_saves.drain(..) {
+            if let Some(save_id) = completion.id {
+                save_completed.write(remote_publish::MapPayloadSaveCompleted {
+                    map_entity: entity,
+                    save_id,
+                    key: remote_publish::MapPayloadSaveKey::MapMeta,
+                });
+            } else {
+                trace!(
+                    ?map_id,
+                    "map metadata save completion has no publish save id"
+                );
+            }
         }
     }
 }
 
 /// Apply map configuration components after meta is resolved.
-fn configure_map_from_meta(
+pub(crate) fn configure_map_from_meta(
     commands: &mut Commands,
     entity: Entity,
+    map_id: &MapInstanceId,
     seed: u64,
     generation_version: u32,
     map_dir: &PathBuf,
     terrain_registry: &TerrainDefRegistry,
     type_registry: &AppTypeRegistry,
 ) {
+    let terrain_key = terrain_key_for_map(map_id);
     let terrain_def = terrain_registry
-        .get("overworld")
-        .expect("overworld.terrain.ron must be loaded by AppState::Ready");
+        .get(terrain_key)
+        .unwrap_or_else(|| panic!("{terrain_key}.terrain.ron must be loaded by AppState::Ready"));
     let dimensions = terrain_def
         .map_dimensions()
-        .expect("overworld.terrain.ron must contain MapDimensions");
+        .unwrap_or_else(|| panic!("{terrain_key}.terrain.ron must contain MapDimensions"));
 
     let mut config = VoxelMapConfig::new(seed, generation_version, 2, true);
     config.save_dir = Some(map_dir.clone());
@@ -269,6 +441,14 @@ fn configure_map_from_meta(
         shape,
     );
     commands.entity(entity).insert(generator);
+}
+
+/// Returns the terrain asset key used to configure a map instance.
+pub(crate) fn terrain_key_for_map(map_id: &MapInstanceId) -> &'static str {
+    match map_id {
+        MapInstanceId::Overworld => "overworld",
+        MapInstanceId::Homebase { .. } => "homebase",
+    }
 }
 
 /// Clone terrain definition components via `reflect_clone`, excluding `MapDimensions`.
@@ -332,6 +512,7 @@ fn save_dirty_chunks_debounced(
     time: Res<Time>,
     mut dirty_state: ResMut<WorldDirtyState>,
     mut map_query: Query<(
+        Entity,
         &mut VoxelMapInstance,
         &VoxelMapConfig,
         &MapInstanceId,
@@ -340,6 +521,15 @@ fn save_dirty_chunks_debounced(
         &mut PendingStoreOps<(), MapMeta>,
         &StoreBackend<(), Vec<SavedEntity>, FsMapEntitiesStore>,
         &mut PendingStoreOps<(), Vec<SavedEntity>>,
+        &StoreBackend<(), MapChangeSet, FsMapChangeSetStore>,
+        Option<&StoreBackend<(), LocalMapHead, FsLocalMapHeadStore>>,
+        Option<&RemotePublishJournal>,
+        Option<&remote_publish::PendingRemotePublishDeltas>,
+        (
+            &VoxelGenerator,
+            &StoreBackend<IVec3, ChunkFileEnvelope, FsChunkStore>,
+            &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
+        ),
     )>,
     entity_query: Query<(
         &MapSaveTarget,
@@ -348,6 +538,18 @@ fn save_dirty_chunks_debounced(
         Option<&RespawnPoint>,
     )>,
     respawn_query: Query<(&Position, &MapInstanceId), With<RespawnPoint>>,
+    chunk_entity_query: Query<(
+        Entity,
+        &ChunkEntityRef,
+        &WorldObjectId,
+        &Position,
+        Option<&ActiveTransformation>,
+        Option<&protocol::Health>,
+        Option<&Rotation>,
+    )>,
+    mut save_ids: ResMut<SaveOpIdAllocator>,
+    mut pending_publish: ResMut<remote_publish::PendingPublishBySaveId>,
+    remote_publish_config: Res<remote_publish::RemoteMapPublishConfig>,
 ) {
     if !dirty_state.is_dirty {
         return;
@@ -367,6 +569,7 @@ fn save_dirty_chunks_debounced(
     let by_map = collect_entities_by_map(&entity_query);
 
     for (
+        map_entity,
         mut instance,
         config,
         map_id,
@@ -375,6 +578,11 @@ fn save_dirty_chunks_debounced(
         mut meta_ops,
         entity_store,
         mut entity_ops,
+        change_set_store,
+        local_head_store,
+        publish_journal,
+        pending_deltas,
+        (generator, chunk_store, chunk_entities_store),
     ) in &mut map_query
     {
         if config.save_dir.is_none() {
@@ -382,20 +590,110 @@ fn save_dirty_chunks_debounced(
             continue;
         }
 
-        enqueue_dirty_chunks(&mut instance, &mut pending_saves);
+        enqueue_dirty_chunks(&mut instance, &mut pending_saves, None);
+        let content_dirty: HashSet<IVec3> = instance.content_dirty_chunks.drain().collect();
+        let entities_dirty = dirty_state.entities_dirty.remove(map_id);
+        let chunk_entities_dirty = dirty_state
+            .chunk_entities_dirty
+            .remove(map_id)
+            .unwrap_or_default();
 
-        let spawn_points: Vec<Vec3> = respawn_query
-            .iter()
-            .filter(|(_, mid)| *mid == map_id)
-            .map(|(pos, _)| pos.0)
-            .collect();
-        let meta = MapMeta {
-            version: 1,
-            seed: config.seed,
-            generation_version: config.generation_version,
-            spawn_points,
-        };
-        meta_ops.spawn_save(&meta_store.0, (), meta);
+        let meta = build_map_meta(config, map_id, &respawn_query);
+        // Meta differs from the last persisted meta when seed/generation/spawn-points change.
+        // Drives the homebase meta delta (overworld always sends meta as Present), so a
+        // post-genesis spawn-point change still republishes rather than being silently dropped.
+        let meta_changed = persistence::Store::load(&meta_store.0, &())
+            .expect("map meta should load during debounced save")
+            .as_ref()
+            != Some(&meta);
+
+        // Accumulate genuine edits into the durable change-set (the publish candidate set). It
+        // survives restart, so prior-session edits still publish across an F7 gap.
+        let dirtied = !content_dirty.is_empty()
+            || entities_dirty
+            || !chunk_entities_dirty.is_empty()
+            || meta_changed;
+        let mut change_set = persistence::Store::load(&change_set_store.0, &())
+            .expect("map change-set should load during debounced save")
+            .unwrap_or_default();
+        if dirtied {
+            change_set
+                .chunk_candidates
+                .extend(content_dirty.iter().copied());
+            change_set
+                .chunk_entity_candidates
+                .extend(chunk_entities_dirty.iter().copied());
+            change_set.map_entities_changed |= entities_dirty;
+            change_set.meta_changed |= meta_changed;
+            persistence::Store::save(&change_set_store.0, &(), &change_set)
+                .expect("map change-set should persist during debounced save");
+        }
+        if matches!(map_id, MapInstanceId::Overworld) && remote_publish_config.enabled && dirtied {
+            let save_id = save_ids.allocate();
+            let local_head = persistence::Store::load(
+                &local_head_store
+                    .expect("remote publishable Overworld map must have a local head store")
+                    .0,
+                &(),
+            )
+            .expect("local map head should load while allocating a remote publish revision");
+            let local_revision_number = remote_publish::next_publish_revision_number(
+                local_head.as_ref(),
+                publish_journal
+                    .expect("remote publishable Overworld map must have a publish journal"),
+                pending_deltas
+                    .expect("remote publishable Overworld map must have pending publish deltas"),
+                &pending_publish,
+            );
+            let map_entities = by_map.get(map_id).cloned().unwrap_or_default();
+            // Source the delta from the durable change-set (not the per-cycle dirty set), so
+            // prior-session edits and reverted-to-generated chunks (tombstones) are captured.
+            let (chunks, chunk_entities) = build_overworld_publish_slots(
+                map_entity,
+                &instance,
+                generator,
+                &chunk_store.0,
+                &chunk_entities_store.0,
+                &chunk_entity_query,
+                &change_set,
+            );
+            // build_overworld_publish_slots already deleted the reverted (tombstoned) chunks'
+            // files; drop their just-enqueued writes too, otherwise the async save drain runs
+            // after the delete and recreates the file.
+            let tombstoned: HashSet<IVec3> = chunks
+                .iter()
+                .filter(|(_, slot)| {
+                    matches!(slot, nostr_map_persistence::PayloadSlotState::Tombstoned)
+                })
+                .map(|(pos, _)| *pos)
+                .collect();
+            if !tombstoned.is_empty() {
+                pending_saves
+                    .queue
+                    .retain(|save| !tombstoned.contains(&save.position));
+            }
+            pending_publish.0.insert(
+                save_id,
+                ServerMapPublishDraft {
+                    local_revision_number,
+                    meta: nostr_map_persistence::PayloadSlotState::Present(meta.clone()),
+                    chunks,
+                    chunk_entities,
+                    map_entities: map_entities_publish_slot(
+                        change_set.map_entities_changed,
+                        &map_entities,
+                    ),
+                },
+            );
+            trace!(
+                ?map_entity,
+                ?save_id,
+                "queued overworld publish draft after dirty save"
+            );
+            meta_ops.spawn_save_with_id(&meta_store.0, save_id, (), meta);
+        } else {
+            meta_ops.spawn_save(&meta_store.0, (), meta);
+        }
 
         if let Some(entities) = by_map.get(map_id) {
             entity_ops.spawn_save(&entity_store.0, (), entities.clone());
@@ -406,22 +704,168 @@ fn save_dirty_chunks_debounced(
     dirty_state.first_dirty_time = None;
 }
 
+/// Classifies the overworld change-set into publish slots: terrain that still differs from
+/// generated terrain is `Present` (current bytes), terrain reverted to generated is `Tombstoned`
+/// (and the on-disk file is deleted so it regenerates from seed), and per-chunk world objects are
+/// `Present` (current list). A loaded chunk's objects come from live state; an evicted chunk's
+/// come from disk (synced on eviction). A candidate that is neither loaded nor on disk is skipped.
+#[allow(clippy::type_complexity)]
+fn build_overworld_publish_slots(
+    map_entity: Entity,
+    instance: &VoxelMapInstance,
+    generator: &VoxelGenerator,
+    chunk_store: &FsChunkStore,
+    chunk_entities_store: &FsChunkEntitiesStore,
+    chunk_entity_query: &Query<(
+        Entity,
+        &ChunkEntityRef,
+        &WorldObjectId,
+        &Position,
+        Option<&ActiveTransformation>,
+        Option<&protocol::Health>,
+        Option<&Rotation>,
+    )>,
+    change_set: &MapChangeSet,
+) -> (
+    Vec<(
+        IVec3,
+        nostr_map_persistence::PayloadSlotState<ChunkFileEnvelope>,
+    )>,
+    Vec<(
+        IVec3,
+        nostr_map_persistence::PayloadSlotState<Vec<WorldObjectSpawn>>,
+    )>,
+) {
+    use nostr_map_persistence::PayloadSlotState;
+
+    let mut sorted_chunks: Vec<IVec3> = change_set.chunk_candidates.iter().copied().collect();
+    sorted_chunks.sort_by_key(|pos| (pos.x, pos.y, pos.z));
+    let mut chunks = Vec::new();
+    for pos in sorted_chunks {
+        if instance.chunk_matches_generated(pos, generator.0.as_ref()) {
+            chunks.push((pos, PayloadSlotState::Tombstoned));
+            if let Err(error) = chunk_store.delete(&pos) {
+                error!(?pos, ?error, "failed to delete reverted overworld chunk");
+            }
+            continue;
+        }
+        let Some(data) = instance.get_chunk_data(pos) else {
+            trace!(
+                ?pos,
+                "overworld candidate differs from generated but is not loaded; skipping"
+            );
+            continue;
+        };
+        chunks.push((
+            pos,
+            PayloadSlotState::Present(ChunkFileEnvelope {
+                version: CHUNK_SAVE_VERSION,
+                chunk_size: instance.chunk_size,
+                data: data.clone(),
+            }),
+        ));
+    }
+
+    let mut sorted_entities: Vec<IVec3> =
+        change_set.chunk_entity_candidates.iter().copied().collect();
+    sorted_entities.sort_by_key(|pos| (pos.x, pos.y, pos.z));
+    let mut chunk_entities = Vec::new();
+    for pos in sorted_entities {
+        let spawns = if instance.get_chunk_data(pos).is_some() {
+            crate::chunk_entities::collect_chunk_entity_spawns(
+                map_entity,
+                pos,
+                None,
+                None,
+                chunk_entity_query,
+            )
+        } else {
+            match persistence::Store::load(chunk_entities_store, &pos) {
+                Ok(loaded) => loaded.unwrap_or_default(),
+                Err(error) => {
+                    error!(
+                        ?pos,
+                        ?error,
+                        "failed to load evicted overworld chunk entities; publishing empty"
+                    );
+                    Vec::new()
+                }
+            }
+        };
+        chunk_entities.push((pos, PayloadSlotState::Present(spawns)));
+    }
+
+    (chunks, chunk_entities)
+}
+
+/// Builds a map's `MapMeta` from its config and current respawn points, with spawn points in a
+/// deterministic order: ECS iteration order is unstable, and both the persisted-meta equality
+/// check (`meta_changed`) and published meta bytes must not flap on permutation.
+fn build_map_meta(
+    config: &VoxelMapConfig,
+    map_id: &MapInstanceId,
+    respawn_query: &Query<(&Position, &MapInstanceId), With<RespawnPoint>>,
+) -> MapMeta {
+    let mut spawn_points: Vec<Vec3> = respawn_query
+        .iter()
+        .filter(|(_, mid)| *mid == map_id)
+        .map(|(pos, _)| pos.0)
+        .collect();
+    spawn_points.sort_by(|a, b| {
+        a.x.total_cmp(&b.x)
+            .then(a.y.total_cmp(&b.y))
+            .then(a.z.total_cmp(&b.z))
+    });
+    MapMeta {
+        version: 1,
+        seed: config.seed,
+        generation_version: config.generation_version,
+        spawn_points,
+    }
+}
+
+/// Selects the publish slot for map-level entities.
+///
+/// `Absent` when the map's entities did not change this cycle, so chunk-only edits do not
+/// re-upload the entity payload; `Present`/`Empty` carries the current entities when they did.
+fn map_entities_publish_slot(
+    entities_dirty: bool,
+    entities: &[SavedEntity],
+) -> nostr_map_persistence::PayloadSlotState<Vec<SavedEntity>> {
+    if !entities_dirty {
+        nostr_map_persistence::PayloadSlotState::Absent
+    } else if entities.is_empty() {
+        nostr_map_persistence::PayloadSlotState::Empty
+    } else {
+        nostr_map_persistence::PayloadSlotState::Present(entities.to_vec())
+    }
+}
+
 /// Drain dirty chunks from an instance into the `PendingSaves` queue.
-fn enqueue_dirty_chunks(instance: &mut VoxelMapInstance, pending_saves: &mut PendingSaves) {
+fn enqueue_dirty_chunks(
+    instance: &mut VoxelMapInstance,
+    pending_saves: &mut PendingSaves,
+    save_id: Option<persistence::SaveOpId>,
+) -> Vec<(IVec3, ChunkFileEnvelope)> {
     let chunk_size = instance.chunk_size;
     let dirty: Vec<IVec3> = instance.dirty_chunks.drain().collect();
+    let mut saved = Vec::new();
     for chunk_pos in dirty {
         if let Some(chunk_data) = instance.get_chunk_data(chunk_pos) {
+            let envelope = ChunkFileEnvelope {
+                version: CHUNK_SAVE_VERSION,
+                chunk_size,
+                data: chunk_data.clone(),
+            };
             pending_saves.queue.push_back(lifecycle::PendingSave {
                 position: chunk_pos,
-                envelope: ChunkFileEnvelope {
-                    version: CHUNK_SAVE_VERSION,
-                    chunk_size,
-                    data: chunk_data.clone(),
-                },
+                envelope: envelope.clone(),
+                save_id,
             });
+            saved.push((chunk_pos, envelope));
         }
     }
+    saved
 }
 
 /// Flush all dirty chunks through the store. Blocks until complete.
@@ -493,17 +937,7 @@ pub fn save_world_on_shutdown(
         if config.save_dir.is_none() {
             continue;
         }
-        let spawn_points: Vec<Vec3> = respawn_query
-            .iter()
-            .filter(|(_, mid)| *mid == map_id)
-            .map(|(pos, _)| pos.0)
-            .collect();
-        let meta = MapMeta {
-            version: 1,
-            seed: config.seed,
-            generation_version: config.generation_version,
-            spawn_points,
-        };
+        let meta = build_map_meta(config, map_id, &respawn_query);
         meta_ops.spawn_save(&meta_store.0, (), meta);
         meta_ops.flush();
         log_save_errors(&mut meta_ops, "map metadata");
@@ -549,30 +983,6 @@ fn collect_entities_by_map(
     by_map
 }
 
-/// Synchronously load and spawn entities for a map. Used by homebase spawn path
-/// which doesn't yet use the async store lifecycle.
-fn load_map_entities_sync(
-    commands: &mut Commands,
-    map_dir: &Arc<PathBuf>,
-    map_id: &MapInstanceId,
-) -> usize {
-    use persistence::Store;
-    let store = FsMapEntitiesStore {
-        map_dir: map_dir.clone(),
-    };
-    let entities: Vec<SavedEntity> = match store.load(&()) {
-        Ok(Some(entities)) => entities,
-        Ok(None) => return 0,
-        Err(e) => {
-            warn!("Failed to load entities for {map_id:?}: {e}");
-            return 0;
-        }
-    };
-    let count = entities.len();
-    spawn_saved_entities(commands, map_id, &entities);
-    count
-}
-
 /// Spawn map entities (respawn points, etc.) from loaded data.
 fn spawn_saved_entities(commands: &mut Commands, map_id: &MapInstanceId, entities: &[SavedEntity]) {
     for saved in entities {
@@ -588,15 +998,31 @@ fn spawn_saved_entities(commands: &mut Commands, map_id: &MapInstanceId, entitie
 fn poll_map_entities(
     mut commands: Commands,
     mut query: Query<(
+        Entity,
         &MapInstanceId,
         &mut MapLoadState,
         &StoreBackend<(), Vec<SavedEntity>, FsMapEntitiesStore>,
         &mut PendingStoreOps<(), Vec<SavedEntity>>,
     )>,
+    mut save_completed: MessageWriter<remote_publish::MapPayloadSaveCompleted>,
 ) {
-    for (map_id, mut state, store, mut ops) in &mut query {
+    for (entity, map_id, mut state, store, mut ops) in &mut query {
         ops.poll();
         log_save_errors(&mut ops, "map entities");
+        for completion in ops.completed_saves.drain(..) {
+            if let Some(save_id) = completion.id {
+                save_completed.write(remote_publish::MapPayloadSaveCompleted {
+                    map_entity: entity,
+                    save_id,
+                    key: remote_publish::MapPayloadSaveKey::MapEntities,
+                });
+            } else {
+                trace!(
+                    ?map_id,
+                    "map entities save completion has no publish save id"
+                );
+            }
+        }
 
         if *state != MapLoadState::AwaitingEntities {
             continue;
@@ -642,10 +1068,27 @@ fn on_map_instance_id_added(
 }
 
 /// Poll async chunk entity store operations each frame.
-fn poll_chunk_entity_ops(mut query: Query<&mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>>) {
-    for mut ops in &mut query {
+fn poll_chunk_entity_ops(
+    mut query: Query<(Entity, &mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>)>,
+    mut save_completed: MessageWriter<remote_publish::MapPayloadSaveCompleted>,
+) {
+    for (map_entity, mut ops) in &mut query {
         ops.poll();
         log_save_errors(&mut ops, "chunk entities");
+        for completion in ops.completed_saves.drain(..) {
+            if let Some(save_id) = completion.id {
+                save_completed.write(remote_publish::MapPayloadSaveCompleted {
+                    map_entity,
+                    save_id,
+                    key: remote_publish::MapPayloadSaveKey::ChunkEntities(completion.key),
+                });
+            } else {
+                trace!(
+                    ?map_entity,
+                    "chunk entity save completion has no publish save id"
+                );
+            }
+        }
     }
 }
 
@@ -658,13 +1101,28 @@ impl Plugin for ServerMapPlugin {
             .init_resource::<RoomRegistry>()
             .init_resource::<WorldDirtyState>()
             .init_resource::<PendingVoxelBroadcasts>()
+            .init_resource::<PendingMapPreflights>()
+            .init_resource::<RemoteMapPersistenceConfig>()
+            .init_resource::<remote_publish::RemoteMapPublishConfig>()
             .init_resource::<WorldSavePath>()
-            .add_systems(OnEnter(AppState::Ready), init_overworld_entity)
+            .init_resource::<SaveOpIdAllocator>()
+            .init_resource::<remote_publish::PendingPublishBySaveId>()
+            .init_resource::<remote_publish::RemoteMapPublishWorker>()
+            .init_resource::<homebase_publication::PendingHomebaseAttestations>()
+            .init_resource::<homebase_publication::InFlightHomebasePublishes>()
+            .add_message::<remote_publish::MapPayloadSaveCompleted>()
+            .add_systems(
+                OnEnter(AppState::Ready),
+                (configure_remote_map_read_context, init_overworld_entity).chain(),
+            )
             .add_systems(
                 Update,
                 (
-                    poll_map_meta.run_if(in_state(AppState::Ready)),
+                    spawn_map_preflight_tasks.run_if(in_state(AppState::Ready)),
+                    poll_map_persistence_preflight.run_if(in_state(AppState::Ready)),
+                    forward_map_meta_save_completions.run_if(in_state(AppState::Ready)),
                     poll_map_entities.run_if(in_state(AppState::Ready)),
+                    commit_ready_map_preflights.run_if(in_state(AppState::Ready)),
                     (
                         (
                             handle_voxel_edit_requests,
@@ -683,7 +1141,7 @@ impl Plugin for ServerMapPlugin {
                     handle_world_object_rotate_requests,
                     push_chunks_to_clients,
                     save_dirty_chunks_debounced,
-                    handle_map_switch_requests.run_if(resource_exists::<TerrainDefRegistry>),
+                    handle_map_switch_requests,
                     crate::transition::complete_map_transition,
                     protocol::attach_chunk_colliders,
                     crate::chunk_entities::spawn_chunk_entities
@@ -696,6 +1154,20 @@ impl Plugin for ServerMapPlugin {
                         .after(lifecycle::despawn_out_of_range_chunks),
                     poll_chunk_entity_ops,
                     crate::chunk_entities::save_chunk_entities_periodic,
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    homebase_publication::handle_homebase_attestation_requests,
+                    homebase_publication::poll_homebase_attestation_uploads,
+                    homebase_publication::handle_homebase_published,
+                    remote_publish::normalize_chunk_save_completions,
+                    remote_publish::handle_completed_map_payload_save_for_publish,
+                    remote_publish::prepare_pending_remote_publish_journal_entries
+                        .run_if(remote_publish::remote_map_publish_enabled),
+                    remote_publish::poll_remote_publish_journal
+                        .run_if(remote_publish::remote_map_publish_enabled),
                 ),
             )
             .add_systems(
@@ -758,12 +1230,7 @@ fn apply_voxel_edit(
         request.position,
         WorldVoxel::from(request.voxel),
     );
-    let now = time.elapsed_secs_f64();
-    if !dirty_state.is_dirty {
-        dirty_state.first_dirty_time = Some(now);
-    }
-    dirty_state.is_dirty = true;
-    dirty_state.last_edit_time = now;
+    dirty_state.mark_dirty(time.elapsed_secs_f64());
 }
 
 /// Sends an edit acknowledgment to the originating client.
@@ -812,6 +1279,8 @@ pub fn handle_world_object_placement_requests(
     vox_registry: Res<VoxModelRegistry>,
     vox_assets: Res<Assets<VoxModelAsset>>,
     meshes: Res<Assets<Mesh>>,
+    mut dirty_state: ResMut<WorldDirtyState>,
+    time: Res<Time>,
     mut commands: Commands,
 ) {
     for (client_entity, mut receiver) in &mut receivers {
@@ -836,14 +1305,14 @@ pub fn handle_world_object_placement_requests(
                 .expect("resolved map entity must have VoxelMapInstance and MapDimensions");
 
             match validate_world_object_placement(&request, instance, dimensions, &defs) {
-                Ok((def, final_position, _)) => {
+                Ok((def, final_position, placement_chunk)) => {
                     crate::world_object::spawn_placed_world_object(
                         &mut commands,
                         request.object_id.clone(),
                         def,
                         request.base_position,
                         map_entity,
-                        map_id,
+                        map_id.clone(),
                         dimensions.chunk_size,
                         &type_registry,
                         &vox_registry,
@@ -859,6 +1328,9 @@ pub fn handle_world_object_placement_requests(
                         },
                         &mut ack_senders,
                     );
+                    let now = time.elapsed_secs_f64();
+                    dirty_state.mark_entities_dirty(&map_id, now);
+                    dirty_state.mark_chunk_entity_dirty(&map_id, placement_chunk, now);
                 }
                 Err(reason) => {
                     trace!(
@@ -979,6 +1451,8 @@ pub fn handle_world_object_delete_requests(
         &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
         &mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>,
     )>,
+    mut dirty_state: ResMut<WorldDirtyState>,
+    time: Res<Time>,
     mut commands: Commands,
 ) {
     for (client_entity, mut receiver) in &mut receivers {
@@ -1020,6 +1494,9 @@ pub fn handle_world_object_delete_requests(
                         },
                         &mut ack_senders,
                     );
+                    let now = time.elapsed_secs_f64();
+                    dirty_state.mark_entities_dirty(&map_id, now);
+                    dirty_state.mark_chunk_entity_dirty(&map_id, validated.chunk_pos, now);
                 }
                 Err(reason) => {
                     send_world_object_edit_reject(
@@ -1127,6 +1604,8 @@ pub fn handle_world_object_move_requests(
         &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
         &mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>,
     )>,
+    mut dirty_state: ResMut<WorldDirtyState>,
+    time: Res<Time>,
     mut commands: Commands,
 ) {
     for (client_entity, mut receiver) in &mut receivers {
@@ -1169,6 +1648,10 @@ pub fn handle_world_object_move_requests(
                         },
                         &mut ack_senders,
                     );
+                    let now = time.elapsed_secs_f64();
+                    dirty_state.mark_entities_dirty(&map_id, now);
+                    dirty_state.mark_chunk_entity_dirty(&map_id, validated.old_chunk_pos, now);
+                    dirty_state.mark_chunk_entity_dirty(&map_id, validated.new_chunk_pos, now);
                 }
                 Err(reason) => {
                     send_world_object_edit_reject(
@@ -1234,6 +1717,8 @@ pub fn handle_world_object_rotate_requests(
         &StoreBackend<IVec3, Vec<WorldObjectSpawn>, FsChunkEntitiesStore>,
         &mut PendingStoreOps<IVec3, Vec<WorldObjectSpawn>>,
     )>,
+    mut dirty_state: ResMut<WorldDirtyState>,
+    time: Res<Time>,
     mut commands: Commands,
 ) {
     for (client_entity, mut receiver) in &mut receivers {
@@ -1282,6 +1767,11 @@ pub fn handle_world_object_rotate_requests(
                             rotation,
                         },
                         &mut ack_senders,
+                    );
+                    dirty_state.mark_chunk_entity_dirty(
+                        &map_id,
+                        chunk_ref.chunk_pos,
+                        time.elapsed_secs_f64(),
                     );
                 }
                 Err(reason) => {
@@ -1691,12 +2181,7 @@ fn apply_voxel_changes(
             .iter()
             .map(|change| (change.position, WorldVoxel::from(change.voxel))),
     );
-    let now = time.elapsed_secs_f64();
-    if !dirty_state.is_dirty {
-        dirty_state.first_dirty_time = Some(now);
-    }
-    dirty_state.is_dirty = true;
-    dirty_state.last_edit_time = now;
+    dirty_state.mark_dirty(time.elapsed_secs_f64());
 }
 
 fn send_brush_edit_ack(
@@ -2019,265 +2504,11 @@ fn unload_stale_columns(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn handle_map_switch_requests(
-    mut commands: Commands,
-    mut receivers: Query<(Entity, &mut MessageReceiver<PlayerMapSwitchRequest>)>,
-    mut senders: Query<&mut MessageSender<MapTransitionStart>>,
-    controlled_query: Query<(Entity, &ControlledBy, &MapInstanceId), With<CharacterMarker>>,
-    pending: Query<(), With<PendingTransition>>,
-    player_identities: Query<&PlayerIdentity>,
-    mut registry: ResMut<MapRegistry>,
-    mut room_registry: ResMut<RoomRegistry>,
-    map_params_query: Query<(&VoxelMapConfig, &MapDimensions)>,
-    save_path: Res<WorldSavePath>,
-    // Option<Res<_>> here because tests may run without a loaded terrain registry.
-    // At runtime the `.run_if(resource_exists::<TerrainDefRegistry>)` guard prevents
-    // the system from running without it; this Option<...> exists only so the
-    // system's param validation doesn't panic in test apps that skip terrain loading.
-    terrain_registry: Option<Res<TerrainDefRegistry>>,
-    type_registry: Res<AppTypeRegistry>,
-    respawn_query: Query<(&Position, &MapInstanceId), With<protocol::RespawnPoint>>,
-) {
-    let Some(terrain_registry) = terrain_registry else {
-        trace!("handle_map_switch_requests: TerrainDefRegistry not loaded yet, skipping");
-        return;
-    };
-    for (client_entity, mut receiver) in &mut receivers {
-        for request in receiver.receive() {
-            trace!(
-                "handle_map_switch_requests: received {request:?} from client {client_entity:?}"
-            );
-            let (player_entity, _controlled_by, current_map_id) = controlled_query
-                .iter()
-                .find(|(_, ctrl, _)| ctrl.owner == client_entity)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "No character entity found for client {client_entity:?} during map switch"
-                    )
-                });
-
-            if pending.get(player_entity).is_ok() {
-                warn!("Player {player_entity:?} already transitioning, ignoring request");
-                continue;
-            }
-
-            let identity = player_identities
-                .get(client_entity)
-                .expect("Authenticated client must have PlayerIdentity before map switch");
-            let target_map_id = resolve_switch_target(&request.target, identity.0);
-
-            if *current_map_id == target_map_id {
-                warn!("Player {player_entity:?} already on target map {target_map_id:?}");
-                continue;
-            }
-
-            crate::transition::start_map_transition(
-                &mut commands,
-                player_entity,
-                client_entity,
-                current_map_id,
-                &target_map_id,
-                &mut registry,
-                &mut room_registry,
-                &map_params_query,
-                &mut senders,
-                &save_path,
-                &terrain_registry,
-                &type_registry,
-                &respawn_query,
-            );
-        }
-    }
-}
-
-/// Resolves a `MapSwitchTarget` to a `MapInstanceId` using the authenticated player's public key.
-fn resolve_switch_target(target: &MapSwitchTarget, owner: NostrPublicKey) -> MapInstanceId {
-    match target {
-        MapSwitchTarget::Overworld => MapInstanceId::Overworld,
-        MapSwitchTarget::Homebase => MapInstanceId::Homebase { owner },
-    }
-}
-
-/// Seed, generation_version, and bounds for a map transition message.
-pub struct MapTransitionParams {
-    pub seed: u64,
-    pub generation_version: u32,
-    pub bounds: Option<IVec3>,
-    pub chunk_size: u32,
-    pub column_y_range: (i32, i32),
-}
-
-/// Returns the map entity and transition params. If the map already exists,
-/// reads params from its `VoxelMapConfig`/`MapDimensions`. If newly spawned,
-/// derives them from the terrain def (the entity isn't queryable yet via commands).
-#[allow(clippy::too_many_arguments)]
-pub fn ensure_map_exists(
-    commands: &mut Commands,
-    map_id: &MapInstanceId,
-    registry: &mut MapRegistry,
-    map_params_query: &Query<(&VoxelMapConfig, &MapDimensions)>,
-    save_path: &WorldSavePath,
-    terrain_registry: &TerrainDefRegistry,
-    type_registry: &AppTypeRegistry,
-) -> (Entity, MapTransitionParams) {
-    if let Some(&entity) = registry.0.get(map_id) {
-        let (config, dimensions) = map_params_query
-            .get(entity)
-            .expect("Existing map entity must have VoxelMapConfig + MapDimensions");
-        let params = MapTransitionParams {
-            seed: config.seed,
-            generation_version: config.generation_version,
-            bounds: dimensions.bounds,
-            chunk_size: dimensions.chunk_size,
-            column_y_range: dimensions.column_y_range,
-        };
-        return (entity, params);
-    }
-
-    match map_id {
-        MapInstanceId::Overworld => {
-            panic!("Overworld must already be registered in MapRegistry");
-        }
-        MapInstanceId::Homebase { owner } => {
-            let (entity, params) = spawn_homebase(
-                commands,
-                *owner,
-                save_path,
-                registry,
-                map_id,
-                terrain_registry,
-                type_registry,
-            );
-            (entity, params)
-        }
-    }
-}
-
-/// Spawns a new homebase map, loading seed and entities from disk if saved.
-fn spawn_homebase(
-    commands: &mut Commands,
-    owner: NostrPublicKey,
-    save_path: &WorldSavePath,
-    registry: &mut MapRegistry,
-    map_id: &MapInstanceId,
-    terrain_registry: &TerrainDefRegistry,
-    type_registry: &AppTypeRegistry,
-) -> (Entity, MapTransitionParams) {
-    let map_dir = Arc::new(map_save_dir(&save_path.0, map_id));
-
-    let seed = load_homebase_seed(&map_dir, owner);
-
-    let terrain_def = terrain_registry
-        .get("homebase")
-        .expect("homebase.terrain.ron must be loaded");
-    let dimensions = terrain_def
-        .map_dimensions()
-        .expect("homebase.terrain.ron must contain MapDimensions");
-
-    let bounds = dimensions.bounds;
-    let spawning_distance = bounds_to_spawning_distance(bounds.unwrap_or(IVec3::ONE));
-
-    let mut config = VoxelMapConfig::new(seed, 0, spawning_distance, true);
-    config.save_dir = Some(map_dir.as_ref().clone());
-
-    let instance = VoxelMapInstance::new(dimensions.tree_height, dimensions.chunk_size);
-    let shape = instance.shape.clone();
-
-    let params = MapTransitionParams {
-        seed: config.seed,
-        generation_version: config.generation_version,
-        bounds: dimensions.bounds,
-        chunk_size: dimensions.chunk_size,
-        column_y_range: dimensions.column_y_range,
-    };
-
-    let entity = commands
-        .spawn((
-            instance,
-            config,
-            dimensions.clone(),
-            Homebase,
-            protocol::map::Owner(owner),
-            Transform::default(),
-            map_id.clone(),
-            StoreBackend::new(FsMapMetaStore {
-                map_dir: map_dir.clone(),
-            }),
-            PendingStoreOps::<(), MapMeta>::default(),
-            StoreBackend::new(FsMapEntitiesStore {
-                map_dir: map_dir.clone(),
-            }),
-            PendingStoreOps::<(), Vec<SavedEntity>>::default(),
-            StoreBackend::new(FsChunkEntitiesStore {
-                map_dir: map_dir.clone(),
-            }),
-            PendingStoreOps::<IVec3, Vec<WorldObjectSpawn>>::default(),
-            StoreBackend::new(FsChunkStore {
-                map_dir: map_dir.clone(),
-            }),
-            PendingStoreOps::<IVec3, ChunkFileEnvelope>::default(),
-        ))
-        .id();
-
-    let components = clone_terrain_components_excluding_dimensions(terrain_def);
-    apply_object_components(commands, entity, components, type_registry.0.clone());
-
-    let generator = build_generator_from_def(
-        terrain_def,
-        seed,
-        dimensions.chunk_size,
-        dimensions.padded_size(),
-        shape,
-    );
-    commands.entity(entity).insert(generator);
-
-    registry.insert(map_id.clone(), entity);
-
-    let entity_count = load_map_entities_sync(commands, &map_dir, map_id);
-    if entity_count > 0 {
-        trace!("Loaded {entity_count} entities for homebase {owner:?}");
-    }
-
-    trace!("Spawned server homebase for owner {owner:?}: {entity:?}");
-    (entity, params)
-}
-
-/// Loads the seed for a homebase from saved metadata, falling back to `seed_from_nostr_public_key`.
-fn load_homebase_seed(map_dir: &Arc<PathBuf>, owner: NostrPublicKey) -> u64 {
-    use persistence::Store;
-    let store = FsMapMetaStore {
-        map_dir: map_dir.clone(),
-    };
-    match store.load(&()) {
-        Ok(Some(meta)) => {
-            trace!(
-                ?owner,
-                "Loading homebase from saved metadata (seed={})",
-                meta.seed
-            );
-            meta.seed
-        }
-        _ => {
-            let seed = seed_from_nostr_public_key(owner);
-            trace!(?owner, "Creating new homebase (seed={seed})");
-            seed
-        }
-    }
-}
-
-fn seed_from_nostr_public_key(owner: NostrPublicKey) -> u64 {
-    u64::from_le_bytes(
-        owner.0[0..8]
-            .try_into()
-            .expect("NostrPublicKey has 32 bytes"),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use protocol::map::VoxelType;
+    use protocol::NostrPublicKey;
 
     fn make_edit(position: IVec3, voxel: VoxelType) -> PendingVoxelEdit {
         PendingVoxelEdit {
@@ -2421,6 +2652,50 @@ mod tests {
             voxel_for_brush_mode(WorldVoxel::Unset, TerrainBrushMode::ReplaceAll, 5),
             Some(VoxelType::Solid(5))
         );
+    }
+
+    #[test]
+    fn remote_read_allowed_hosts_parse_comma_list() {
+        assert_eq!(
+            parse_blossom_allowed_hosts(Some("Blossom.Example, cdn.example ")),
+            BTreeSet::from(["blossom.example".to_string(), "cdn.example".to_string()])
+        );
+    }
+
+    #[test]
+    fn entity_change_marks_dirty_and_records_map() {
+        let mut dirty = WorldDirtyState::default();
+        let map_id = MapInstanceId::Overworld;
+
+        dirty.mark_entities_dirty(&map_id, 1.0);
+
+        assert!(dirty.is_dirty);
+        assert_eq!(dirty.first_dirty_time, Some(1.0));
+        assert!(dirty.entities_dirty.contains(&map_id));
+    }
+
+    #[test]
+    fn map_entities_slot_absent_unless_entities_changed() {
+        let entities = vec![SavedEntity {
+            kind: SavedEntityKind::RespawnPoint,
+            position: Vec3::ZERO,
+        }];
+
+        // Unchanged this cycle (e.g. a chunk-only edit) -> do not re-upload entities.
+        assert!(matches!(
+            map_entities_publish_slot(false, &entities),
+            nostr_map_persistence::PayloadSlotState::Absent
+        ));
+        // Changed with entities present -> upload the current list.
+        assert!(matches!(
+            map_entities_publish_slot(true, &entities),
+            nostr_map_persistence::PayloadSlotState::Present(_)
+        ));
+        // Changed to empty -> explicit empty slot, not absent.
+        assert!(matches!(
+            map_entities_publish_slot(true, &[]),
+            nostr_map_persistence::PayloadSlotState::Empty
+        ));
     }
 
     #[test]

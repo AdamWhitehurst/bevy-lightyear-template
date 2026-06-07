@@ -4,6 +4,7 @@ use ndshape::{RuntimeShape, Shape};
 use std::collections::{HashMap, HashSet};
 
 use crate::api::voxel_to_chunk_pos;
+use crate::config::VoxelGeneratorImpl;
 use crate::types::{ChunkData, WorldVoxel};
 
 /// Marker: this map is the shared overworld.
@@ -24,10 +25,12 @@ pub struct Arena {
 #[derive(Component)]
 pub struct VoxelMapInstance {
     pub tree: OctreeI32<Option<ChunkData>>,
-    /// Effective level per loaded column (level ≤ LOAD_LEVEL_THRESHOLD only).
+    /// Effective level per loaded column (level <= LOAD_LEVEL_THRESHOLD only).
     pub chunk_levels: HashMap<IVec2, u32>,
-    /// Chunks with unsaved voxel modifications.
+    /// Chunks with unsaved voxel modifications (generated or edited); drives local saves.
     pub dirty_chunks: HashSet<IVec3>,
+    /// Chunks changed by genuine content edits (not procedural generation); drives remote publish.
+    pub content_dirty_chunks: HashSet<IVec3>,
     /// Chunks that need async remeshing after in-place mutation.
     pub chunks_needing_remesh: HashSet<IVec3>,
     pub debug_colors: bool,
@@ -45,6 +48,7 @@ impl VoxelMapInstance {
             tree: OctreeI32::new(tree_height as u8),
             chunk_levels: HashMap::new(),
             dirty_chunks: HashSet::new(),
+            content_dirty_chunks: HashSet::new(),
             chunks_needing_remesh: HashSet::new(),
             debug_colors: false,
             chunk_size,
@@ -92,6 +96,24 @@ impl VoxelMapInstance {
         self.tree.get_value_mut(relation.child)?.as_mut()
     }
 
+    /// Returns whether the loaded chunk at `chunk_pos` is byte-identical to freshly-generated
+    /// terrain (i.e. holds no genuine edits). Used to classify a publish candidate as a delete
+    /// (equals generated -> Tombstone) vs an edit (differs -> Present).
+    ///
+    /// Returns `false` when the chunk is not loaded (cannot prove it equals generated).
+    pub fn chunk_matches_generated(
+        &self,
+        chunk_pos: IVec3,
+        generator: &dyn VoxelGeneratorImpl,
+    ) -> bool {
+        let Some(chunk_data) = self.get_chunk_data(chunk_pos) else {
+            trace!(?chunk_pos, "chunk not loaded; cannot compare to generated");
+            return false;
+        };
+        let generated = generator.generate_terrain(chunk_pos);
+        chunk_data.matches_voxels(&generated)
+    }
+
     /// Mutate multiple world-space voxels by reusing single-voxel mutation behavior.
     pub fn set_voxels(&mut self, edits: impl IntoIterator<Item = (IVec3, WorldVoxel)>) -> usize {
         let mut written = 0;
@@ -131,6 +153,7 @@ impl VoxelMapInstance {
         chunk_data.voxels.set(index, voxel);
 
         self.dirty_chunks.insert(chunk_pos);
+        self.content_dirty_chunks.insert(chunk_pos);
         self.chunks_needing_remesh.insert(chunk_pos);
 
         self.update_neighbor_padding(chunk_pos, local, voxel);
@@ -181,10 +204,36 @@ pub fn seed_from_id(id: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::terrain::AirGenerator;
     use crate::types::{ChunkStatus, FillType};
 
     /// Padded chunk volume for the default `chunk_size=16`, used by tests.
     const PADDED_VOLUME_16: usize = 18 * 18 * 18;
+
+    #[test]
+    fn chunk_matches_generated_true_for_unedited_chunk() {
+        let mut instance = VoxelMapInstance::new(5, 16);
+        let pos = IVec3::ZERO;
+        let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
+        instance.insert_chunk_data(pos, ChunkData::from_voxels(&voxels, ChunkStatus::Full));
+        assert!(instance.chunk_matches_generated(pos, &AirGenerator::new(16)));
+    }
+
+    #[test]
+    fn chunk_matches_generated_false_after_edit() {
+        let mut instance = VoxelMapInstance::new(5, 16);
+        let pos = IVec3::ZERO;
+        let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
+        instance.insert_chunk_data(pos, ChunkData::from_voxels(&voxels, ChunkStatus::Full));
+        instance.set_voxel(IVec3::new(5, 5, 5), WorldVoxel::Solid(1));
+        assert!(!instance.chunk_matches_generated(pos, &AirGenerator::new(16)));
+    }
+
+    #[test]
+    fn chunk_matches_generated_false_when_unloaded() {
+        let instance = VoxelMapInstance::new(5, 16);
+        assert!(!instance.chunk_matches_generated(IVec3::ZERO, &AirGenerator::new(16)));
+    }
 
     #[test]
     fn new_creates_empty_instance() {
@@ -298,6 +347,25 @@ mod tests {
         assert_eq!(data.voxels.get(index), WorldVoxel::Solid(42));
         assert!(instance.dirty_chunks.contains(&chunk_pos));
         assert!(instance.chunks_needing_remesh.contains(&chunk_pos));
+    }
+
+    #[test]
+    fn content_dirty_tracks_edits_not_generated_inserts() {
+        let mut instance = VoxelMapInstance::new(5, 16);
+        let chunk_pos = IVec3::ZERO;
+        let voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
+
+        // Generated/disk-loaded chunk insertion must not mark content dirty.
+        instance.insert_chunk_data(
+            chunk_pos,
+            ChunkData::from_voxels(&voxels, ChunkStatus::Full),
+        );
+        assert!(instance.content_dirty_chunks.is_empty());
+
+        // A genuine voxel edit marks the chunk content dirty (and locally dirty).
+        instance.set_voxel(IVec3::new(5, 5, 5), WorldVoxel::Solid(42));
+        assert!(instance.content_dirty_chunks.contains(&chunk_pos));
+        assert!(instance.dirty_chunks.contains(&chunk_pos));
     }
 
     #[test]

@@ -2,6 +2,7 @@ pub mod diagnostics;
 pub mod gameplay;
 pub mod input;
 pub mod map;
+pub mod map_publication;
 pub mod transition;
 pub mod world_object;
 
@@ -14,6 +15,7 @@ use diagnostics::ClientDiagnosticsPlugin;
 use gameplay::ClientGameplayPlugin;
 use lightyear::prelude::client::*;
 use map::ClientMapPlugin;
+use map_publication::ClientMapPublicationPlugin;
 use nostr_client::{
     EncryptedIdentity, LoginError, NostrClientConfig, NostrClientPlugin, SaveEncryptedIdentity,
     StoredEncryptedIdentity,
@@ -92,6 +94,7 @@ fn main() {
         .add_plugins(ClientGameplayPlugin)
         .add_plugins(input::ClientInputCommandPlugin)
         .add_plugins(ClientMapPlugin)
+        .add_plugins(ClientMapPublicationPlugin)
         .add_plugins(transition::ClientTransitionPlugin)
         .add_plugins(RenderPlugin)
         .add_plugins(UiPlugin)
@@ -157,11 +160,12 @@ fn poll_identity_store_load(
         complete.0 = true;
         info!("Encrypted identity load complete");
     }
-    for (_key, error) in ops.load_errors.drain(..) {
+    if let Some((_key, error)) = ops.load_errors.pop() {
         panic!("Failed to load encrypted identity: {error}");
     }
-    for (_key, error) in ops.save_errors.drain(..) {
-        panic!("Failed to save encrypted identity: {error}");
+    ops.completed_saves.clear();
+    if let Some(failure) = ops.save_errors.pop() {
+        panic!("Failed to save encrypted identity: {}", failure.error);
     }
 }
 

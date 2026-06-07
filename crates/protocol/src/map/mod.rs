@@ -1,5 +1,6 @@
 mod chunk;
 mod colliders;
+mod homebase_publication;
 mod persistence;
 mod transition;
 mod types;
@@ -15,6 +16,10 @@ pub use voxel_map_engine::prelude::{VoxelChunk, VoxelType};
 
 pub use chunk::{ChunkChannel, ChunkDataSync, UnloadColumn};
 pub use colliders::attach_chunk_colliders;
+pub use homebase_publication::{
+    HomebaseAttestationRequest, HomebaseAttestationResponse, HomebasePayloadScope,
+    HomebasePublicationAttestation, HomebasePublished,
+};
 pub use persistence::{MapSaveTarget, SavedEntity, SavedEntityKind};
 pub use transition::{
     MapChannel, MapTransitionEnd, MapTransitionReady, MapTransitionStart, PendingTransition,

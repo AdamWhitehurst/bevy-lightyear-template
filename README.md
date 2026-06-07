@@ -9,7 +9,7 @@ See [VISION.md](VISION.md) for the long-term game vision.
 - Server-authoritative multiplayer over WebTransport with Lightyear prediction/replication.
 - Native and WASM clients that connect to the same authoritative server.
 - Nostr identity, server discovery, and connection authentication.
-- Persistent voxel maps with Overworld and per-player Homebase instances.
+- Persistent voxel maps with Overworld and per-player Homebase instances, gated by server-side persistence preflight before startup spawns or map transitions.
 - Server-authoritative terrain sculpting, world-object placement, editing, and persistence.
 - Data-driven abilities, combat phases, hit detection, health, death, and respawn.
 - Sprite-rig character rendering and RON-loaded animation assets.
@@ -146,10 +146,98 @@ Gameplay hotkeys are filtered through client-local input ownership so focused UI
 | `crates/dev` | Dev inspector, physics debug, spawn/world/terrain panels. |
 | `crates/voxel_map_engine` | Voxel terrain generation, chunk lifecycle, meshing, brush edits, and map internals. |
 | `crates/sprite_rig` | Sprite rig assets, animation loading, and billboarded rig spawning. |
-| `crates/nostr_client` | Nostr relay pool, encrypted identity, server announcements, and auth helpers. |
+| `crates/nostr_client` | Nostr relay pool, encrypted identity, server announcements, auth helpers, generic event queries, and verified blob helpers. |
+| `crates/nostr_map_persistence` | Shared Nostr map persistence DTOs, signed manifest verification, query policies, remote read/write helpers, and store adapters. |
 | `assets` | Game data, sprites, rigs, animations, terrain, objects, and voxel models. |
 | `worlds` | Local generated/persisted world data. |
 | `docs` | Brainstorms, task plans, bug notes, and deeper design documents. |
 | `git` | Checked-out dependency sources and submodules. |
 | `certificates` | Local WebTransport certificates and digest. |
 | `scripts` | Setup and helper scripts. |
+
+## Nostr/Blossom Map Persistence
+
+Persistent maps still write to local filesystem stores first. When remote publishing is enabled, server-owned Overworld saves are tracked with per-map `remote_publish_journal.bin` entries, `local_head.bin`, and `accepted_head.bin`; failed remote publishes block later remote entries while preserving local files. Blossom uploads are authorized with BUD-11 `Authorization: Nostr ...` tokens signed by the configured Nostr keys. Remote restore is enabled by `SERVER_MAP_REMOTE_READ=1` or implicitly by `SERVER_MAP_REMOTE_PUBLISH=1`; startup preflight then queries Nostr for the latest server-owned Overworld manifest and downloads Blossom payloads from `SERVER_BLOSSOM_PUBLIC_BASE_URL`/`SERVER_BLOSSOM_ALLOWED_HOSTS` before falling back to local files.
+
+Enable server-owned Overworld remote publishing with:
+
+```bash
+SERVER_MAP_REMOTE_PUBLISH=1 \
+SERVER_BLOSSOM_UPLOAD_URL='https://blossom.example/upload' \
+SERVER_BLOSSOM_PUBLIC_BASE_URL='https://blossom.example/' \
+SERVER_NSEC='nsec1...' \
+NOSTR_RELAYS='wss://relay.damus.io,wss://nos.lol' \
+cargo server
+```
+
+For restore-only testing without publishing, use `SERVER_MAP_REMOTE_READ=1` with `SERVER_BLOSSOM_PUBLIC_BASE_URL` or `SERVER_BLOSSOM_ALLOWED_HOSTS`, `SERVER_NSEC`, and `NOSTR_RELAYS`. To test a clean remote restore safely, move `worlds/` aside instead of deleting it, then restore the backup if remote materialization fails.
+
+For manual failure-path testing, add `SERVER_MAP_REMOTE_PUBLISH_FAIL_FIRST=1` to force the first manifest publish to fail after Blossom payload upload.
+
+### Scope, Quarantine, and Recovery
+
+v1 remote persistence covers map/layout data for the Overworld and Homebases only,
+and never progression-bearing client-published state. "Latest" means the latest
+*visible valid descendant* of the local accepted head under the configured relay
+query policy — not a global latest: relays that are down or not configured cannot
+contribute manifests.
+
+Failure handling is split by class (each logged distinctly):
+
+- **Unavailable** (relay query/Blossom fetch failed, timeout): graceful fallback to
+  local filesystem state; nothing is written or blocked.
+- **Invalid / Incomplete / Divergent** (bad signature/attestation, descriptor-root
+  mismatch, blob hash/size mismatch, disallowed Blossom host, missing ancestor
+  manifests, forked revision chain): the map is blocked from remote restore and a
+  quarantine record is written; valid local filesystem state is never overwritten.
+
+Quarantine records are RON files under `worlds/quarantine/<map>/` (override with
+`SERVER_MAP_QUARANTINE_DIR`), named by manifest hash (or `local-invalid-<timestamp>`
+when no hash applies), each recording the map id, owner, and rejection reason.
+
+On-disk layout per map dir (`worlds/overworld/`, `worlds/homebase_<npub>/`):
+`active_revision` (pointer file naming the active materialized revision),
+`revisions/rev-<n>-<hash>/` (immutable materialized snapshots), `staging/`
+(incomplete materialization work, cleaned at startup), and the top-level
+`accepted_head.bin`/`local_head.bin`/`change_set.bin` head files. At startup the
+server validates the active pointer; if it references a missing/incomplete
+revision, it quarantines a record, removes the pointer, and rolls back to the
+top-level filesystem state.
+
+Manual recovery/rollback: stop the server, inspect `worlds/quarantine/` and the
+`active_revision` pointer, unset `SERVER_MAP_REMOTE_READ`/`SERVER_MAP_REMOTE_PUBLISH`
+to run filesystem-only (no migration needed — remote can be disabled at any time),
+and delete `active_revision` to fall back to the legacy top-level save files (or
+point it at a known-good `revisions/` directory).
+
+### Player-Owned Homebase Publication
+
+A player can publish their own Homebase to Nostr. Because the client cannot
+faithfully reproduce the server's authoritative save bytes from replication, the
+flow is "server encodes, client signs": the client presses `F7` (the
+`PublishHomebase` action) to send a `HomebaseAttestationRequest`; the server
+classifies the durable change-set of edited chunks against freshly-generated
+terrain — chunks that still differ are uploaded to Blossom as `Present`, chunks
+reverted to generated terrain become `Tombstoned` (and their local files are
+deleted so they regenerate from seed). Chunks whose per-chunk world objects were
+placed/removed/moved/rotated are published the same way (their current object
+list, `Present`). The server chains the delta onto the accepted head,
+signs a `HomebasePublicationAttestation`, and returns an unsigned
+`NostrMapManifest`; the client signs that manifest event with the **player's**
+Nostr key and publishes it to relays, then confirms back to the server, which
+advances the accepted head and clears the published keys from its change-set so
+the next publish chains onto this revision. Each publish is a small chained delta
+of genuine edits, not a full snapshot. Remote import of a Homebase manifest is
+accepted only if it carries a valid player signature and a valid server
+attestation (the temporary Phase 3 insecure import path is removed).
+
+Homebase publication requires the same server remote-publish configuration as the
+Overworld (`SERVER_MAP_REMOTE_PUBLISH=1` with the `SERVER_BLOSSOM_*`, `SERVER_NSEC`,
+and `NOSTR_RELAYS` settings above), plus a client running with a loaded Nostr
+identity and configured relays.
+
+> Not yet enforced: progression-bearing-data rejection and per-player entitlement
+> checks on imported Homebase data (plan item 5.7) are deferred — no progression or
+> entitlement types exist in the codebase yet. The server attestation requirement is
+> the current Homebase import security boundary; progression-data filtering is a
+> follow-up.

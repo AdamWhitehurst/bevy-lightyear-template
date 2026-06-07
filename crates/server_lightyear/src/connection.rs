@@ -33,16 +33,9 @@ impl Default for ServerNetworkConfig {
     }
 }
 
+#[derive(Default)]
 pub struct ServerNetworkPlugin {
     pub config: ServerNetworkConfig,
-}
-
-impl Default for ServerNetworkPlugin {
-    fn default() -> Self {
-        Self {
-            config: ServerNetworkConfig::default(),
-        }
-    }
 }
 
 impl Plugin for ServerNetworkPlugin {

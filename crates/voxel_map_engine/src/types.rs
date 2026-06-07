@@ -4,17 +4,12 @@ use serde::{Deserialize, Serialize};
 use crate::palette::PalettedChunk;
 
 /// Voxel data stored per position
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Reflect, Default)]
 pub enum WorldVoxel {
     Air,
+    #[default]
     Unset,
     Solid(u8),
-}
-
-impl Default for WorldVoxel {
-    fn default() -> Self {
-        Self::Unset
-    }
 }
 
 /// How a chunk is filled (optimization for uniform chunks)
@@ -63,7 +58,7 @@ impl ChunkStatus {
 }
 
 /// Voxel data for one chunk (16^3 with 1-voxel padding = 18^3)
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChunkData {
     pub voxels: PalettedChunk,
     pub fill_type: FillType,
@@ -87,6 +82,20 @@ impl ChunkData {
             hash: 0,
             status: ChunkStatus::Full,
         }
+    }
+
+    /// Returns whether this chunk's padded voxel buffer is element-wise identical to `voxels`.
+    /// A length mismatch returns `false` (cannot be equal) with a `trace!`.
+    pub fn matches_voxels(&self, voxels: &[WorldVoxel]) -> bool {
+        if self.voxels.len() != voxels.len() {
+            trace!(
+                stored = self.voxels.len(),
+                other = voxels.len(),
+                "chunk voxel length mismatch; not equal to generated"
+            );
+            return false;
+        }
+        (0..voxels.len()).all(|i| self.voxels.get(i) == voxels[i])
     }
 
     /// Construct from a flat voxel array (generation output).

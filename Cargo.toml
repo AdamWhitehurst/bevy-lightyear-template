@@ -13,6 +13,7 @@ members = [
   "crates/voxel_map_engine",
   "crates/sprite_rig",
   "crates/nostr_client",
+  "crates/nostr_map_persistence",
 ]
 exclude = [
   "git/avian",
@@ -50,9 +51,10 @@ leafwing-input-manager = { git = "https://github.com/Leafwing-Studios/leafwing-i
 voxel_map_engine = { path = "crates/voxel_map_engine" }
 lightyear = { path = "git/lightyear/lightyear", features = ["leafwing"] }
 lightyear_replication = { path = "git/lightyear/lightyear_replication" }
-persistence = { package = "bevy-persistence", git = "https://github.com/AdamWhitehurst/bevy-persistence.git" }
+persistence = { package = "bevy-persistence", path = "git/bevy-persistence" }
 protocol = { path = "crates/protocol" }
 nostr_client = { path = "crates/nostr_client" }
+nostr_map_persistence = { path = "crates/nostr_map_persistence" }
 client_lightyear = { path = "crates/client_lightyear" }
 server_lightyear = { path = "crates/server_lightyear" }
 client_web_lightyear = { path = "crates/client_web_lightyear" }

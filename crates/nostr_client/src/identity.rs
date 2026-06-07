@@ -1,8 +1,11 @@
 use bevy::prelude::*;
 use nostr_sdk::nips::nip49::EncryptedSecretKey;
+use nostr_sdk::nostr::secp256k1::schnorr::Signature;
+use nostr_sdk::nostr::secp256k1::Message;
 use nostr_sdk::{FromBech32, Keys, PublicKey, SecretKey, ToBech32};
 use protocol::NostrPublicKey;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
 pub const ENCRYPTED_IDENTITY_VERSION: u32 = 1;
@@ -13,25 +16,82 @@ pub struct EncryptedIdentity {
     pub ciphertext: String,
 }
 
-#[derive(Resource, Clone)]
-pub struct ClientIdentity {
-    pub secret: SecretKey,
-    pub public: PublicKey,
-}
+#[derive(Resource, Component, Clone)]
+pub struct NostrKeys(Keys);
 
-#[derive(Resource, Clone)]
-pub struct ServerIdentity {
-    pub keys: Keys,
-}
-
-impl ClientIdentity {
+impl NostrKeys {
     pub fn from_secret(secret: SecretKey) -> Self {
-        let keys = Keys::new(secret.clone());
-        Self {
-            secret,
-            public: keys.public_key(),
-        }
+        Self(Keys::new(secret))
     }
+
+    /// Generates a fresh random identity. Intended for tests and one-off key creation.
+    pub fn generate() -> Self {
+        Self(Keys::generate())
+    }
+
+    pub fn keys(&self) -> &Keys {
+        &self.0
+    }
+
+    pub fn public_key(&self) -> PublicKey {
+        self.0.public_key()
+    }
+
+    pub fn protocol_public_key(&self) -> NostrPublicKey {
+        NostrPublicKey(*self.public_key().as_bytes())
+    }
+
+    pub fn sign_event(
+        &self,
+        draft: &crate::events::NostrEventDraft,
+    ) -> Result<String, crate::events::NostrEventError> {
+        draft.sign_with_keys(&self.0)
+    }
+
+    /// Signs arbitrary bytes with a schnorr signature over their SHA-256 digest.
+    ///
+    /// Map-agnostic primitive for signing non-event payloads (e.g. attestations).
+    /// Returns the raw 64-byte signature.
+    pub fn sign_payload_schnorr(&self, payload: &[u8]) -> Vec<u8> {
+        let digest = Sha256::digest(payload);
+        let message = Message::from_digest_slice(&digest)
+            .expect("SHA-256 digest is always 32 bytes for a schnorr message");
+        self.0.sign_schnorr(&message).serialize().to_vec()
+    }
+}
+
+/// Verifies a schnorr signature over the SHA-256 digest of `payload`.
+///
+/// Map-agnostic counterpart to [`NostrKeys::sign_payload_schnorr`].
+pub fn verify_payload_schnorr(
+    pubkey: NostrPublicKey,
+    payload: &[u8],
+    signature: &[u8],
+) -> Result<(), PayloadSignatureError> {
+    let digest = Sha256::digest(payload);
+    let message = Message::from_digest_slice(&digest)
+        .expect("SHA-256 digest is always 32 bytes for a schnorr message");
+    let signature =
+        Signature::from_slice(signature).map_err(|_| PayloadSignatureError::MalformedSignature)?;
+    let public_key =
+        PublicKey::from_slice(&pubkey.0).map_err(|_| PayloadSignatureError::MalformedPublicKey)?;
+    let xonly = public_key
+        .xonly()
+        .map_err(|_| PayloadSignatureError::MalformedPublicKey)?;
+    signature
+        .verify(&message, &xonly)
+        .map_err(|_| PayloadSignatureError::VerificationFailed)
+}
+
+/// Failure verifying a raw schnorr payload signature.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum PayloadSignatureError {
+    #[error("payload signature is not a valid 64-byte schnorr signature")]
+    MalformedSignature,
+    #[error("public key is not a valid x-only public key")]
+    MalformedPublicKey,
+    #[error("payload schnorr signature verification failed")]
+    VerificationFailed,
 }
 
 pub fn client_id_from_public_key(public: &PublicKey) -> u64 {
@@ -59,7 +119,7 @@ pub struct SaveEncryptedIdentity(pub EncryptedIdentity);
 
 pub fn generate_encrypted_identity(
     passphrase: &str,
-) -> Result<(ClientIdentity, EncryptedIdentity), String> {
+) -> Result<(NostrKeys, EncryptedIdentity), String> {
     let secret = SecretKey::generate();
     encrypt_identity(secret, passphrase)
 }
@@ -67,7 +127,7 @@ pub fn generate_encrypted_identity(
 pub fn import_encrypted_identity(
     nsec: &str,
     passphrase: &str,
-) -> Result<(ClientIdentity, EncryptedIdentity), String> {
+) -> Result<(NostrKeys, EncryptedIdentity), String> {
     let secret = SecretKey::parse(nsec).map_err(|error| format!("invalid nsec: {error}"))?;
     encrypt_identity(secret, passphrase)
 }
@@ -75,7 +135,7 @@ pub fn import_encrypted_identity(
 pub fn unlock_identity(
     encrypted: &EncryptedIdentity,
     passphrase: &str,
-) -> Result<ClientIdentity, String> {
+) -> Result<NostrKeys, String> {
     if encrypted.version != ENCRYPTED_IDENTITY_VERSION {
         return Err(format!(
             "unsupported encrypted identity version {}",
@@ -88,7 +148,7 @@ pub fn unlock_identity(
     let secret = encrypted_key
         .decrypt(passphrase)
         .map_err(|error| format!("failed to decrypt identity: {error}"))?;
-    Ok(ClientIdentity::from_secret(secret))
+    Ok(NostrKeys::from_secret(secret))
 }
 
 pub fn decode_nsec_or_ncryptsec(
@@ -108,21 +168,19 @@ pub fn decode_nsec_or_ncryptsec(
     }
 }
 
-pub fn load_server_identity_from_env_or_profile(
-    profile: Option<&str>,
-) -> Result<ServerIdentity, String> {
+pub fn load_nostr_keys_from_env_or_profile(profile: Option<&str>) -> Result<NostrKeys, String> {
     let passphrase = std::env::var("NOSTR_IDENTITY_PASSPHRASE").ok();
     if let Ok(raw) = std::env::var("SERVER_NSEC") {
-        return server_identity_from_secret_text(&raw, passphrase.as_deref());
+        return nostr_keys_from_secret_text(&raw, passphrase.as_deref());
     }
     let profile_dir = client_identity_dir(profile)?;
-    load_server_identity_from_profile_dir(&profile_dir, passphrase.as_deref())
+    load_nostr_keys_from_profile_dir(&profile_dir, passphrase.as_deref())
 }
 
-pub fn load_server_identity_from_profile_dir(
+pub fn load_nostr_keys_from_profile_dir(
     profile_dir: &Path,
     passphrase: Option<&str>,
-) -> Result<ServerIdentity, String> {
+) -> Result<NostrKeys, String> {
     let encrypted = load_encrypted_identity_from_dir(profile_dir)
         .map_err(|error| format!("load profile identity: {error}"))?
         .ok_or_else(|| {
@@ -134,19 +192,12 @@ pub fn load_server_identity_from_profile_dir(
     let passphrase =
         passphrase.ok_or("NOSTR_IDENTITY_PASSPHRASE is required to unlock profile identity")?;
     let identity = unlock_identity(&encrypted, passphrase)?;
-    Ok(ServerIdentity {
-        keys: Keys::new(identity.secret),
-    })
+    Ok(identity)
 }
 
-fn server_identity_from_secret_text(
-    raw: &str,
-    passphrase: Option<&str>,
-) -> Result<ServerIdentity, String> {
+fn nostr_keys_from_secret_text(raw: &str, passphrase: Option<&str>) -> Result<NostrKeys, String> {
     let secret = decode_nsec_or_ncryptsec(raw, passphrase)?;
-    Ok(ServerIdentity {
-        keys: Keys::new(secret),
-    })
+    Ok(NostrKeys::from_secret(secret))
 }
 
 pub fn nostr_config_dir() -> PathBuf {
@@ -294,11 +345,11 @@ pub fn load_encrypted_identity_from_dir(
 fn encrypt_identity(
     secret: SecretKey,
     passphrase: &str,
-) -> Result<(ClientIdentity, EncryptedIdentity), String> {
+) -> Result<(NostrKeys, EncryptedIdentity), String> {
     let encrypted = secret
         .encrypt(passphrase)
         .map_err(|error| format!("failed to encrypt identity: {error}"))?;
-    let identity = ClientIdentity::from_secret(secret);
+    let identity = NostrKeys::from_secret(secret);
     Ok((
         identity,
         EncryptedIdentity {
@@ -319,7 +370,7 @@ mod tests {
         let (identity, encrypted) = generate_encrypted_identity("correct horse").unwrap();
         let unlocked = unlock_identity(&encrypted, "correct horse").unwrap();
 
-        assert_eq!(identity.public, unlocked.public);
+        assert_eq!(identity.public_key(), unlocked.public_key());
     }
 
     #[test]
@@ -436,9 +487,9 @@ mod tests {
         save_encrypted_identity_to_dir(dir.path(), &encrypted).unwrap();
 
         let server_identity =
-            load_server_identity_from_profile_dir(dir.path(), Some("profile passphrase")).unwrap();
+            load_nostr_keys_from_profile_dir(dir.path(), Some("profile passphrase")).unwrap();
 
-        assert_eq!(server_identity.keys.public_key(), client_identity.public);
+        assert_eq!(server_identity.public_key(), client_identity.public_key());
     }
 
     #[test]
@@ -448,7 +499,7 @@ mod tests {
             generate_encrypted_identity("profile passphrase").unwrap();
         save_encrypted_identity_to_dir(dir.path(), &encrypted).unwrap();
 
-        let error = match load_server_identity_from_profile_dir(dir.path(), None) {
+        let error = match load_nostr_keys_from_profile_dir(dir.path(), None) {
             Ok(_) => panic!("profile identity should require passphrase"),
             Err(error) => error,
         };
@@ -460,9 +511,9 @@ mod tests {
         let secret = SecretKey::generate();
         let nsec = secret.to_bech32().unwrap();
 
-        let identity = server_identity_from_secret_text(&nsec, None).unwrap();
+        let identity = nostr_keys_from_secret_text(&nsec, None).unwrap();
 
-        assert_eq!(identity.keys.public_key(), Keys::new(secret).public_key());
+        assert_eq!(identity.public_key(), Keys::new(secret).public_key());
     }
 
     #[test]

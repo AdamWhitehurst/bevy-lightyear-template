@@ -323,7 +323,7 @@ fn pick_material(
 
 /// Returns the first biome whose height and moisture ranges both contain the
 /// given values. Falls back to the first rule if none match.
-pub fn select_biome<'a>(rules: &'a [BiomeRule], height: f64, moisture: f64) -> &'a BiomeRule {
+pub fn select_biome(rules: &[BiomeRule], height: f64, moisture: f64) -> &BiomeRule {
     debug_assert!(
         !rules.is_empty(),
         "BiomeRules must contain at least one rule"
@@ -395,7 +395,7 @@ impl VoxelGeneratorImpl for HeightmapGenerator {
         };
         let mut spawns = Vec::new();
 
-        for (_rule_idx, rule) in rules.0.iter().enumerate() {
+        for rule in rules.0.iter() {
             let candidates = jittered_grid_sample(
                 self.seed,
                 chunk_pos,
@@ -423,33 +423,32 @@ impl VoxelGeneratorImpl for HeightmapGenerator {
                     continue;
                 }
 
-                if let Some(slope_max) = rule.slope_max {
-                    if exceeds_slope(
+                if let Some(slope_max) = rule.slope_max
+                    && exceeds_slope(
                         local_x + 1,
                         local_z + 1,
                         heights,
                         slope_max,
                         self.padded_size,
-                    ) {
-                        continue;
-                    }
+                    )
+                {
+                    continue;
                 }
 
-                if !rule.allowed_biomes.is_empty() {
-                    if let (Some(moisture_map), Some(biome_rules)) =
+                if !rule.allowed_biomes.is_empty()
+                    && let (Some(moisture_map), Some(biome_rules)) =
                         (&self.moisture_map, &self.biome_rules)
-                    {
-                        let biome = select_biome_at_pos(
-                            self.seed,
-                            &self.height_map,
-                            moisture_map,
-                            biome_rules,
-                            world_pos.x as f64,
-                            world_pos.y as f64,
-                        );
-                        if !rule.allowed_biomes.iter().any(|b| b == &biome.biome_id) {
-                            continue;
-                        }
+                {
+                    let biome = select_biome_at_pos(
+                        self.seed,
+                        &self.height_map,
+                        moisture_map,
+                        biome_rules,
+                        world_pos.x as f64,
+                        world_pos.y as f64,
+                    );
+                    if !rule.allowed_biomes.iter().any(|b| b == &biome.biome_id) {
+                        continue;
                     }
                 }
 
@@ -509,6 +508,27 @@ pub struct FlatGenerator {
 impl VoxelGeneratorImpl for FlatGenerator {
     fn generate_terrain(&self, chunk_pos: IVec3) -> Vec<WorldVoxel> {
         flat_terrain_voxels(chunk_pos, self.chunk_size, &self.shape)
+    }
+}
+
+/// All-air terrain generator producing an empty world.
+pub struct AirGenerator {
+    pub shape: RuntimeShape<u32, 3>,
+}
+
+impl AirGenerator {
+    /// Creates a generator emitting padded all-air chunks for `chunk_size`.
+    pub fn new(chunk_size: u32) -> Self {
+        let padded = chunk_size + 2;
+        Self {
+            shape: RuntimeShape::<u32, 3>::new([padded; 3]),
+        }
+    }
+}
+
+impl VoxelGeneratorImpl for AirGenerator {
+    fn generate_terrain(&self, _chunk_pos: IVec3) -> Vec<WorldVoxel> {
+        vec![WorldVoxel::Air; self.shape.usize()]
     }
 }
 

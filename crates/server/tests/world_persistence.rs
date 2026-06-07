@@ -1,11 +1,20 @@
 use std::sync::Arc;
 
 use bevy::prelude::*;
+use nostr_map_persistence::MapRevision;
 use persistence::Store;
+use server::map::seed_from_nostr_public_key;
 use server::persistence::fs_map_entities::FsMapEntitiesStore;
 use server::persistence::fs_map_meta::FsMapMetaStore;
-use server::persistence::{map_save_dir, MapMeta};
+use server::persistence::{
+    active_pointer_path, cleanup_materialization_staging, map_save_dir,
+    materialize_validated_map_save, revision_dir_name, store_map_dir_for_loading,
+    FsAcceptedMapHeadStore, FsLocalMapHeadStore, FsMapChangeSetStore, MapChangeSet, MapMeta,
+    ServerValidatedMapSave, REVISIONS_DIR, STAGING_DIR,
+};
+use voxel_map_engine::config::{WorldObjectPositionKind, WorldObjectSpawn};
 use voxel_map_engine::persistence::fs_chunk::FsChunkStore;
+use voxel_map_engine::persistence::fs_chunk_entities::FsChunkEntitiesStore;
 use voxel_map_engine::persistence::{chunk_file_path, ChunkFileEnvelope, CHUNK_SAVE_VERSION};
 use voxel_map_engine::prelude::*;
 
@@ -37,6 +46,12 @@ fn test_entity_store(dir: &std::path::Path) -> FsMapEntitiesStore {
     }
 }
 
+fn test_chunk_entities_store(dir: &std::path::Path) -> FsChunkEntitiesStore {
+    FsChunkEntitiesStore {
+        map_dir: Arc::new(dir.to_path_buf()),
+    }
+}
+
 fn save_chunk(store: &FsChunkStore, pos: IVec3, chunk_size: u32, data: &ChunkData) {
     let envelope = ChunkFileEnvelope {
         version: CHUNK_SAVE_VERSION,
@@ -44,6 +59,254 @@ fn save_chunk(store: &FsChunkStore, pos: IVec3, chunk_size: u32, data: &ChunkDat
         data: data.clone(),
     };
     store.save(&pos, &envelope).unwrap();
+}
+
+#[test]
+fn world_persistence_local_valid_map_meta_is_available_for_filesystem_preflight() {
+    let tmp = tempfile::tempdir().unwrap();
+    let map_dir = map_save_dir(tmp.path(), &MapInstanceId::Overworld);
+    let store = test_meta_store(&map_dir);
+    let meta = MapMeta {
+        version: 1,
+        seed: 4242,
+        generation_version: 3,
+        spawn_points: vec![Vec3::new(1.0, 2.0, 3.0)],
+    };
+    store.save(&(), &meta).expect("save meta");
+
+    let loaded = store
+        .load(&())
+        .expect("load meta")
+        .expect("filesystem preflight should see local metadata");
+    assert_eq!(loaded.seed, 4242);
+    assert_eq!(loaded.generation_version, 3);
+}
+
+#[test]
+fn world_persistence_missing_homebase_meta_keeps_deterministic_seed_fallback() {
+    let tmp = tempfile::tempdir().unwrap();
+    let map_id = MapInstanceId::Homebase { owner: owner(9) };
+    let map_dir = map_save_dir(tmp.path(), &map_id);
+    let store = test_meta_store(&map_dir);
+    assert!(store.load(&()).expect("load missing meta").is_none());
+    assert_eq!(
+        seed_from_nostr_public_key(owner(9)),
+        u64::from_le_bytes([9; 8])
+    );
+}
+
+fn remote_revision(byte: u8, revision: u64, previous_hash: Option<[u8; 32]>) -> MapRevision {
+    MapRevision {
+        revision,
+        previous_hash,
+        manifest_hash: [byte; 32],
+    }
+}
+
+fn remote_chunk(fill: u8) -> ChunkFileEnvelope {
+    let mut voxels = vec![WorldVoxel::Air; PADDED_VOLUME_16];
+    voxels[0] = WorldVoxel::Solid(fill);
+    ChunkFileEnvelope {
+        version: CHUNK_SAVE_VERSION,
+        chunk_size: 16,
+        data: ChunkData::from_voxels(&voxels, ChunkStatus::Full),
+    }
+}
+
+fn remote_meta(seed: u64) -> MapMeta {
+    MapMeta {
+        version: 1,
+        seed,
+        generation_version: 0,
+        spawn_points: vec![Vec3::new(0.0, 5.0, 0.0)],
+    }
+}
+
+fn remote_spawn(object_id: &str) -> WorldObjectSpawn {
+    WorldObjectSpawn {
+        object_id: object_id.to_string(),
+        position: Vec3::new(1.0, 2.0, 3.0),
+        position_kind: WorldObjectPositionKind::PlacementBase,
+        persisted_components: vec![],
+    }
+}
+
+fn remote_save(seed: u64, revision: MapRevision) -> ServerValidatedMapSave {
+    ServerValidatedMapSave {
+        meta: remote_meta(seed),
+        chunks: vec![(IVec3::ZERO, remote_chunk(7))],
+        chunk_entities: vec![(IVec3::ZERO, vec![remote_spawn("crate")])],
+        map_entities: Some(vec![SavedEntity {
+            kind: SavedEntityKind::RespawnPoint,
+            position: Vec3::new(0.0, 5.0, 0.0),
+        }]),
+        revision,
+    }
+}
+
+#[test]
+fn remote_restore_rematerializing_same_revision_is_idempotent() {
+    let tmp = tempfile::tempdir().unwrap();
+    let map_dir = map_save_dir(tmp.path(), &MapInstanceId::Overworld);
+    let revision = remote_revision(1, 1, None);
+    let save = remote_save(1234, revision.clone());
+
+    materialize_validated_map_save(&map_dir, &save).expect("first materialize");
+    // Re-materializing the same content-addressed revision (e.g. a server restart that
+    // re-selects the same remote head) must succeed. Heads live at the map's top-level dir,
+    // so promotion must not require an accepted-head file inside the revision snapshot.
+    materialize_validated_map_save(&map_dir, &save).expect("second materialize is idempotent");
+
+    let active_dir = store_map_dir_for_loading(&map_dir).expect("active dir");
+    assert_eq!(
+        test_meta_store(&active_dir)
+            .load(&())
+            .unwrap()
+            .unwrap()
+            .seed,
+        1234
+    );
+    assert_eq!(
+        FsAcceptedMapHeadStore {
+            map_dir: Arc::new(map_dir),
+        }
+        .load(&())
+        .unwrap()
+        .unwrap(),
+        revision
+    );
+}
+
+#[test]
+fn remote_restore_self_heals_incomplete_revision_directory() {
+    let tmp = tempfile::tempdir().unwrap();
+    let map_dir = map_save_dir(tmp.path(), &MapInstanceId::Overworld);
+    let revision = remote_revision(1, 1, None);
+    let save = remote_save(1234, revision.clone());
+
+    materialize_validated_map_save(&map_dir, &save).expect("first materialize");
+
+    // Simulate a pre-migration remnant: a revision directory missing the completeness marker.
+    let revision_dir = map_dir
+        .join(REVISIONS_DIR)
+        .join(revision_dir_name(&revision));
+    std::fs::remove_file(revision_dir.join("map.meta.bin")).expect("remove meta marker");
+
+    materialize_validated_map_save(&map_dir, &save).expect("self-heals incomplete revision dir");
+    let active_dir = store_map_dir_for_loading(&map_dir).expect("active dir");
+    assert!(test_meta_store(&active_dir).load(&()).unwrap().is_some());
+}
+
+#[test]
+fn remote_restore_missing_local_save_materializes_meta_chunks_and_entities() {
+    let tmp = tempfile::tempdir().unwrap();
+    let map_dir = map_save_dir(tmp.path(), &MapInstanceId::Overworld);
+    let revision = remote_revision(1, 1, None);
+    let save = remote_save(1234, revision.clone());
+
+    materialize_validated_map_save(&map_dir, &save).expect("materialize remote save");
+    let active_dir = store_map_dir_for_loading(&map_dir).expect("active dir");
+    assert_ne!(active_dir, map_dir);
+
+    assert_eq!(
+        test_meta_store(&active_dir)
+            .load(&())
+            .unwrap()
+            .unwrap()
+            .seed,
+        1234
+    );
+    assert!(test_chunk_store(&active_dir)
+        .load(&IVec3::ZERO)
+        .unwrap()
+        .is_some());
+    assert_eq!(
+        test_chunk_entities_store(&active_dir)
+            .load(&IVec3::ZERO)
+            .unwrap()
+            .unwrap()[0]
+            .object_id,
+        "crate"
+    );
+    assert_eq!(
+        test_entity_store(&active_dir)
+            .load(&())
+            .unwrap()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        FsAcceptedMapHeadStore {
+            map_dir: Arc::new(map_dir),
+        }
+        .load(&())
+        .unwrap()
+        .unwrap(),
+        revision
+    );
+}
+
+#[test]
+fn remote_restore_accepted_head_written_after_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    let map_dir = map_save_dir(tmp.path(), &MapInstanceId::Overworld);
+    let save = remote_save(77, remote_revision(3, 3, None));
+
+    materialize_validated_map_save(&map_dir, &save).expect("materialize remote save");
+    let active_dir = store_map_dir_for_loading(&map_dir).expect("active dir");
+
+    // Content lives in the active revision dir; head pointers live at the map top-level dir.
+    assert!(active_dir.join("map.meta.bin").exists());
+    assert!(map_dir.join("accepted_head.bin").exists());
+    assert!(map_dir.join("local_head.bin").exists());
+    assert!(!active_dir.join("accepted_head.bin").exists());
+    assert!(active_pointer_path(&map_dir).exists());
+}
+
+#[test]
+fn remote_restore_seeds_local_head_for_next_publish_revision() {
+    let tmp = tempfile::tempdir().unwrap();
+    let map_dir = map_save_dir(tmp.path(), &MapInstanceId::Overworld);
+    let save = remote_save(77, remote_revision(9, 5, None));
+
+    materialize_validated_map_save(&map_dir, &save).expect("materialize remote save");
+
+    let local_head = FsLocalMapHeadStore {
+        map_dir: Arc::new(map_dir.clone()),
+    }
+    .load(&())
+    .expect("load local head")
+    .expect("local head present at map top-level after restore");
+    assert_eq!(local_head.local_revision_number, 5);
+
+    // A post-restore publish must descend from the restored head (6), not reset to 1.
+    let next = server::map::remote_publish::next_publish_revision_number(
+        Some(&local_head),
+        &server::persistence::RemotePublishJournal::default(),
+        &server::map::remote_publish::PendingRemotePublishDeltas::default(),
+        &server::map::remote_publish::PendingPublishBySaveId::default(),
+    );
+    assert_eq!(next, 6);
+}
+
+#[test]
+fn remote_restore_staging_cleanup_removes_interrupted_revisions() {
+    let tmp = tempfile::tempdir().unwrap();
+    let map_dir = map_save_dir(tmp.path(), &MapInstanceId::Overworld);
+    let staging = map_dir.join(STAGING_DIR).join("interrupted");
+    std::fs::create_dir_all(&staging).unwrap();
+    std::fs::create_dir_all(&map_dir).unwrap();
+    std::fs::write(
+        active_pointer_path(&map_dir).with_extension("tmp"),
+        b"partial",
+    )
+    .unwrap();
+
+    cleanup_materialization_staging(&map_dir).expect("cleanup staging");
+
+    assert!(!staging.exists());
+    assert!(!active_pointer_path(&map_dir).with_extension("tmp").exists());
 }
 
 /// Save all dirty chunks from an instance via the store.
@@ -444,4 +707,68 @@ fn entities_and_chunks_coexist_in_map_directory() {
         .unwrap()
         .expect("chunk exists");
     assert_eq!(loaded_chunk.data.voxels.get(0), WorldVoxel::Solid(1));
+}
+
+fn test_change_set_store(dir: &std::path::Path) -> FsMapChangeSetStore {
+    FsMapChangeSetStore {
+        map_dir: Arc::new(dir.to_path_buf()),
+    }
+}
+
+#[test]
+fn change_set_persists_and_reloads() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = test_change_set_store(dir.path());
+
+    let mut change_set = MapChangeSet::default();
+    change_set.chunk_candidates.insert(IVec3::new(1, 0, -2));
+    change_set.chunk_candidates.insert(IVec3::new(3, 4, 5));
+    change_set.map_entities_changed = true;
+    store.save(&(), &change_set).unwrap();
+
+    let loaded = store.load(&()).unwrap().expect("change set exists");
+    assert_eq!(loaded, change_set);
+}
+
+#[test]
+fn change_set_accumulates_across_save_cycles() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = test_change_set_store(dir.path());
+
+    // First cycle: edits to two chunks.
+    let mut cycle_one = store.load(&()).unwrap().unwrap_or_default();
+    cycle_one.chunk_candidates.insert(IVec3::new(0, 0, 0));
+    cycle_one.chunk_candidates.insert(IVec3::new(1, 0, 0));
+    store.save(&(), &cycle_one).unwrap();
+
+    // Second cycle: one repeat, one new chunk — should union, not replace.
+    let mut cycle_two = store.load(&()).unwrap().unwrap_or_default();
+    cycle_two.chunk_candidates.insert(IVec3::new(1, 0, 0));
+    cycle_two.chunk_candidates.insert(IVec3::new(2, 0, 0));
+    store.save(&(), &cycle_two).unwrap();
+
+    let loaded = store.load(&()).unwrap().expect("change set exists");
+    assert_eq!(loaded.chunk_candidates.len(), 3);
+    for pos in [
+        IVec3::new(0, 0, 0),
+        IVec3::new(1, 0, 0),
+        IVec3::new(2, 0, 0),
+    ] {
+        assert!(loaded.chunk_candidates.contains(&pos), "missing {pos}");
+    }
+}
+
+#[test]
+fn change_set_empty_cycle_leaves_it_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = test_change_set_store(dir.path());
+
+    let mut initial = MapChangeSet::default();
+    initial.chunk_candidates.insert(IVec3::new(7, 7, 7));
+    store.save(&(), &initial).unwrap();
+
+    // An empty save cycle (no content_dirty, no entity changes) performs no save, so the
+    // persisted set is untouched.
+    let loaded = store.load(&()).unwrap().expect("change set exists");
+    assert_eq!(loaded, initial);
 }
