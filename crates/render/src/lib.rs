@@ -1,7 +1,7 @@
 mod camera;
 mod health_bar;
 
-pub use camera::CameraOrbitState;
+pub use camera::{release_lock_on, CameraOrbitState, LockOnTarget};
 
 use avian3d::prelude::Position;
 use bevy::prelude::*;
@@ -37,6 +37,7 @@ impl Plugin for RenderPlugin {
         app.add_systems(
             Update,
             (
+                camera::steer_lock_on_camera,
                 camera::update_camera_orbit,
                 camera::follow_player,
                 camera::center_background_sphere,

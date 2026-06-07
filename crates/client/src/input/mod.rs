@@ -14,7 +14,7 @@ use leafwing_input_manager::prelude::InputManagerPlugin;
 use lightyear::prelude::client::input::InputSystems;
 
 use self::ability::write_filtered_ability_actions;
-use self::control::write_filtered_control_actions;
+use self::control::{write_filtered_control_actions, write_lock_on_toggle};
 #[cfg(feature = "spawn-panel")]
 use self::editor::write_world_object_command_intents;
 use self::editor::{write_dev_hotkey_intents, TerrainCommandIntent, WorldObjectCommandIntent};
@@ -53,6 +53,7 @@ impl Plugin for ClientInputCommandPlugin {
                 (
                     write_filtered_ability_actions,
                     write_filtered_control_actions,
+                    write_lock_on_toggle,
                 )
                     .in_set(ClientInputSet::WriteTransport)
                     .before(InputSystems::BufferClientInputs),

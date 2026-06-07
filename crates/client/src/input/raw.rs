@@ -8,6 +8,7 @@ pub enum RawClientActions {
     CameraYaw,
     CameraRotateLeft,
     CameraRotateRight,
+    ToggleLockOn,
     Jump,
     Ability1,
     Ability2,
@@ -44,6 +45,7 @@ pub fn raw_client_input_map() -> InputMap<RawClientActions> {
         .with_dual_axis(RawClientActions::Move, VirtualDPad::wasd())
         .with(RawClientActions::CameraRotateLeft, KeyCode::KeyQ)
         .with(RawClientActions::CameraRotateRight, KeyCode::KeyE)
+        .with(RawClientActions::ToggleLockOn, KeyCode::Tab)
         .with(RawClientActions::Jump, KeyCode::Space)
         .with(RawClientActions::Jump, GamepadButton::South)
         .with(RawClientActions::PlaceVoxel, MouseButton::Left)

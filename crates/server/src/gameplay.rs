@@ -32,7 +32,18 @@ impl Plugin for ServerGameplayPlugin {
             )
                 .chain(),
         );
-        // app.add_systems(OnEnter(AppState::Ready), spawn_dummy_target);
+        // Spawn the practice dummy once the overworld map is ready; the
+        // DummyTarget query keeps this idempotent across frames.
+        app.add_systems(
+            Update,
+            spawn_dummy_target.run_if(
+                any_with_component::<MapLoadState>
+                    .and(|query: Query<&MapLoadState>| {
+                        query.iter().any(|s| *s == MapLoadState::Ready)
+                    })
+                    .and(|dummies: Query<(), With<DummyTarget>>| dummies.is_empty()),
+            ),
+        );
         app.add_systems(
             Update,
             validate_respawn_points.run_if(any_with_component::<MapLoadState>.and(
@@ -100,26 +111,27 @@ fn sync_ability_manifest(defs: Option<Res<AbilityDefs>>, mut last_len: Local<usi
     }
 }
 
-// fn spawn_dummy_target(mut commands: Commands, registry: Res<MapRegistry>) {
-//     commands.spawn((
-//         Name::new("DummyTarget"),
-//         Position(Vec3::new(10.0, 5.0, 0.0)),
-//         Rotation::default(),
-//         Replicate::to_clients(NetworkTarget::All),
-//         NetworkVisibility,
-//         PredictionTarget::to_clients(NetworkTarget::All),
-//         CharacterPhysicsBundle::default(),
-//         ColorComponent(css::GRAY.into()),
-//         CharacterMarker,
-//         CharacterType::Humanoid,
-//         MapInstanceId::Overworld,
-//         Health::new(100.0),
-//         RespawnTimerConfig::default(),
-//         ChunkTicket::npc(registry.get(&MapInstanceId::Overworld)),
-//         DummyTarget,
-//     ));
-// }
-//
+/// Spawns the practice dummy in the overworld for testing combat and lock-on.
+fn spawn_dummy_target(mut commands: Commands, registry: Res<MapRegistry>) {
+    commands.spawn((
+        Name::new("DummyTarget"),
+        Position(Vec3::new(10.0, 5.0, 0.0)),
+        Rotation::default(),
+        Replicate::to_clients(NetworkTarget::All),
+        NetworkVisibility,
+        PredictionTarget::to_clients(NetworkTarget::All),
+        CharacterPhysicsBundle::default(),
+        ColorComponent(css::GRAY.into()),
+        CharacterMarker,
+        CharacterType::Humanoid,
+        MapInstanceId::Overworld,
+        Health::new(100.0),
+        RespawnTimerConfig::default(),
+        ChunkTicket::npc(registry.get(&MapInstanceId::Overworld)),
+        DummyTarget,
+    ));
+}
+
 fn handle_character_movement(
     time: Res<Time>,
     mut query: Query<
