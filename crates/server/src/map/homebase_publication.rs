@@ -157,61 +157,68 @@ pub fn validate_homebase_manifest_import(
     validate_homebase_manifest_attestation(&ServerAttestationVerifier, manifest)
 }
 
-/// Builds a `Present` manifest descriptor from already-encoded payload bytes.
-///
-/// The descriptor root only depends on class/key/schema_version/sha256/size, so the
-/// server can reproduce a client's descriptor root from read-back filesystem bytes
-/// without uploading blobs or knowing the client's Blossom URL.
-fn present_descriptor(
-    class: PayloadClass,
-    key: PayloadKey,
-    schema_version: u32,
-    bytes: &[u8],
-) -> ManifestPayloadDescriptor {
-    let sha256: [u8; 32] = Sha256::digest(bytes).into();
-    ManifestPayloadDescriptor {
-        class,
-        key,
-        slot: ManifestPayloadSlot::Present {
-            blob: BlobRef {
-                sha256,
-                size: bytes.len() as u64,
-                content_type: "application/octet-stream".to_string(),
-                urls: Vec::new(),
-            },
-        },
-        schema_version,
-    }
-}
-
-/// Builds a `Tombstoned` manifest descriptor (delete slot; carries no blob).
-fn tombstone_descriptor(
-    class: PayloadClass,
-    key: PayloadKey,
-    schema_version: u32,
-) -> ManifestPayloadDescriptor {
-    ManifestPayloadDescriptor {
-        class,
-        key,
-        slot: ManifestPayloadSlot::Tombstoned,
-        schema_version,
-    }
-}
-
 /// Classified publish slots for one homebase delta: blobs to upload (`Present`) plus
 /// `Tombstoned` descriptors (deletes), and the payload scope describing them.
+#[derive(Default)]
 struct HomebasePublishSlots {
     present_payloads: Vec<(ManifestPayloadDescriptor, Vec<u8>)>,
     tombstoned: Vec<ManifestPayloadDescriptor>,
     scope: HomebasePayloadScope,
 }
 
-/// Classifies the durable change-set candidates into publish slots using the live map state.
-///
-/// For each candidate chunk: byte-identical to freshly-generated terrain -> `Tombstoned` (and the
-/// on-disk file is deleted so local load regenerates it); otherwise `Present` with the current
-/// in-memory chunk bytes. Meta and map-level entities are `Present` on the genesis revision or
-/// when their change flag is set, else omitted (restore preserves omitted slots).
+impl HomebasePublishSlots {
+    /// Records already-encoded payload bytes as a `Present` slot to upload.
+    ///
+    /// The descriptor root only depends on class/key/schema_version/sha256/size, so the
+    /// server can reproduce a client's descriptor root from read-back filesystem bytes
+    /// without uploading blobs or knowing the client's Blossom URL.
+    fn push_present(
+        &mut self,
+        class: PayloadClass,
+        key: PayloadKey,
+        schema_version: u32,
+        bytes: Vec<u8>,
+    ) {
+        let sha256: [u8; 32] = Sha256::digest(&bytes).into();
+        self.present_payloads.push((
+            ManifestPayloadDescriptor {
+                class,
+                key,
+                slot: ManifestPayloadSlot::Present {
+                    blob: BlobRef {
+                        sha256,
+                        size: bytes.len() as u64,
+                        content_type: "application/octet-stream".to_string(),
+                        urls: Vec::new(),
+                    },
+                },
+                schema_version,
+            },
+            bytes,
+        ));
+    }
+
+    /// Records a `Tombstoned` slot (delete; carries no blob).
+    fn push_tombstone(&mut self, class: PayloadClass, key: PayloadKey, schema_version: u32) {
+        self.tombstoned.push(ManifestPayloadDescriptor {
+            class,
+            key,
+            slot: ManifestPayloadSlot::Tombstoned,
+            schema_version,
+        });
+    }
+}
+
+/// Candidate positions in deterministic xyz order so descriptor ordering is stable.
+fn sorted_candidates(candidates: &HashSet<IVec3>) -> Vec<IVec3> {
+    let mut sorted: Vec<IVec3> = candidates.iter().copied().collect();
+    sorted.sort_by_key(|pos| (pos.x, pos.y, pos.z));
+    sorted
+}
+
+/// Classifies the durable change-set candidates into publish slots using the live map state,
+/// one section resolver per payload class. Slot order (meta, terrain, chunk entities, map
+/// entities) is part of the descriptor-root input and must stay stable.
 ///
 /// Per-chunk entity slots are not driven by the change-set (it tracks only terrain candidates +
 /// meta/map-entity flags), so they are not published here.
@@ -226,87 +233,117 @@ fn resolve_homebase_publish_slots(
     change_set: &MapChangeSet,
     is_genesis: bool,
 ) -> Result<HomebasePublishSlots, MapPersistenceRejection> {
-    let mut present_payloads: Vec<(ManifestPayloadDescriptor, Vec<u8>)> = Vec::new();
-    let mut tombstoned: Vec<ManifestPayloadDescriptor> = Vec::new();
-    let mut scope = HomebasePayloadScope::default();
+    let mut slots = HomebasePublishSlots::default();
+    resolve_meta_slot(meta_store, change_set, is_genesis, &mut slots)?;
+    resolve_terrain_chunk_slots(instance, generator, chunk_store, change_set, &mut slots)?;
+    resolve_chunk_entity_slots(chunk_entities_store, change_set, &mut slots)?;
+    resolve_map_entities_slot(map_entities_store, change_set, is_genesis, &mut slots)?;
+    Ok(slots)
+}
 
-    // Genesis must carry meta so restore can fetch the seed and regenerate folded-out chunks.
-    if is_genesis || change_set.meta_changed {
-        let meta = meta_store
-            .load(&())
-            .map_err(|e| MapPersistenceRejection::Filesystem(format!("load homebase meta: {e}")))?
-            .ok_or_else(|| {
-                MapPersistenceRejection::Incomplete("homebase meta missing for publish".into())
-            })?;
-        let spawn_points = meta
-            .spawn_points
-            .iter()
-            .map(|point| [point.x, point.y, point.z])
-            .collect();
-        let bytes = encode_map_meta_payload(
-            meta.version,
-            meta.seed,
-            meta.generation_version,
-            spawn_points,
-        )?;
-        present_payloads.push((
-            present_descriptor(
-                PayloadClass::MapMeta,
-                PayloadKey::Singleton,
-                MAP_META_SCHEMA_VERSION,
-                &bytes,
-            ),
-            bytes,
-        ));
-        scope.includes_meta = true;
+/// Publishes map meta as `Present` on the genesis revision (restore must fetch the seed to
+/// regenerate folded-out chunks) or when the change-set flags it, else omits it (restore
+/// preserves omitted slots).
+fn resolve_meta_slot(
+    meta_store: &FsMapMetaStore,
+    change_set: &MapChangeSet,
+    is_genesis: bool,
+    slots: &mut HomebasePublishSlots,
+) -> Result<(), MapPersistenceRejection> {
+    if !(is_genesis || change_set.meta_changed) {
+        trace!("homebase meta unchanged on a chained delta; omitting slot");
+        return Ok(());
     }
+    let meta = meta_store
+        .load(&())
+        .map_err(|e| MapPersistenceRejection::Filesystem(format!("load homebase meta: {e}")))?
+        .ok_or_else(|| {
+            MapPersistenceRejection::Incomplete("homebase meta missing for publish".into())
+        })?;
+    let spawn_points = meta
+        .spawn_points
+        .iter()
+        .map(|point| [point.x, point.y, point.z])
+        .collect();
+    let bytes = encode_map_meta_payload(
+        meta.version,
+        meta.seed,
+        meta.generation_version,
+        spawn_points,
+    )?;
+    slots.push_present(
+        PayloadClass::MapMeta,
+        PayloadKey::Singleton,
+        MAP_META_SCHEMA_VERSION,
+        bytes,
+    );
+    slots.scope.includes_meta = true;
+    Ok(())
+}
 
-    let mut candidates: Vec<IVec3> = change_set.chunk_candidates.iter().copied().collect();
-    candidates.sort_by_key(|pos| (pos.x, pos.y, pos.z));
-    for pos in candidates {
-        let key = PayloadKey::Chunk {
-            x: pos.x,
-            y: pos.y,
-            z: pos.z,
-        };
-        if instance.chunk_matches_generated(pos, generator) {
-            tombstoned.push(tombstone_descriptor(
-                PayloadClass::TerrainChunk,
-                key,
-                CHUNK_SAVE_VERSION,
-            ));
-            scope.tombstoned_chunks.push(pos);
-            chunk_store.delete(&pos).map_err(|e| {
-                MapPersistenceRejection::Filesystem(format!("delete reverted chunk {pos}: {e}"))
-            })?;
-            continue;
-        }
-        let Some(data) = instance.get_chunk_data(pos) else {
-            trace!(
-                ?pos,
-                "publish candidate differs from generated but is not loaded; skipping"
-            );
-            continue;
-        };
-        let envelope = ChunkFileEnvelope {
-            version: CHUNK_SAVE_VERSION,
-            chunk_size: instance.chunk_size,
-            data: data.clone(),
-        };
-        let bytes = encode_chunk_payload(envelope)?;
-        present_payloads.push((
-            present_descriptor(PayloadClass::TerrainChunk, key, CHUNK_SAVE_VERSION, &bytes),
-            bytes,
-        ));
-        scope.edited_chunks.push(pos);
+/// Classifies every terrain candidate in the change-set against the live map state.
+fn resolve_terrain_chunk_slots(
+    instance: &VoxelMapInstance,
+    generator: &dyn VoxelGeneratorImpl,
+    chunk_store: &FsChunkStore,
+    change_set: &MapChangeSet,
+    slots: &mut HomebasePublishSlots,
+) -> Result<(), MapPersistenceRejection> {
+    for pos in sorted_candidates(&change_set.chunk_candidates) {
+        resolve_terrain_chunk_slot(pos, instance, generator, chunk_store, slots)?;
     }
+    Ok(())
+}
 
-    // Per-chunk world objects publish as Present(current list, possibly empty); an emptied chunk
-    // stays empty on restore. They are never tombstoned (that would regenerate generated objects).
-    let mut entity_candidates: Vec<IVec3> =
-        change_set.chunk_entity_candidates.iter().copied().collect();
-    entity_candidates.sort_by_key(|pos| (pos.x, pos.y, pos.z));
-    for pos in entity_candidates {
+/// Classifies one terrain candidate: byte-identical to freshly-generated terrain ->
+/// `Tombstoned` (and the on-disk file is deleted so local load regenerates it); otherwise
+/// `Present` with the current in-memory chunk bytes.
+fn resolve_terrain_chunk_slot(
+    pos: IVec3,
+    instance: &VoxelMapInstance,
+    generator: &dyn VoxelGeneratorImpl,
+    chunk_store: &FsChunkStore,
+    slots: &mut HomebasePublishSlots,
+) -> Result<(), MapPersistenceRejection> {
+    let key = PayloadKey::Chunk {
+        x: pos.x,
+        y: pos.y,
+        z: pos.z,
+    };
+    if instance.chunk_matches_generated(pos, generator) {
+        slots.push_tombstone(PayloadClass::TerrainChunk, key, CHUNK_SAVE_VERSION);
+        slots.scope.tombstoned_chunks.push(pos);
+        return chunk_store.delete(&pos).map_err(|e| {
+            MapPersistenceRejection::Filesystem(format!("delete reverted chunk {pos}: {e}"))
+        });
+    }
+    let Some(data) = instance.get_chunk_data(pos) else {
+        trace!(
+            ?pos,
+            "publish candidate differs from generated but is not loaded; skipping"
+        );
+        return Ok(());
+    };
+    let envelope = ChunkFileEnvelope {
+        version: CHUNK_SAVE_VERSION,
+        chunk_size: instance.chunk_size,
+        data: data.clone(),
+    };
+    let bytes = encode_chunk_payload(envelope)?;
+    slots.push_present(PayloadClass::TerrainChunk, key, CHUNK_SAVE_VERSION, bytes);
+    slots.scope.edited_chunks.push(pos);
+    Ok(())
+}
+
+/// Publishes each chunk-entity candidate as `Present` with the persisted world-object list
+/// (possibly empty; an emptied chunk stays empty on restore). Never tombstoned, since that
+/// would regenerate generated objects.
+fn resolve_chunk_entity_slots(
+    chunk_entities_store: &FsChunkEntitiesStore,
+    change_set: &MapChangeSet,
+    slots: &mut HomebasePublishSlots,
+) -> Result<(), MapPersistenceRejection> {
+    for pos in sorted_candidates(&change_set.chunk_entity_candidates) {
         let Some(spawns) = chunk_entities_store.load(&pos).map_err(|e| {
             MapPersistenceRejection::Filesystem(format!("load chunk entities {pos}: {e}"))
         })?
@@ -318,46 +355,50 @@ fn resolve_homebase_publish_slots(
             continue;
         };
         let bytes = encode_chunk_entities_payload(spawns)?;
-        present_payloads.push((
-            present_descriptor(
-                PayloadClass::ChunkEntities,
-                PayloadKey::Chunk {
-                    x: pos.x,
-                    y: pos.y,
-                    z: pos.z,
-                },
-                CHUNK_ENTITIES_SCHEMA_VERSION,
-                &bytes,
-            ),
+        slots.push_present(
+            PayloadClass::ChunkEntities,
+            PayloadKey::Chunk {
+                x: pos.x,
+                y: pos.y,
+                z: pos.z,
+            },
+            CHUNK_ENTITIES_SCHEMA_VERSION,
             bytes,
-        ));
-        scope.chunk_entities.push(pos);
+        );
+        slots.scope.chunk_entities.push(pos);
     }
+    Ok(())
+}
 
-    if is_genesis || change_set.map_entities_changed {
-        if let Some(entities) = map_entities_store
-            .load(&())
-            .map_err(|e| MapPersistenceRejection::Filesystem(format!("load map entities: {e}")))?
-        {
-            let bytes = encode_map_entities_payload(entities)?;
-            present_payloads.push((
-                present_descriptor(
-                    PayloadClass::MapEntities,
-                    PayloadKey::Singleton,
-                    MAP_ENTITIES_SCHEMA_VERSION,
-                    &bytes,
-                ),
-                bytes,
-            ));
-            scope.includes_map_entities = true;
-        }
+/// Publishes map-level entities as `Present` on the genesis revision or when the change-set
+/// flags them, else omits the slot (restore preserves omitted slots). A flagged-but-absent
+/// file is also omitted: nothing was ever persisted, so there is nothing to publish.
+fn resolve_map_entities_slot(
+    map_entities_store: &FsMapEntitiesStore,
+    change_set: &MapChangeSet,
+    is_genesis: bool,
+    slots: &mut HomebasePublishSlots,
+) -> Result<(), MapPersistenceRejection> {
+    if !(is_genesis || change_set.map_entities_changed) {
+        trace!("map entities unchanged on a chained delta; omitting slot");
+        return Ok(());
     }
-
-    Ok(HomebasePublishSlots {
-        present_payloads,
-        tombstoned,
-        scope,
-    })
+    let Some(entities) = map_entities_store
+        .load(&())
+        .map_err(|e| MapPersistenceRejection::Filesystem(format!("load map entities: {e}")))?
+    else {
+        trace!("map entities flagged but never persisted; omitting slot");
+        return Ok(());
+    };
+    let bytes = encode_map_entities_payload(entities)?;
+    slots.push_present(
+        PayloadClass::MapEntities,
+        PayloadKey::Singleton,
+        MAP_ENTITIES_SCHEMA_VERSION,
+        bytes,
+    );
+    slots.scope.includes_map_entities = true;
+    Ok(())
 }
 
 /// Current unix time in seconds for attestation issuance/expiry.
