@@ -1,5 +1,6 @@
 ---
 description: Create an isolated git worktree for implementation
+model: opus
 argument-hint: "doc/tasks/<id>/"
 ---
 
@@ -19,11 +20,13 @@ The artifact directory is `$ARGUMENTS`.
    - Worktree path: `~/wt/<repo-name>/<branch-name>`
 
 2. **Create the worktree:**
+
    ```
    git worktree add ~/wt/<repo-name>/<branch-name> -b <branch-name>
    ```
 
 3. **Confirm with the user** before executing:
+
    ```
    Ready to create worktree:
 

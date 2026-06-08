@@ -25,10 +25,10 @@ Read `$ARGUMENTS/questions.md`. That file is your only input.
    - **web-search-researcher** - find information or resources online
 
    Give each agent 1–2 specific questions. In every agent prompt, pass through these four rules verbatim:
-   - *"Describe what exists. Do not suggest improvements or propose solutions."*
-   - *"Quote the load-bearing code inline — signatures, key expressions, variant bodies, schema keys — with `file:line`. Do not paraphrase where the code itself is short."*
-   - *"If the literal answer to a question is 'none' or 'no', find and deescribe adjacent concepts that ARE present in the codebase — close patterns, nearest component, analogous mechanisms. A bare 'does not exist' is unacceptable."*
-   - *"If a concept in a question is novel or has little-to-no codebase presence (e.g. a new dependency or existing-dependency primitive/concept not yet used), research the concept itself, official docs, or the web. Describe what it is, how it is normally used, and the shape it would take if introduced — with quoted evidence and source links."*
+   - _"Describe what exists. Do not suggest improvements or propose solutions."_
+   - _"Quote the load-bearing code inline — signatures, key expressions, variant bodies, schema keys — with `file:line`. Do not paraphrase where the code itself is short."_
+   - _"If the literal answer to a question is 'none' or 'no', find and deescribe adjacent concepts that ARE present in the codebase — close patterns, nearest component, analogous mechanisms. A bare 'does not exist' is unacceptable."_
+   - _"If a concept in a question is novel or has little-to-no codebase presence (e.g. a new dependency or existing-dependency primitive/concept not yet used), research the concept itself, official docs, or the web. Describe what it is, how it is normally used, and the shape it would take if introduced — with quoted evidence and source links."_
 
 3. **Wait for ALL agents to complete** before proceeding.
 
@@ -46,10 +46,12 @@ Read `$ARGUMENTS/questions.md`. That file is your only input.
    ### Evidence
 
    - [0 or more quoted code snippets with plain-language description of what the quoted code does, with `file:line`]
+
    ```<lang>
    // path/to/file.rs:30-42
    <quoted code>
    ```
+
    - [Related fact or connection, with `file:line`]
    - [Enumeration as a table when plural — variants, callers, files, registrations]
 
@@ -57,14 +59,11 @@ Read `$ARGUMENTS/questions.md`. That file is your only input.
 
    ## Cross-Cutting Observations
 
-   [Patterns, conventions, or architectural invariants observed across multiple
-    questions. Describe patterns that exist in the code. Do not recommend
-    choices, do not list open design questions, do not advocate for approaches.]
+   [Patterns, conventions, or architectural invariants observed across multiple questions. Describe patterns that exist in the code. Do not recommend choices, do not list open design questions, do not advocate for approaches.]
 
    ## Open Areas
 
-   [Questions that could not be fully answered: what was searched, what was not found,
-     where a fact remains unverified.]
+   [Questions that could not be fully answered: what was searched, what was not found, where a fact remains unverified.]
    ````
 
 6. **Present a brief summary** to the user (≤10 lines, covering scope of evidence and any notable absences). Wait for follow-up questions — if they have them, research further and update the document.

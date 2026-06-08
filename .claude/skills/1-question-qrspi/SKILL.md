@@ -1,9 +1,7 @@
 ---
 description: Decompose a task into neutral research questions
+model: opus
 argument-hint: "<ticket file, issue URL, or task description>"
-model: openai/o4-mini-deep-research
-fallbackModels: anthropic/claude-sonnet-4.6, openai/o3-deep-research, moonshotai/kimi-k2.6, xai/grok-4.1-fast-non-reasoning
-thinking: medium
 ---
 
 # Question -- Decompose the Task
@@ -22,18 +20,16 @@ The user provides a task description, ticket file path, or issue reference.
    - Spawn a **codebase-locator** agent to find which areas of the codebase relate to the task. You need to know what exists to write good questions.
    - Spawn **web-search-researcher** agent to better understand any concepts in the task so you can include questions that lead to more insightful research. Examples: possible packages, patterns, best practices, prior art, and/or expert experience. You need to know what is possible to write good questions.
 
-  - high-level architecture information you want to ask useful, relevant questions about how the task will affect architecture/system from a high level
+- high-level architecture information you want to ask useful, relevant questions about how the task will affect architecture/system from a high level
 
 3. **Decompose into around 3-15 research questions**:
    - Each question should cause a researcher to explore a different relevant area of the codebase
    - Questions must be **neutral** — they ask what exists and how it works, never how to build something
    - Prefer "trace the flow" questions that reveal architecture over yes/no questions
 
-   Good: "How does the middleware chain handle request authentication, and where are auth policies defined?"
-   Bad: "What's the best way to add a new authenticated endpoint?"
+   Good: "How does the middleware chain handle request authentication, and where are auth policies defined?" Bad: "What's the best way to add a new authenticated endpoint?"
 
-   Good: "What patterns exist for database migrations, and how are they tested?"
-   Bad: "How should we add a new migration for the users table?"
+   Good: "What patterns exist for database migrations, and how are they tested?" Bad: "How should we add a new migration for the users table?"
 
 4. **Determine the artifact directory**:
    - With ticket number: `doc/tasks/PROJ-1234-brief-description/` (use the project's ticket prefix)
@@ -49,17 +45,18 @@ The user provides a task description, ticket file path, or issue reference.
    # Research Questions
 
    ## Context
-   [2-3 sentences describing which areas of the codebase to focus on.
-   Do NOT mention what is being built or why.]
+
+   [2-3 sentences describing which areas of the codebase to focus on. Do NOT mention what is being built or why.]
 
    ## Questions
+
    1. [Neutral, fact-seeking question]
-   2. [Neutral, fact-seeking question]
-   ...
+   2. [Neutral, fact-seeking question] ...
    ```
 
 8. **Present questions to the user** and wait for approval or edits before finalizing.
-  - While reviewing questions with user, try to rephrase questions with additional details rather than add more, similar questions
+
+- While reviewing questions with user, try to rephrase questions with additional details rather than add more, similar questions
 
 ## Output
 

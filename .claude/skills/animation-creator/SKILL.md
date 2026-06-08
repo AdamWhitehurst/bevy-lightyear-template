@@ -26,6 +26,25 @@ Workflow for authoring sprite-rig animations. The system is data-driven (RON ass
 
 ## Stepwise workflow
 
+### 0. Analyze reference keyframes — MANDATORY
+
+**If the user did not provide reference keyframe images, STOP and request them** (or, if images are genuinely unavailable, request written keyframe descriptions — beat-by-beat pose notes for each limb). Do not begin authoring from a verbal task description alone; the subtleties that make motion read correctly are exactly what a prose request omits.
+
+Read the frames FIRST. Do NOT generate motion parametrically (circle equations, sinusoids) and back-rationalize it against the reference. Read the frames first. Skipping this is the #1 source of "looks nothing like the reference" errors — subtleties live in the frames, not in your prior of what the motion "should" be.
+
+For **every** reference image, produce a per-frame transcription before writing any RON:
+
+1. **Identify the beat of each frame** and its position in the cycle (`t` fraction).
+2. **Transcribe each animated bone per frame** into a table: rotation (forward/back/up, rough degrees) and position relative to the body (forward/back, high/low, tucked/extended).
+3. **State the phase relationships explicitly** — these are what get missed:
+   - **Left/right limb offset:** are paired limbs a half-cycle apart? (Almost always yes for locomotion. Same-instant extremes = wrong.)
+   - **Contralateral coordination:** which arm leads which leg (opposite arm to forward leg).
+   - **Within-limb coherence:** does rotation track translation (e.g. most-bent at the forward extreme), or are they fighting?
+   - Lean direction, vertical bob timing, anticipation vs. follow-through.
+4. **Verify in world-space, not by "mirror" intuition.** Mirror reasoning is error-prone here because rig bones are not pre-mirrored. Write out actual hand/foot X/Y at each `t` for both limbs and confirm the offset is real (e.g. "at t=0 left hand forward X=+0.5, right hand back X=−0.5").
+
+**Echo this reading back to the user as text and get confirmation BEFORE authoring keyframes.** Correcting a misread pose costs one message; correcting it after a build + screenshot costs a full loop. Phrase it as "here's what I see in the frames: …" and list the phase relationships you'll encode.
+
 ### 1. Gather context (read in parallel)
 
 - `assets/abilities/{ability_id}.ability.ron` — `AbilityPhases`, `OnTickEffects` timing.
@@ -38,12 +57,12 @@ Workflow for authoring sprite-rig animations. The system is data-driven (RON ass
 
 Don't accept the ability's existing phases blindly. Sketch the visual beats (anticipation → contact → settle → hold), assign tick budgets, then update **both files together** if the ability needs to grow or shrink to match. Common shape:
 
-| Beat | Phase | Notes |
-|---|---|---|
-| Anticipation / windup | Startup | Long enough to read the action coming |
-| Contact / impact | Active (tick 0…N) | First effect at impact frame |
-| Trailing effects | Active (tick N…end) | Subsequent shockwaves, projectiles |
-| Settle to idle | Recovery | Final pose = idle pose for clean handoff |
+| Beat                  | Phase               | Notes                                    |
+| --------------------- | ------------------- | ---------------------------------------- |
+| Anticipation / windup | Startup             | Long enough to read the action coming    |
+| Contact / impact      | Active (tick 0…N)   | First effect at impact frame             |
+| Trailing effects      | Active (tick N…end) | Subsequent shockwaves, projectiles       |
+| Settle to idle        | Recovery            | Final pose = idle pose for clean handoff |
 
 Conversion: `effect_time_seconds = startup/64 + active_offset_tick/64`.
 
@@ -67,8 +86,10 @@ Keyframe rules:
 - **First keyframe at `time: 0.0`, last at `time: duration`.** Both endpoints should hold the neutral pose so the clip closes cleanly.
 - **Translation `value` is an offset from the bone's default position** (rig.ron). The build adds the default in.
 - **Rotation `value` is in degrees.** Positive = CCW.
-- **Mirror-symmetric limbs**: use OPPOSITE signs (e.g. `arm_l: +X`, `arm_r: -X`). This is the natural pose for raised hands, side kicks, etc., because bones are not pre-mirrored in the rig — only screen-side.
-- **Same-sign rotation on both limbs** is rare and produces visually asymmetric motion (one limb crosses the body); only use deliberately.
+- **Choose opposite vs same sign by the CAMERA the motion is viewed from — this is the most-missed rig fact.** The rig sprites have a fixed hand/finger orientation and are NOT pre-mirrored; rotation sign decides which way each hand faces.
+  - **Front-facing poses (camera looks at the chest): OPPOSITE signs.** Raised hands, side kicks, T-pose — the limbs are genuine mirror images, so `arm_l: +X`, `arm_r: -X`.
+  - **Side-on locomotion (walk/run/jog — camera looks at the profile): SAME sign.** Both hands face the travel direction, so both arms must rotate the same way. Using opposite signs here makes the **back-facing arm's hand point the wrong direction** (it faces backward) — a subtle flip that's easy to miss because the front arm looks correct. The two arms still alternate via a half-cycle phase offset in their *timelines*, not via opposite rotation signs.
+  - Z-order fixes which arm is the "back" arm (e.g. `arm_l` `z_order: -0.003` renders behind the torso always). Author the back arm's rotation so its hand still faces forward.
 
 ### 4. Avoid rotation interpolation pitfalls
 
@@ -112,7 +133,7 @@ events: [ (time: 0.875, name: "ground_pound_impact") ],
 ## Diagnosing common symptoms
 
 | Symptom | Cause | Fix |
-|---|---|---|
+| --- | --- | --- |
 | Bones snap to idle mid-animation | `duration` > ability total ticks / 64 | Match `duration` to `(startup + active + recovery) / 64` |
 | Effect doesn't fire | Effect tick exceeds active duration, or wrong phase | Effect ticks are offsets from active start; expand `active` |
 | Rotation wiggles, doesn't reach target | Slerp ambiguity at ≥150° leg, or anticipation cock fighting main rotation | Insert intermediate keyframes ≤90° apart; drop the cock |
@@ -121,6 +142,8 @@ events: [ (time: 0.875, name: "ground_pound_impact") ],
 | Rotations fold back at ±90° | Billboard shader regression — `cos θz` extracted as `length()` instead of signed `col1.y` | Restore `assets/shaders/sprite_rig_billboard.wgsl` signed-cosine extraction |
 | Animation plays partially or not at all | Animset entry missing/typo, or hot-reload skipped after RON parse error | Verify entry, restart client |
 | Rotation appears reversed when facing left | `JointRoot.scale.x = -1` mirrors Z rotations visually — expected | Author for right-facing; left-facing flips automatically |
+| Back/behind hand faces the wrong way (looks flipped) while the front hand looks fine | Opposite-sign rotation used on a side-on locomotion clip — correct for front-facing poses, wrong for profile views where both hands face travel direction | Give both arms the SAME rotation sign; keep them alternating via half-cycle timeline offset, not via opposite signs |
+| Paired limbs (arms/legs) move in sync instead of alternating | Both limbs hit their forward/back extreme at the same `t` — only offset on one axis (e.g. Y) but not the swing axis | Offset one limb's entire timeline by half the cycle so its forward extreme lands when the other's is back; verify in world-space X, not by "mirror" intuition |
 
 ## Debugging philosophy
 
@@ -130,16 +153,16 @@ Always check sprite dimensions and bone defaults before promising a visual outco
 
 ## File map
 
-| Path | Role |
-|---|---|
-| `assets/anims/{rig}/*.anim.ron` | Animation clip definitions |
-| `assets/anims/{rig}/{rig}.animset.ron` | Maps ability IDs → clip paths |
-| `assets/abilities/*.ability.ron` | Phase + effect timing |
-| `assets/rigs/*.rig.ron` | Bone hierarchy, defaults, sprite metadata |
-| `assets/sprites/{rig}/*.png` | Per-bone sprites |
-| `assets/shaders/sprite_rig_billboard.wgsl` | Per-bone rendering with Z-rotation extraction |
-| `crates/sprite_rig/src/animation.rs` | Clip building, animation graph |
-| `crates/sprite_rig/src/animset.rs` | Ability triggers, return-to-locomotion |
-| `crates/protocol/src/ability/effects.rs` | OnTickEffects gating to Active phase |
+| Path                                        | Role                                          |
+| ------------------------------------------- | --------------------------------------------- |
+| `assets/anims/{rig}/*.anim.ron`             | Animation clip definitions                    |
+| `assets/anims/{rig}/{rig}.animset.ron`      | Maps ability IDs → clip paths                 |
+| `assets/abilities/*.ability.ron`            | Phase + effect timing                         |
+| `assets/rigs/*.rig.ron`                     | Bone hierarchy, defaults, sprite metadata     |
+| `assets/sprites/{rig}/*.png`                | Per-bone sprites                              |
+| `assets/shaders/sprite_rig_billboard.wgsl`  | Per-bone rendering with Z-rotation extraction |
+| `crates/sprite_rig/src/animation.rs`        | Clip building, animation graph                |
+| `crates/sprite_rig/src/animset.rs`          | Ability triggers, return-to-locomotion        |
+| `crates/protocol/src/ability/effects.rs`    | OnTickEffects gating to Active phase          |
 | `crates/protocol/src/ability/activation.rs` | Phase advancement, despawn at end of recovery |
-| `crates/protocol/src/lib.rs` | `FIXED_TIMESTEP_HZ = 64.0` |
+| `crates/protocol/src/lib.rs`                | `FIXED_TIMESTEP_HZ = 64.0`                    |
