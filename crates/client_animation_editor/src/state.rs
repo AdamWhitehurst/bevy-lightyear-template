@@ -137,14 +137,18 @@ pub fn select_clip(
 /// Bevy's natural advance would fight the playhead), advances the playhead by `dt` when
 /// `Playing` (wrapping at the clip duration), and seeks the node(s) to the playhead.
 ///
-/// Locomotion nodes other than the selected one keep their natural advance — at zero
-/// audition velocity only idle has weight anyway. For ability slots both the override and
-/// additive nodes are driven.
+/// When the selection changes, the previous slot's nodes are released first — abilities
+/// and hit_react are stopped (otherwise they stay frozen at their last pose and keep
+/// writing their bones over the new selection); a previously selected locomotion node
+/// instead gets its natural speed back, since locomotion must keep playing
+/// (`update_locomotion_blend_weights` requires it). For ability slots both the override
+/// and additive nodes are driven.
 pub fn drive_player_from_playhead(
     mut state: ResMut<EditorState>,
     mut players: Query<(&mut AnimationPlayer, &AnimSetRef)>,
     built_graphs: Res<BuiltAnimGraphs>,
     time: Res<Time>,
+    mut last_applied: Local<Option<ClipSlot>>,
 ) {
     let Ok((mut player, animset_ref)) = players.single_mut() else {
         trace!("editor rig player not ready; transport idle");
@@ -155,12 +159,19 @@ pub fn drive_player_from_playhead(
         return;
     };
 
+    if last_applied.as_ref() != Some(&state.selected_clip) {
+        if let Some(previous) = last_applied.as_ref() {
+            release_slot_nodes(previous, &state, built, &mut player);
+        }
+        *last_applied = Some(state.selected_clip.clone());
+    }
+
     if state.playback == Playback::Playing {
         let duration = state.working.duration.max(f32::EPSILON);
         state.playhead = (state.playhead + time.delta_secs()) % duration;
     }
 
-    for node in selected_nodes(&state, built) {
+    for node in slot_nodes(&state.selected_clip, &state.working_set, built) {
         let anim = match player.animation_mut(node) {
             Some(anim) => anim,
             None => player.play(node),
@@ -171,13 +182,40 @@ pub fn drive_player_from_playhead(
     }
 }
 
-/// Resolves the graph node(s) the selected slot drives. Abilities have an override and an
-/// additive node; the others have one.
-fn selected_nodes(
+/// Releases the transport's hold on a slot's nodes after the selection moves elsewhere:
+/// locomotion nodes return to natural speed (they must keep playing); ability/hit_react
+/// nodes are stopped so their frozen pose no longer blends over the new selection.
+fn release_slot_nodes(
+    slot: &ClipSlot,
     state: &EditorState,
     built: &sprite_rig::animation::BuiltAnimGraph,
+    player: &mut AnimationPlayer,
+) {
+    let nodes = slot_nodes(slot, &state.working_set, built);
+    match slot {
+        ClipSlot::Locomotion(_) => {
+            for node in nodes {
+                if let Some(anim) = player.animation_mut(node) {
+                    anim.set_speed(1.0);
+                }
+            }
+        }
+        ClipSlot::Ability(_) | ClipSlot::HitReact => {
+            for node in nodes {
+                player.stop(node);
+            }
+        }
+    }
+}
+
+/// Resolves the graph node(s) a slot drives. Abilities have an override and an additive
+/// node; the others have one.
+fn slot_nodes(
+    slot: &ClipSlot,
+    working_set: &SpriteAnimSetAsset,
+    built: &sprite_rig::animation::BuiltAnimGraph,
 ) -> Vec<AnimationNodeIndex> {
-    match &state.selected_clip {
+    match slot {
         ClipSlot::Locomotion(i) => built
             .locomotion_entries
             .get(*i)
@@ -194,8 +232,7 @@ fn selected_nodes(
                 nodes
             })
             .unwrap_or_default(),
-        ClipSlot::HitReact => state
-            .working_set
+        ClipSlot::HitReact => working_set
             .hit_react
             .as_ref()
             .and_then(|path| built.node_map.get(path))
