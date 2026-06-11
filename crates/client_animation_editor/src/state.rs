@@ -178,7 +178,14 @@ pub fn drive_player_from_playhead(
         };
         anim.repeat();
         anim.set_speed(0.0);
-        anim.seek_to(state.playhead);
+        if state.playhead >= anim.seek_time() {
+            // Forward: seek_to records [last, new) so clip events fire during playback.
+            anim.seek_to(state.playhead);
+        } else {
+            // Backward (scrub left or loop wrap): set both times equal — bevy's forward
+            // event-trigger path slices events[last..new] and panics when last > new.
+            anim.set_seek_time(state.playhead);
+        }
     }
 }
 
