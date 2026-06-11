@@ -52,6 +52,7 @@ pub fn draw_bone_gizmos(
     egui_wants_input: Res<EguiWantsInput>,
     rigs: Query<&BoneEntities>,
     bone_transforms: Query<&GlobalTransform>,
+    parents: Query<&ChildOf>,
     cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
     mut drag: Local<Option<GizmoDrag>>,
 ) {
@@ -74,7 +75,7 @@ pub fn draw_bone_gizmos(
         .map(|v| v.physical_position.as_vec2() / ctx.pixels_per_point())
         .unwrap_or(Vec2::ZERO);
 
-    let mut gizmos: Vec<(String, Vec2)> = Vec::new();
+    let mut gizmos: Vec<(String, Vec2, Entity)> = Vec::new();
     for (bone, &entity) in &bone_entities.0 {
         let Ok(global) = bone_transforms.get(entity) else {
             trace!(bone, "bone entity without GlobalTransform yet");
@@ -84,7 +85,7 @@ pub fn draw_bone_gizmos(
             trace!(bone, "bone projects outside the camera frustum");
             continue;
         };
-        gizmos.push((bone.clone(), viewport_offset + viewport_pos));
+        gizmos.push((bone.clone(), viewport_offset + viewport_pos, entity));
     }
 
     paint_gizmos(ctx, &state, &gizmos);
@@ -101,9 +102,16 @@ pub fn draw_bone_gizmos(
             let Some(pos) = pointer_pos else {
                 return; // no pointer position this frame — nothing to hit-test
             };
-            let Some((bone, bone_screen)) = nearest_gizmo(pos, &gizmos) else {
+            let Some((bone, bone_screen, bone_entity)) = nearest_gizmo(pos, &gizmos) else {
                 return; // press on empty viewport space — not a bone drag
             };
+            // The authored-value space is the bone's direct parent's frame.
+            let parent_rotation = parents
+                .get(bone_entity)
+                .ok()
+                .and_then(|child_of| bone_transforms.get(child_of.parent()).ok())
+                .map(|parent_global| parent_global.rotation())
+                .unwrap_or(Quat::IDENTITY);
             *drag = start_drag(
                 &mut state,
                 auto_key.0,
@@ -113,6 +121,7 @@ pub fn draw_bone_gizmos(
                 camera,
                 camera_tf,
                 viewport_offset,
+                parent_rotation,
             );
         }
         // Continue an active drag.
@@ -178,6 +187,7 @@ fn start_drag(
     camera: &Camera,
     camera_tf: &GlobalTransform,
     viewport_offset: Vec2,
+    parent_rotation: Quat,
 ) -> Option<GizmoDrag> {
     let channel = match &state.selection {
         Selection::Key {
@@ -204,7 +214,10 @@ fn start_drag(
         idx: key_idx,
     };
 
-    // Project the world X/Y axes at the bone's depth to build the screen-from-world basis.
+    // Build the screen-from-parent-local basis at the bone's depth: authored translation
+    // offsets live in the bone's PARENT space, and the billboard system rotates joint
+    // roots 180° to face the camera — so parent-local X/Y, not world X/Y, are what a
+    // drag must invert (this is also what keeps rotation's mirror sign correct).
     let bone_world = state_bone_world(camera, camera_tf, bone_screen, viewport_offset)?;
     let project = |world: Vec3| -> Option<Vec2> {
         camera
@@ -213,8 +226,8 @@ fn start_drag(
             .map(|v| viewport_offset + v)
     };
     let origin = project(bone_world)?;
-    let x_axis = project(bone_world + Vec3::X)? - origin;
-    let y_axis = project(bone_world + Vec3::Y)? - origin;
+    let x_axis = project(bone_world + parent_rotation * Vec3::X)? - origin;
+    let y_axis = project(bone_world + parent_rotation * Vec3::Y)? - origin;
 
     Some(GizmoDrag {
         start_pointer: pointer,
@@ -362,9 +375,9 @@ fn resolve_target_key(
 }
 
 /// Paints a circle per bone, highlighted when the bone owns the current selection.
-fn paint_gizmos(ctx: &egui::Context, state: &EditorState, gizmos: &[(String, Vec2)]) {
+fn paint_gizmos(ctx: &egui::Context, state: &EditorState, gizmos: &[(String, Vec2, Entity)]) {
     let painter = ctx.layer_painter(egui::LayerId::background());
-    for (bone, screen) in gizmos {
+    for (bone, screen, _) in gizmos {
         let selected = matches!(
             &state.selection,
             Selection::Key { bone: b, .. } if b == bone
@@ -385,16 +398,19 @@ fn paint_gizmos(ctx: &egui::Context, state: &EditorState, gizmos: &[(String, Vec
 }
 
 /// The gizmo nearest `pos` within `GRAB_TOLERANCE`.
-fn nearest_gizmo(pos: egui::Pos2, gizmos: &[(String, Vec2)]) -> Option<(String, Vec2)> {
+fn nearest_gizmo(
+    pos: egui::Pos2,
+    gizmos: &[(String, Vec2, Entity)],
+) -> Option<(String, Vec2, Entity)> {
     gizmos
         .iter()
-        .map(|(bone, screen)| {
+        .map(|(bone, screen, entity)| {
             let d = (Vec2::new(pos.x, pos.y) - *screen).length();
-            (d, bone, screen)
+            (d, bone, screen, entity)
         })
-        .filter(|(d, _, _)| *d <= GRAB_TOLERANCE)
+        .filter(|(d, _, _, _)| *d <= GRAB_TOLERANCE)
         .min_by(|a, b| a.0.total_cmp(&b.0))
-        .map(|(_, bone, screen)| (bone.clone(), *screen))
+        .map(|(_, bone, screen, entity)| (bone.clone(), *screen, *entity))
 }
 
 #[cfg(test)]
