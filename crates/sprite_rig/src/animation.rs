@@ -8,6 +8,7 @@ use bevy::{
 };
 
 use crate::asset::{SpriteAnimAsset, SpriteAnimSetAsset, SpriteRigAsset};
+use crate::curve::SegmentedKeyframeCurve;
 use crate::spawn::{AnimSetRef, BoneEntities};
 use crate::RigRegistry;
 use protocol::CharacterMarker;
@@ -392,13 +393,13 @@ fn add_additive_rotation_curve(
     if timeline.rotation.len() < 2 {
         return;
     }
-    let curve = UnevenSampleAutoCurve::new(
-        timeline
-            .rotation
-            .iter()
-            .map(|k| (k.time, Quat::from_rotation_z(k.value.to_radians()))),
-    )
-    .expect("Additive rotation timeline needs >= 2 keyframes");
+    let keys = timeline
+        .rotation
+        .iter()
+        .map(|k| (k.time, Quat::from_rotation_z(k.value.to_radians()), k.curve))
+        .collect();
+    let curve =
+        SegmentedKeyframeCurve::new(keys).expect("Additive rotation timeline needs >= 2 keyframes");
     clip.add_curve_to_target(
         target_id,
         AnimatableCurve::new(animated_field!(Transform::rotation), curve),
@@ -415,13 +416,13 @@ fn add_additive_translation_curve(
     if timeline.translation.len() < 2 {
         return;
     }
-    let curve = UnevenSampleAutoCurve::new(
-        timeline
-            .translation
-            .iter()
-            .map(|k| (k.time, Vec3::new(k.value.x, k.value.y, 0.0))),
-    )
-    .expect("Additive translation timeline needs >= 2 keyframes");
+    let keys = timeline
+        .translation
+        .iter()
+        .map(|k| (k.time, Vec3::new(k.value.x, k.value.y, 0.0), k.curve))
+        .collect();
+    let curve = SegmentedKeyframeCurve::new(keys)
+        .expect("Additive translation timeline needs >= 2 keyframes");
     clip.add_curve_to_target(
         target_id,
         AnimatableCurve::new(animated_field!(Transform::translation), curve),
@@ -460,13 +461,13 @@ fn add_rotation_curve(
     duration: f32,
 ) {
     if timeline.rotation.len() >= 2 {
-        let curve = UnevenSampleAutoCurve::new(
-            timeline
-                .rotation
-                .iter()
-                .map(|k| (k.time, Quat::from_rotation_z(k.value.to_radians()))),
-        )
-        .expect("Rotation timeline needs >= 2 keyframes");
+        let keys = timeline
+            .rotation
+            .iter()
+            .map(|k| (k.time, Quat::from_rotation_z(k.value.to_radians()), k.curve))
+            .collect();
+        let curve =
+            SegmentedKeyframeCurve::new(keys).expect("Rotation timeline needs >= 2 keyframes");
         clip.add_curve_to_target(
             target_id,
             AnimatableCurve::new(animated_field!(Transform::rotation), curve),
@@ -491,13 +492,19 @@ fn add_translation_curve(
     duration: f32,
 ) {
     if timeline.translation.len() >= 2 {
-        let curve = UnevenSampleAutoCurve::new(timeline.translation.iter().map(|k| {
-            (
-                k.time,
-                Vec3::new(default_xy.x + k.value.x, default_xy.y + k.value.y, z_order),
-            )
-        }))
-        .expect("Translation timeline needs >= 2 keyframes");
+        let keys = timeline
+            .translation
+            .iter()
+            .map(|k| {
+                (
+                    k.time,
+                    Vec3::new(default_xy.x + k.value.x, default_xy.y + k.value.y, z_order),
+                    k.curve,
+                )
+            })
+            .collect();
+        let curve =
+            SegmentedKeyframeCurve::new(keys).expect("Translation timeline needs >= 2 keyframes");
         clip.add_curve_to_target(
             target_id,
             AnimatableCurve::new(animated_field!(Transform::translation), curve),
@@ -522,13 +529,12 @@ fn add_scale_curve(
     if timeline.scale.len() < 2 {
         return; // no scale animation — Bevy's default scale (1,1,1) is correct
     }
-    let curve = UnevenSampleAutoCurve::new(
-        timeline
-            .scale
-            .iter()
-            .map(|k| (k.time, Vec3::new(k.value.x, k.value.y, 1.0))),
-    )
-    .expect("Scale timeline needs >= 2 keyframes");
+    let keys = timeline
+        .scale
+        .iter()
+        .map(|k| (k.time, Vec3::new(k.value.x, k.value.y, 1.0), k.curve))
+        .collect();
+    let curve = SegmentedKeyframeCurve::new(keys).expect("Scale timeline needs >= 2 keyframes");
     clip.add_curve_to_target(
         target_id,
         AnimatableCurve::new(animated_field!(Transform::scale), curve),

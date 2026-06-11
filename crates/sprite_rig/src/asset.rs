@@ -130,7 +130,7 @@ pub struct ScaleKeyframe {
 }
 
 /// Interpolation curve type between keyframes.
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, Default, PartialEq, Eq, Reflect)]
 pub enum CurveType {
     #[default]
     Linear,
