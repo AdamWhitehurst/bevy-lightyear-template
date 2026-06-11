@@ -2625,6 +2625,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "client_animation_editor"
+version = "0.1.0"
+dependencies = [
+ "avian3d",
+ "bevy",
+ "bevy_egui",
+ "protocol",
+ "sprite_rig",
+]
+
+[[package]]
 name = "client_lightyear"
 version = "0.1.0"
 dependencies = [
