@@ -1,6 +1,10 @@
+pub mod panels;
+pub mod state;
+
 use avian3d::prelude::LinearVelocity;
 use bevy::prelude::*;
-use protocol::app_state::{IdentityLoadComplete, RelayPoolReady};
+use bevy_egui::EguiPrimaryContextPass;
+use protocol::app_state::{AppState, IdentityLoadComplete, RelayPoolReady};
 use protocol::billboard::billboard_material::BillboardMaterial;
 use protocol::billboard::shadow_only_material::ShadowOnlyMaterial;
 use protocol::billboard::sprite_rig_material::SpriteRigMaterial;
@@ -23,6 +27,19 @@ impl Plugin for AnimationEditorPlugin {
         app.add_plugins(sprite_rig::SpriteRigPlugin);
         app.add_systems(Startup, (satisfy_app_state_gates, setup_editor_scene));
         app.add_systems(Update, spawn_editor_rig);
+        app.add_systems(
+            Update,
+            (
+                state::init_editor_state.run_if(
+                    in_state(AppState::Ready).and(not(resource_exists::<state::EditorState>)),
+                ),
+                state::drive_player_from_playhead.run_if(resource_exists::<state::EditorState>),
+            ),
+        );
+        app.add_systems(
+            EguiPrimaryContextPass,
+            panels::transport::draw_transport.run_if(resource_exists::<state::EditorState>),
+        );
     }
 }
 
