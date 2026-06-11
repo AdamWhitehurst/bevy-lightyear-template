@@ -21,26 +21,57 @@ impl Plugin for AnimationEditorPlugin {
         app.add_plugins(bevy::pbr::MaterialPlugin::<SpriteRigMaterial>::default());
         app.add_plugins(bevy::pbr::MaterialPlugin::<ShadowOnlyMaterial>::default());
         app.add_plugins(sprite_rig::SpriteRigPlugin);
-        app.add_systems(
-            Startup,
-            (
-                spawn_editor_rig,
-                satisfy_app_state_gates,
-                setup_editor_scene,
-            ),
-        );
+        app.add_systems(Startup, (satisfy_app_state_gates, setup_editor_scene));
+        app.add_systems(Update, spawn_editor_rig);
     }
 }
 
 /// Spawns a humanoid rig driven by the real spawn + animation chain
-/// (`resolve_character_rig` → `spawn_sprite_rigs` → graph build → locomotion blend).
+/// (`spawn_sprite_rigs` → graph build → locomotion blend), once the rig, animset, and all
+/// sprite images are loaded — `spawn_sprite_rigs` panics on unloaded assets, an invariant
+/// the game satisfies by replicating characters in only after `AppState::Ready`.
+///
+/// Resolves `SpriteRig`/`AnimSetRef`/`Facing` itself instead of going through
+/// `resolve_character_rig`: that system only matches replicated entities
+/// (`Predicted`/`Replicated`/`Interpolated`), which the editor rig is not.
+///
 /// `LinearVelocity` is the input `update_locomotion_blend_weights` reads; zero holds the
 /// rig in idle until the audition controls (Phase 9) drive it. No physics body, no
 /// replication — the editor rig is animation-only.
-fn spawn_editor_rig(mut commands: Commands) {
+fn spawn_editor_rig(
+    mut commands: Commands,
+    existing: Query<(), With<CharacterMarker>>,
+    registry: Res<sprite_rig::RigRegistry>,
+    sprite_images: Res<sprite_rig::SpriteImageHandles>,
+    asset_server: Res<AssetServer>,
+) {
+    if !existing.is_empty() {
+        return; // rig already spawned — steady state
+    }
+    let entry = registry
+        .entries
+        .get(&CharacterType::Humanoid)
+        .expect("RigRegistry missing Humanoid entry");
+    if !asset_server.is_loaded_with_dependencies(&entry.rig_handle)
+        || !asset_server.is_loaded_with_dependencies(&entry.animset_handle)
+    {
+        trace!("editor rig/animset assets still loading; retrying next frame");
+        return;
+    }
+    let all_images_loaded = sprite_images
+        .0
+        .values()
+        .all(|handle| asset_server.is_loaded_with_dependencies(handle));
+    if sprite_images.0.is_empty() || !all_images_loaded {
+        trace!("editor sprite images still loading; retrying next frame");
+        return;
+    }
     commands.spawn((
         CharacterMarker,
         CharacterType::Humanoid,
+        sprite_rig::SpriteRig(entry.rig_handle.clone()),
+        sprite_rig::AnimSetRef(entry.animset_handle.clone()),
+        sprite_rig::Facing::Right,
         LinearVelocity::ZERO,
         Transform::default(),
         Visibility::default(),
@@ -63,9 +94,11 @@ fn satisfy_app_state_gates(
 /// billboards its joints toward the camera (`billboard_joint_roots`), so a fixed
 /// camera always sees the sprite plane face-on.
 fn setup_editor_scene(mut commands: Commands) {
+    // The humanoid rig spans roughly y ∈ [-2.5, 0.5] around the entity origin
+    // (root bone sits at y = -1.75), so the camera aims at its vertical center.
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(0.0, 1.5, -6.0).looking_at(Vec3::new(0.0, 1.5, 0.0), Vec3::Y),
+        Transform::from_xyz(0.0, -0.75, -16.0).looking_at(Vec3::new(0.0, -0.75, 0.0), Vec3::Y),
     ));
     commands.spawn((
         DirectionalLight {
