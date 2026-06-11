@@ -14,7 +14,10 @@ use std::collections::HashMap;
 pub use animation::{
     AnimBoneDefaults, BuiltAnimGraphs, BuiltAnimations, LoadedAnimHandles, LocomotionBlendWeights,
 };
-pub use animset::AnimationEventFired;
+pub use animset::{
+    recompute_layer_masks, ActiveAnimLayers, AnimLayer, AnimLayerMode, AnimLayerSource,
+    AnimationEventFired,
+};
 pub use shadow_twin::ShadowTwinOf;
 pub use spawn::{
     AnimSetRef, BoneEntities, Facing, JointRoot, RigMeshCache, SpriteImageHandles, SpriteRig,

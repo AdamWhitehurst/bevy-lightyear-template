@@ -254,6 +254,98 @@ pub fn drive_player_from_playhead(
     }
 }
 
+/// Mirrors the in-game layer stack for the selected ability so the preview composes under
+/// REAL masks: pushes an override (and, when claimed, additive) `AnimLayer` for the
+/// ability's nodes and recomputes masks, exactly like `trigger_ability_animations` does
+/// for a cast. Without this, locomotion keeps writing the ability's claimed bones and the
+/// 50/50 quaternion blend flips when a rotation crosses ±180° relative to the base pose.
+///
+/// Editor layers use `AnimLayerSource::Locomotion` — the only source
+/// `cleanup_finished_ability_layers` never drops (there is no `ActiveAbility` entity to
+/// tie them to) — and ids prefixed `editor:` so this system can own their lifecycle.
+pub fn sync_ability_preview_layers(
+    state: Res<EditorState>,
+    mut rigs: Query<(
+        &mut sprite_rig::ActiveAnimLayers,
+        &AnimSetRef,
+        &AnimationGraphHandle,
+    )>,
+    built_graphs: Res<BuiltAnimGraphs>,
+    mut graphs: ResMut<Assets<AnimationGraph>>,
+) {
+    let Ok((mut layers, animset_ref, graph_handle)) = rigs.single_mut() else {
+        trace!("editor rig not ready; no preview layers");
+        return;
+    };
+    let Some(built) = built_graphs.0.get(&animset_ref.0.id()) else {
+        trace!("anim graph not built yet; no preview layers");
+        return;
+    };
+    if !layers.entries.iter().any(|e| e.id == "locomotion") {
+        // The permanent locomotion entry is seeded by start_locomotion_blend; adding
+        // editor layers to an empty stack would make it skip seeding entirely.
+        trace!("locomotion layer not seeded yet; preview layers wait");
+        return;
+    }
+
+    let desired = match &state.selected_clip {
+        ClipSlot::Ability(id) => built
+            .ability_nodes
+            .get(id)
+            .map(|pair| {
+                let mut entries = Vec::new();
+                if pair.override_claims != 0 {
+                    entries.push(sprite_rig::AnimLayer {
+                        id: format!("editor:{id}"),
+                        node_index: pair.override_node,
+                        claims: pair.override_claims,
+                        priority: 1,
+                        mode: sprite_rig::AnimLayerMode::Override,
+                        source: sprite_rig::AnimLayerSource::Locomotion,
+                    });
+                }
+                if pair.additive_claims != 0 {
+                    entries.push(sprite_rig::AnimLayer {
+                        id: format!("editor:{id}:additive"),
+                        node_index: pair.additive_node,
+                        claims: pair.additive_claims,
+                        priority: 0,
+                        mode: sprite_rig::AnimLayerMode::Additive,
+                        source: sprite_rig::AnimLayerSource::Locomotion,
+                    });
+                }
+                entries
+            })
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+
+    let current: Vec<&sprite_rig::AnimLayer> = layers
+        .entries
+        .iter()
+        .filter(|e| e.id.starts_with("editor:"))
+        .collect();
+    let in_sync = current.len() == desired.len()
+        && current
+            .iter()
+            .zip(&desired)
+            .all(|(c, d)| c.id == d.id && c.node_index == d.node_index && c.claims == d.claims);
+    if in_sync {
+        return; // selection unchanged since last sync — steady state
+    }
+
+    layers.entries.retain(|e| !e.id.starts_with("editor:"));
+    layers.entries.extend(desired);
+    if let Some(graph) = graphs.get_mut(&graph_handle.0) {
+        sprite_rig::recompute_layer_masks(&layers.entries, graph);
+    } else {
+        debug_assert!(
+            false,
+            "rig holds an AnimationGraphHandle with no graph asset"
+        );
+    }
+}
+
 /// Releases the transport's hold on a slot's nodes after the selection moves elsewhere:
 /// locomotion nodes return to natural speed (they must keep playing); ability/hit_react
 /// nodes are stopped so their frozen pose no longer blends over the new selection.

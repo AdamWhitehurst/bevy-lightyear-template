@@ -119,7 +119,11 @@ impl ActiveAnimLayers {
 ///
 /// Pure function of `entries`. Override entries are processed in descending priority order;
 /// additive entries are processed independently.
-pub(crate) fn recompute_layer_masks(entries: &[AnimLayer], graph: &mut AnimationGraph) {
+///
+/// Public for live-edit tooling (the animation editor mirrors the in-game layer stack to
+/// preview ability clips under real masks); gameplay code goes through the trigger/cleanup
+/// systems in this module.
+pub fn recompute_layer_masks(entries: &[AnimLayer], graph: &mut AnimationGraph) {
     // Override priority chain: walk highest priority first, accumulating claimed bones.
     let mut owned_above: AnimationMask = 0;
     let mut override_entries: Vec<&AnimLayer> = entries

@@ -1,3 +1,4 @@
+pub mod audition;
 pub mod curve;
 pub mod gizmo;
 pub mod inspector;
