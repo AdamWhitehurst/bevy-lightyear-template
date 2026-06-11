@@ -1,3 +1,4 @@
+pub mod eval;
 pub mod panels;
 pub mod state;
 
@@ -46,11 +47,18 @@ impl Plugin for AnimationEditorPlugin {
                 state::drive_player_from_playhead.run_if(resource_exists::<state::EditorState>),
             ),
         );
+        // Panel order fixes the layout: the right inspector claims its column first so
+        // every bottom panel spans the remaining width (keeping the shared t→x mapping
+        // aligned across ruler/dope sheet/curve); bottom panels stack in registration
+        // order (transport lowest, then timeline, then curve). Viewport sync runs last
+        // so it sees the frame's final available_rect.
         app.add_systems(
             EguiPrimaryContextPass,
             (
+                panels::inspector::draw_inspector,
                 panels::transport::draw_transport,
                 panels::timeline::draw_timeline,
+                panels::curve::draw_curve_editor,
                 sync_camera_viewport,
             )
                 .chain()
