@@ -220,7 +220,8 @@ pub fn drive_player_from_playhead(
         .playhead
         .min(state.working.duration.next_down())
         .max(0.0);
-    for node in slot_nodes(&state.selected_clip, &state.working_set, built) {
+    let selected = slot_nodes(&state.selected_clip, &state.working_set, built);
+    for &node in &selected {
         let anim = match player.animation_mut(node) {
             Some(anim) => anim,
             None => player.play(node),
@@ -231,6 +232,25 @@ pub fn drive_player_from_playhead(
         // clip events. Transport-driven nodes can't fire them anyway — advance normalizes
         // the seek pair before triggers run; Phase 10 adds editor-side event audio.
         anim.set_seek_time(applied_t);
+    }
+
+    // Pause freezes the whole rig: non-selected locomotion nodes hold at speed 0 while
+    // paused and run naturally while playing. (The selected node is always
+    // transport-owned above; ability/hit_react nodes only play while selected.)
+    let base_speed = if state.playback == Playback::Playing {
+        1.0
+    } else {
+        0.0
+    };
+    for entry in &built.locomotion_entries {
+        if selected.contains(&entry.node_index) {
+            continue; // transport-owned this frame
+        }
+        if let Some(anim) = player.animation_mut(entry.node_index) {
+            anim.set_speed(base_speed);
+        } else {
+            trace!("locomotion node not playing yet; start_locomotion_blend seeds it");
+        }
     }
 }
 
