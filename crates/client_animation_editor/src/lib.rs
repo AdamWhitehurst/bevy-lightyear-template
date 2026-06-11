@@ -21,6 +21,16 @@ pub struct AnimationEditorPlugin;
 
 impl Plugin for AnimationEditorPlugin {
     fn build(&self, app: &mut App) {
+        // bevy_egui's auto-setup would attach the primary egui context to the first
+        // camera it sees — our viewport-shrunk 3D camera — making egui's canvas track
+        // that viewport and feedback-shrink it to nothing. The editor owns the setup
+        // instead: a dedicated full-window UI camera (spawned in `setup_editor_scene`)
+        // carries `PrimaryEguiContext`. Requires `EguiPlugin` to be added first.
+        app.world_mut()
+            .get_resource_mut::<bevy_egui::EguiGlobalSettings>()
+            .expect("add EguiPlugin before AnimationEditorPlugin")
+            .auto_create_primary_context = false;
+
         app.add_plugins(bevy::pbr::MaterialPlugin::<BillboardMaterial>::default());
         app.add_plugins(bevy::pbr::MaterialPlugin::<SpriteRigMaterial>::default());
         app.add_plugins(bevy::pbr::MaterialPlugin::<ShadowOnlyMaterial>::default());
@@ -166,6 +176,17 @@ fn setup_editor_scene(mut commands: Commands) {
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(0.0, -0.75, -16.0).looking_at(Vec3::new(0.0, -0.75, 0.0), Vec3::Y),
+    ));
+    // Dedicated full-window egui camera: renders the UI above the 3D view (order 1, no
+    // clear) and keeps egui's canvas independent of the 3D camera's shrinking viewport.
+    commands.spawn((
+        bevy_egui::PrimaryEguiContext,
+        Camera2d,
+        Camera {
+            order: 1,
+            clear_color: bevy::camera::ClearColorConfig::None,
+            ..default()
+        },
     ));
     commands.spawn((
         DirectionalLight {
