@@ -1,3 +1,4 @@
+pub mod edit;
 pub mod eval;
 pub mod panels;
 pub mod state;
@@ -45,8 +46,10 @@ impl Plugin for AnimationEditorPlugin {
                     in_state(AppState::Ready).and(not(resource_exists::<state::EditorState>)),
                 ),
                 state::drive_player_from_playhead.run_if(resource_exists::<state::EditorState>),
+                edit::rebuild_dirty_clip.run_if(resource_exists::<state::EditorState>),
             ),
         );
+        app.init_resource::<edit::AutoKey>();
         // Panel order fixes the layout: the right inspector claims its column first so
         // every bottom panel spans the remaining width (keeping the shared t→x mapping
         // aligned across ruler/dope sheet/curve); bottom panels stack in registration

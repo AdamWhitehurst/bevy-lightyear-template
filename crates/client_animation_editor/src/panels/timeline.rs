@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
+use crate::edit::apply_key_edit;
 use crate::panels::paint::{draw_diamond, draw_playhead, track_rect};
 use crate::state::{Channel, EditorState, Playback, Selection};
 
@@ -15,7 +16,11 @@ const HIT_TOLERANCE: f32 = 7.0;
 /// and `t→x` mapping so the playhead lands at the identical x in each. The initial panel
 /// height fits the working clip's rows exactly, capped at a fraction of the window (the
 /// ScrollArea handles overflow beyond the cap).
-pub fn draw_timeline(mut contexts: EguiContexts, mut state: ResMut<EditorState>) {
+pub fn draw_timeline(
+    mut contexts: EguiContexts,
+    mut state: ResMut<EditorState>,
+    mut dragging_key: Local<bool>,
+) {
     let Ok(ctx) = contexts.ctx_mut() else {
         trace!("egui context not ready; skipping timeline frame");
         return;
@@ -34,7 +39,7 @@ pub fn draw_timeline(mut contexts: EguiContexts, mut state: ResMut<EditorState>)
         .show(ctx, |ui| {
             draw_ruler(ui, &mut state);
             egui::ScrollArea::vertical().show(ui, |ui| {
-                draw_dope_sheet(ui, &mut state, &bones);
+                draw_dope_sheet(ui, &mut state, &bones, &mut dragging_key);
             });
         });
 }
@@ -115,13 +120,15 @@ fn draw_ruler(ui: &mut egui::Ui, state: &mut EditorState) {
     draw_playhead(&painter, state.t_to_x(state.playhead, track), lane);
 }
 
-/// Dope sheet: read-only view of `working.bone_timelines` in `bone_order`. One row group
-/// per bone with non-empty channel sub-tracks; a diamond per key at `t_to_x(key.time)`.
-/// Clicking a diamond selects it (no scrub); clicking empty lane area scrubs.
+/// Dope sheet over `working.bone_timelines` in `bone_order`. One row group per bone with
+/// non-empty channel sub-tracks; a diamond per key at `t_to_x(key.time)`. Clicking a
+/// diamond selects it (no scrub); dragging a diamond retimes the key live (clamped,
+/// re-sorting past neighbors); clicking/dragging empty lane area scrubs.
 fn draw_dope_sheet(
     ui: &mut egui::Ui,
     state: &mut EditorState,
     bones: &[(String, Vec<(Channel, Vec<f32>)>)],
+    dragging_key: &mut bool,
 ) {
     let total_height: f32 = bones
         .iter()
@@ -188,14 +195,29 @@ fn draw_dope_sheet(
     }
 
     if let Some(pos) = response.interact_pointer_pos() {
-        if response.clicked() {
+        if response.drag_started() {
+            match hit_test_diamond(pos, &diamonds) {
+                Some(selection) => {
+                    state.selection = selection;
+                    *dragging_key = true;
+                }
+                None => scrub_to(state, pos.x, track),
+            }
+        } else if response.clicked() {
             match hit_test_diamond(pos, &diamonds) {
                 Some(selection) => state.selection = selection,
                 None => scrub_to(state, pos.x, track),
             }
-        } else if response.dragged() && hit_test_diamond(pos, &diamonds).is_none() {
-            scrub_to(state, pos.x, track);
+        } else if response.dragged() {
+            if *dragging_key {
+                apply_key_edit(state, state.x_to_t(pos.x, track), None);
+            } else {
+                scrub_to(state, pos.x, track);
+            }
         }
+    }
+    if response.drag_stopped() {
+        *dragging_key = false;
     }
     draw_playhead(&painter, state.t_to_x(state.playhead, track), region);
 }

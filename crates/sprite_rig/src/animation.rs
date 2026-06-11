@@ -279,6 +279,25 @@ pub fn build_animation_clips(
     }
 }
 
+/// Rebuilds a source clip's override + additive `AnimationClip`s in place from an edited
+/// `SpriteAnimAsset`, preserving the pair's handles so every graph node referencing them
+/// re-evaluates the new curves. For live-edit tooling (the animation editor); the game's
+/// hot-reload path goes through `build_animation_clips`' Modified handler instead.
+/// Returns the rebuilt `(override_bones, additive_bones)` masks so callers can detect a
+/// partition flip.
+pub fn rebuild_clip_pair_in_place(
+    source: &SpriteAnimAsset,
+    bone_defaults: &[BoneAnimDefault],
+    pair: &BuiltClipPair,
+    clips: &mut Assets<AnimationClip>,
+) -> (AnimationMask, AnimationMask) {
+    let (override_clip, additive_clip, override_bones, additive_bones) =
+        build_clip_pair(source, bone_defaults);
+    let _ = clips.insert(pair.override_clip.id(), override_clip);
+    let _ = clips.insert(pair.additive_clip.id(), additive_clip);
+    (override_bones, additive_bones)
+}
+
 /// Converts a `SpriteAnimAsset` into an override + additive `AnimationClip` pair, plus the
 /// bone masks identifying which bones each side animates.
 fn build_clip_pair(

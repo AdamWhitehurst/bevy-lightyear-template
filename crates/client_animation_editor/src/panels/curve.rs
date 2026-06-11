@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use sprite_rig::asset::{BoneTimeline, CurveType};
 
+use crate::edit::{apply_key_edit, KeyValue};
 use crate::eval::{rotation_keys, sample_scalar, sample_vec2, vec2_keys};
 use crate::panels::paint::{draw_diamond, draw_playhead, track_rect};
 use crate::state::{Channel, EditorState, Selection};
@@ -15,11 +16,39 @@ const Y_COLOR: egui::Color32 = egui::Color32::from_rgb(110, 150, 230);
 /// evaluator holds the left value across the segment).
 const PLOT_SAMPLES: usize = 256;
 
+/// Pixel radius within which a drag/click grabs a key glyph.
+const GRAB_TOLERANCE: f32 = 7.0;
+
+/// What a curve-view drag edits.
+#[derive(Clone, Copy, Debug)]
+enum CurveDragTarget {
+    /// Scalar diamond: x edits time, y edits the value.
+    Scalar,
+    /// Vector top diamond: x edits time only.
+    Time,
+    /// Vector component node: x edits time, y edits this component (false = x, true = y).
+    Component { y_component: bool },
+}
+
+/// Active curve-view drag, with the value-axis range frozen at drag start so the y
+/// mapping stays stable while the edited value moves the range.
+#[derive(Clone, Copy, Debug)]
+pub struct CurveDrag {
+    target: CurveDragTarget,
+    min: f32,
+    max: f32,
+}
+
 /// Curve editor: plots the selected key's channel. Scalar (rotation) → one polyline;
 /// vector (translation/scale) → one polyline per component (green = X, blue = Y,
 /// legended). The shared playhead overlays at the same x as ruler/dope sheet. Vector
-/// keys stack their component nodes at one t under a single diamond.
-pub fn draw_curve_editor(mut contexts: EguiContexts, state: Res<EditorState>) {
+/// keys stack their component nodes at one t under a single diamond. Dragging a glyph
+/// retimes (x) and — for value glyphs — revalues (y) the key live.
+pub fn draw_curve_editor(
+    mut contexts: EguiContexts,
+    mut state: ResMut<EditorState>,
+    mut drag: Local<Option<CurveDrag>>,
+) {
     let Ok(ctx) = contexts.ctx_mut() else {
         trace!("egui context not ready; skipping curve frame");
         return;
@@ -28,32 +57,33 @@ pub fn draw_curve_editor(mut contexts: EguiContexts, state: Res<EditorState>) {
         .resizable(true)
         .default_height(PLOT_HEIGHT)
         .show(ctx, |ui| {
-            let Selection::Key { bone, channel, idx } = &state.selection else {
+            let Selection::Key { bone, channel, idx } = state.selection.clone() else {
                 ui.centered_and_justified(|ui| {
                     ui.weak("select a key in the dope sheet to plot its channel");
                 });
                 return;
             };
-            let Some(timeline) = state.working.bone_timelines.get(bone) else {
+            let Some(timeline) = state.working.bone_timelines.get(&bone).cloned() else {
                 debug_assert!(false, "selected bone '{bone}' missing from working clip");
                 return;
             };
-            draw_channel_plot(ui, &state, bone, timeline, *channel, *idx);
+            draw_channel_plot(ui, &mut state, &bone, &timeline, channel, idx, &mut drag);
         });
 }
 
-/// Lays out one plot lane and dispatches to the scalar or vector renderer.
+/// Lays out one plot lane, paints the selected channel, and applies glyph drags.
 fn draw_channel_plot(
     ui: &mut egui::Ui,
-    state: &EditorState,
+    state: &mut EditorState,
     bone: &str,
     timeline: &BoneTimeline,
     channel: Channel,
     selected_idx: usize,
+    drag: &mut Option<CurveDrag>,
 ) {
-    let (lane, _) = ui.allocate_exact_size(
+    let (lane, response) = ui.allocate_exact_size(
         egui::vec2(ui.available_width(), ui.available_height().max(60.0)),
-        egui::Sense::hover(),
+        egui::Sense::click_and_drag(),
     );
     let track = track_rect(lane);
     let painter = ui.painter_at(lane);
@@ -67,7 +97,8 @@ fn draw_channel_plot(
         ui.visuals().text_color(),
     );
 
-    match channel {
+    let mut hit_targets: Vec<(egui::Pos2, usize, CurveDragTarget)> = Vec::new();
+    let (min, max) = match channel {
         Channel::Rotation => {
             let keys = rotation_keys(timeline);
             let (min, max) = scalar_range(keys.iter().map(|k| k.1));
@@ -79,7 +110,9 @@ fn draw_channel_plot(
                     value_to_y(*value, min, max, track),
                 );
                 draw_diamond(&painter, pos, DIAMOND_SIZE, X_COLOR, idx == selected_idx);
+                hit_targets.push((pos, idx, CurveDragTarget::Scalar));
             }
+            (min, max)
         }
         Channel::Translation | Channel::Scale => {
             let keys = vec2_keys(timeline, channel);
@@ -97,26 +130,41 @@ fn draw_channel_plot(
                 let selected = idx == selected_idx;
                 // Component nodes at their value heights, stacked under one diamond at
                 // the lane top marking the shared key time.
-                painter.circle_filled(
-                    egui::pos2(x, value_to_y(value.x, min, max, track)),
-                    COMPONENT_NODE_RADIUS,
-                    X_COLOR,
-                );
-                painter.circle_filled(
-                    egui::pos2(x, value_to_y(value.y, min, max, track)),
-                    COMPONENT_NODE_RADIUS,
-                    Y_COLOR,
-                );
+                let x_pos = egui::pos2(x, value_to_y(value.x, min, max, track));
+                let y_pos = egui::pos2(x, value_to_y(value.y, min, max, track));
+                let time_pos = egui::pos2(x, track.top() + DIAMOND_SIZE + 2.0);
+                painter.circle_filled(x_pos, COMPONENT_NODE_RADIUS, X_COLOR);
+                painter.circle_filled(y_pos, COMPONENT_NODE_RADIUS, Y_COLOR);
                 draw_diamond(
                     &painter,
-                    egui::pos2(x, track.top() + DIAMOND_SIZE + 2.0),
+                    time_pos,
                     DIAMOND_SIZE,
                     egui::Color32::from_rgb(190, 170, 90),
                     selected,
                 );
+                hit_targets.push((
+                    x_pos,
+                    idx,
+                    CurveDragTarget::Component { y_component: false },
+                ));
+                hit_targets.push((y_pos, idx, CurveDragTarget::Component { y_component: true }));
+                hit_targets.push((time_pos, idx, CurveDragTarget::Time));
             }
+            (min, max)
         }
-    }
+    };
+
+    apply_curve_interaction(
+        state,
+        &response,
+        track,
+        &hit_targets,
+        bone,
+        channel,
+        min,
+        max,
+        drag,
+    );
 
     draw_playhead(&painter, state.t_to_x(state.playhead, track), lane);
 
@@ -138,6 +186,109 @@ fn draw_channel_plot(
         egui::FontId::proportional(10.0),
         label_color,
     );
+}
+
+/// Applies curve-view pointer interaction: grab-to-drag on key glyphs (select + frozen
+/// value range), click-to-select, live `apply_key_edit` while dragging.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "plain painter-context plumbing; bundling into a struct adds nothing"
+)]
+fn apply_curve_interaction(
+    state: &mut EditorState,
+    response: &egui::Response,
+    track: egui::Rect,
+    hit_targets: &[(egui::Pos2, usize, CurveDragTarget)],
+    bone: &str,
+    channel: Channel,
+    min: f32,
+    max: f32,
+    drag: &mut Option<CurveDrag>,
+) {
+    if let Some(pos) = response.interact_pointer_pos() {
+        if response.drag_started() {
+            if let Some((idx, target)) = hit_test_glyph(pos, hit_targets) {
+                state.selection = Selection::Key {
+                    bone: bone.to_string(),
+                    channel,
+                    idx,
+                };
+                *drag = Some(CurveDrag { target, min, max });
+            }
+        } else if response.clicked() {
+            if let Some((idx, _)) = hit_test_glyph(pos, hit_targets) {
+                state.selection = Selection::Key {
+                    bone: bone.to_string(),
+                    channel,
+                    idx,
+                };
+            }
+        } else if response.dragged() {
+            if let Some(active) = *drag {
+                let new_time = state.x_to_t(pos.x, track);
+                let new_value = drag_value(state, &active, pos.y, track);
+                apply_key_edit(state, new_time, new_value);
+            }
+        }
+    }
+    if response.drag_stopped() {
+        *drag = None;
+    }
+}
+
+/// The value payload for the active drag target at pointer height `y`, or `None` for
+/// time-only drags.
+fn drag_value(
+    state: &EditorState,
+    drag: &CurveDrag,
+    y: f32,
+    track: egui::Rect,
+) -> Option<KeyValue> {
+    match drag.target {
+        CurveDragTarget::Time => None,
+        CurveDragTarget::Scalar => Some(KeyValue::Scalar(y_to_value(y, drag.min, drag.max, track))),
+        CurveDragTarget::Component { y_component } => {
+            let Selection::Key { bone, channel, idx } = &state.selection else {
+                debug_assert!(false, "curve drag without key selection");
+                return None;
+            };
+            let timeline = state
+                .working
+                .bone_timelines
+                .get(bone)
+                .expect("dragged bone present in working clip");
+            let mut value = vec2_keys(timeline, *channel)
+                .get(*idx)
+                .expect("dragged key index in bounds")
+                .1;
+            let component = y_to_value(y, drag.min, drag.max, track);
+            if y_component {
+                value.y = component;
+            } else {
+                value.x = component;
+            }
+            Some(KeyValue::Vec2(value))
+        }
+    }
+}
+
+/// Returns the key index + drag target of the glyph nearest `pos` within `GRAB_TOLERANCE`.
+fn hit_test_glyph(
+    pos: egui::Pos2,
+    targets: &[(egui::Pos2, usize, CurveDragTarget)],
+) -> Option<(usize, CurveDragTarget)> {
+    targets
+        .iter()
+        .map(|(p, idx, target)| (p.distance(pos), idx, target))
+        .filter(|(d, _, _)| *d <= GRAB_TOLERANCE)
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, idx, target)| (*idx, *target))
+}
+
+/// Inverse of `value_to_y` over the same frozen range.
+fn y_to_value(y: f32, min: f32, max: f32, track: egui::Rect) -> f32 {
+    let frac = ((track.bottom() - y) / track.height()).clamp(0.0, 1.0);
+    min + frac * (max - min)
 }
 
 /// Plots a scalar key set as a sampled polyline across the track width.

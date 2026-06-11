@@ -57,6 +57,8 @@ pub struct EditorState {
     /// Rig bone names in bone-index order; fixes the dope sheet's row order (the working
     /// clip's `bone_timelines` is a `HashMap`).
     pub bone_order: Vec<String>,
+    /// Set by edits; `rebuild_dirty_clip` rebakes the live clip and clears it.
+    pub clip_dirty: bool,
 }
 
 impl EditorState {
@@ -142,6 +144,7 @@ pub fn init_editor_state(
         playback: Playback::Playing,
         selection: Selection::None,
         bone_order,
+        clip_dirty: false,
     });
 }
 
