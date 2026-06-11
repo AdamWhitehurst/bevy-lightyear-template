@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
 use sprite_rig::asset::{SpriteAnimAsset, SpriteAnimSetAsset};
-use sprite_rig::{AnimSetRef, BuiltAnimGraphs, LoadedAnimHandles};
+use sprite_rig::{AnimBoneDefaults, AnimSetRef, BuiltAnimGraphs, LoadedAnimHandles};
 
 /// Identifies which animset slot the working clip occupies.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -19,6 +19,29 @@ pub enum Playback {
     Paused,
 }
 
+/// A keyframe channel of a bone timeline.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Channel {
+    Rotation,
+    Translation,
+    Scale,
+}
+
+/// What the user has selected in the time views.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub enum Selection {
+    #[default]
+    None,
+    /// A keyframe: bone name, channel, index into that channel's key vec.
+    Key {
+        bone: String,
+        channel: Channel,
+        idx: usize,
+    },
+    /// An `AnimEventKeyframe` index in `working.events`.
+    Event(usize),
+}
+
 /// The single in-memory working model every editor view reads and every edit mutates.
 #[derive(Resource)]
 pub struct EditorState {
@@ -30,6 +53,10 @@ pub struct EditorState {
     /// Seconds, in `[0, working.duration]`.
     pub playhead: f32,
     pub playback: Playback,
+    pub selection: Selection,
+    /// Rig bone names in bone-index order; fixes the dope sheet's row order (the working
+    /// clip's `bone_timelines` is a `HashMap`).
+    pub bone_order: Vec<String>,
 }
 
 impl EditorState {
@@ -78,6 +105,7 @@ pub fn init_editor_state(
     animset_assets: Res<Assets<SpriteAnimSetAsset>>,
     anim_assets: Res<Assets<SpriteAnimAsset>>,
     loaded_handles: Res<LoadedAnimHandles>,
+    bone_defaults: Res<AnimBoneDefaults>,
 ) {
     let Ok(animset_ref) = rigs.single() else {
         trace!("editor rig not spawned yet; EditorState waits");
@@ -89,12 +117,20 @@ pub fn init_editor_state(
     };
     let default_slot = ClipSlot::Locomotion(0);
     let default_path = &animset.locomotion.entries[0].clip;
-    let Some(working) = loaded_handles
-        .0
-        .get(default_path)
-        .and_then(|handle| anim_assets.get(handle))
-    else {
+    let Some(default_handle) = loaded_handles.0.get(default_path) else {
         trace!("default clip not loaded yet; EditorState waits");
+        return;
+    };
+    let Some(working) = anim_assets.get(default_handle) else {
+        trace!("default clip not loaded yet; EditorState waits");
+        return;
+    };
+    let Some(bone_order) = bone_defaults
+        .0
+        .get(&default_handle.id())
+        .map(|defaults| defaults.iter().map(|b| b.name.clone()).collect())
+    else {
+        trace!("bone defaults not populated yet; EditorState waits");
         return;
     };
 
@@ -104,6 +140,8 @@ pub fn init_editor_state(
         selected_clip: default_slot,
         playhead: 0.0,
         playback: Playback::Playing,
+        selection: Selection::None,
+        bone_order,
     });
 }
 
@@ -130,6 +168,7 @@ pub fn select_clip(
     };
     state.working = asset.clone();
     state.playhead = 0.0;
+    state.selection = Selection::None;
 }
 
 /// Drives the editor rig's `AnimationPlayer` from the transport: ensures the selected

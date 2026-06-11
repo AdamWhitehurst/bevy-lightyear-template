@@ -38,7 +38,12 @@ impl Plugin for AnimationEditorPlugin {
         );
         app.add_systems(
             EguiPrimaryContextPass,
-            panels::transport::draw_transport.run_if(resource_exists::<state::EditorState>),
+            (
+                panels::transport::draw_transport,
+                panels::timeline::draw_timeline,
+            )
+                .chain()
+                .run_if(resource_exists::<state::EditorState>),
         );
     }
 }
