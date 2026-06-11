@@ -12,21 +12,63 @@ const DIAMOND_SIZE: f32 = 5.0;
 const HIT_TOLERANCE: f32 = 7.0;
 
 /// Timeline panel: time ruler docked above the dope sheet, both sharing the same gutter
-/// and `t→x` mapping so the playhead lands at the identical x in each.
+/// and `t→x` mapping so the playhead lands at the identical x in each. The initial panel
+/// height fits the working clip's rows exactly, capped at a fraction of the window (the
+/// ScrollArea handles overflow beyond the cap).
 pub fn draw_timeline(mut contexts: EguiContexts, mut state: ResMut<EditorState>) {
     let Ok(ctx) = contexts.ctx_mut() else {
         trace!("egui context not ready; skipping timeline frame");
         return;
     };
+    let bones = collect_bone_channels(&state);
+    let content_height: f32 = RULER_HEIGHT
+        + bones
+            .iter()
+            .map(|(_, channels)| BONE_HEADER_HEIGHT + channels.len() as f32 * CHANNEL_ROW_HEIGHT)
+            .sum::<f32>()
+        + 12.0;
+    let height_cap = ctx.content_rect().height() * 0.45;
     egui::TopBottomPanel::bottom("timeline")
         .resizable(true)
-        .default_height(240.0)
+        .default_height(content_height.min(height_cap))
         .show(ctx, |ui| {
             draw_ruler(ui, &mut state);
             egui::ScrollArea::vertical().show(ui, |ui| {
-                draw_dope_sheet(ui, &mut state);
+                draw_dope_sheet(ui, &mut state, &bones);
             });
         });
+}
+
+/// Per-bone non-empty channels with their keyframe times, in `bone_order`. Drives both
+/// the dope sheet rows and the panel's content-fitted initial height.
+fn collect_bone_channels(state: &EditorState) -> Vec<(String, Vec<(Channel, Vec<f32>)>)> {
+    state
+        .bone_order
+        .iter()
+        .filter_map(|bone| {
+            let timeline = state.working.bone_timelines.get(bone)?;
+            let mut channels = Vec::new();
+            if !timeline.rotation.is_empty() {
+                channels.push((
+                    Channel::Rotation,
+                    timeline.rotation.iter().map(|k| k.time).collect(),
+                ));
+            }
+            if !timeline.translation.is_empty() {
+                channels.push((
+                    Channel::Translation,
+                    timeline.translation.iter().map(|k| k.time).collect(),
+                ));
+            }
+            if !timeline.scale.is_empty() {
+                channels.push((
+                    Channel::Scale,
+                    timeline.scale.iter().map(|k| k.time).collect(),
+                ));
+            }
+            (!channels.is_empty()).then(|| (bone.clone(), channels))
+        })
+        .collect()
 }
 
 /// Time ruler: tick marks + the shared playhead. Clicking/dragging scrubs (seeks the
@@ -76,35 +118,11 @@ fn draw_ruler(ui: &mut egui::Ui, state: &mut EditorState) {
 /// Dope sheet: read-only view of `working.bone_timelines` in `bone_order`. One row group
 /// per bone with non-empty channel sub-tracks; a diamond per key at `t_to_x(key.time)`.
 /// Clicking a diamond selects it (no scrub); clicking empty lane area scrubs.
-fn draw_dope_sheet(ui: &mut egui::Ui, state: &mut EditorState) {
-    let bones: Vec<(String, Vec<(Channel, Vec<f32>)>)> = state
-        .bone_order
-        .iter()
-        .filter_map(|bone| {
-            let timeline = state.working.bone_timelines.get(bone)?;
-            let mut channels = Vec::new();
-            if !timeline.rotation.is_empty() {
-                channels.push((
-                    Channel::Rotation,
-                    timeline.rotation.iter().map(|k| k.time).collect(),
-                ));
-            }
-            if !timeline.translation.is_empty() {
-                channels.push((
-                    Channel::Translation,
-                    timeline.translation.iter().map(|k| k.time).collect(),
-                ));
-            }
-            if !timeline.scale.is_empty() {
-                channels.push((
-                    Channel::Scale,
-                    timeline.scale.iter().map(|k| k.time).collect(),
-                ));
-            }
-            (!channels.is_empty()).then(|| (bone.clone(), channels))
-        })
-        .collect();
-
+fn draw_dope_sheet(
+    ui: &mut egui::Ui,
+    state: &mut EditorState,
+    bones: &[(String, Vec<(Channel, Vec<f32>)>)],
+) {
     let total_height: f32 = bones
         .iter()
         .map(|(_, channels)| BONE_HEADER_HEIGHT + channels.len() as f32 * CHANNEL_ROW_HEIGHT)
@@ -121,7 +139,7 @@ fn draw_dope_sheet(ui: &mut egui::Ui, state: &mut EditorState) {
 
     let mut diamonds: Vec<(egui::Pos2, Selection)> = Vec::new();
     let mut y = region.top();
-    for (bone, channels) in &bones {
+    for (bone, channels) in bones {
         painter.text(
             egui::pos2(region.left() + 4.0, y + BONE_HEADER_HEIGHT / 2.0),
             egui::Align2::LEFT_CENTER,

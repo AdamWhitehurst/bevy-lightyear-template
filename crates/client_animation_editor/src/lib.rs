@@ -41,6 +41,7 @@ impl Plugin for AnimationEditorPlugin {
             (
                 panels::transport::draw_transport,
                 panels::timeline::draw_timeline,
+                sync_camera_viewport,
             )
                 .chain()
                 .run_if(resource_exists::<state::EditorState>),
@@ -110,6 +111,50 @@ fn satisfy_app_state_gates(
 ) {
     relay.0 = true;
     identity.0 = true;
+}
+
+/// Shrinks the editor camera's render viewport to the screen area egui leaves over, so
+/// panels never cover the rig — the scene re-centers itself in the remaining space. Runs
+/// after all panels in `EguiPrimaryContextPass` so `available_rect` reflects this frame's
+/// final layout. Converts egui's logical points to the physical pixels `Viewport` wants.
+fn sync_camera_viewport(
+    mut contexts: bevy_egui::EguiContexts,
+    mut cameras: Query<&mut Camera, With<Camera3d>>,
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+) {
+    let Ok(ctx) = contexts.ctx_mut() else {
+        trace!("egui context not ready; viewport unchanged");
+        return;
+    };
+    let Ok(window) = windows.single() else {
+        trace!("primary window missing; viewport unchanged");
+        return;
+    };
+    let Ok(mut camera) = cameras.single_mut() else {
+        trace!("editor camera missing; viewport unchanged");
+        return;
+    };
+
+    let avail = ctx.available_rect();
+    let scale = window.scale_factor();
+    let window_size = UVec2::new(window.physical_width(), window.physical_height());
+    let position = UVec2::new(
+        (avail.left() * scale).round() as u32,
+        (avail.top() * scale).round() as u32,
+    )
+    .min(window_size.saturating_sub(UVec2::ONE));
+    let size = UVec2::new(
+        (avail.width() * scale).round() as u32,
+        (avail.height() * scale).round() as u32,
+    )
+    .min(window_size.saturating_sub(position))
+    .max(UVec2::ONE);
+
+    camera.viewport = Some(bevy::camera::Viewport {
+        physical_position: position,
+        physical_size: size,
+        ..default()
+    });
 }
 
 /// Static camera framing the rig at the origin, plus a directional light. The rig
