@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use avian3d::prelude::LinearVelocity;
 use bevy::{
@@ -101,6 +101,14 @@ pub struct LocomotionNodeEntry {
 /// Pre-built animation graphs, one per animset asset.
 #[derive(Resource, Default)]
 pub struct BuiltAnimGraphs(pub HashMap<AssetId<SpriteAnimSetAsset>, BuiltAnimGraph>);
+
+/// Source-clip ids whose `blend_mode` partition changed on hot-reload, requiring a graph
+/// rebuild for every animset that references them. A clip-only change emits no
+/// `SpriteAnimSetAsset` Modified event, so `build_animation_clips` pushes the *clip* id here
+/// and `build_anim_graphs` maps clip→animset while draining (keeps the producer's param list
+/// small — the consumer already has registry + animset access).
+#[derive(Resource, Default)]
+pub struct GraphRebuildQueue(pub HashSet<AssetId<SpriteAnimAsset>>);
 
 /// Smoothed blend weights for locomotion clips, lerped toward target each frame.
 #[derive(Component)]
@@ -211,8 +219,9 @@ fn collect_animset_clip_paths(animset: &SpriteAnimSetAsset) -> Vec<&str> {
 /// assets that don't yet have a built pair. Hot-reload via `AssetEvent::Modified` updates
 /// both clips in place, preserving handle identity so existing graph nodes keep working.
 ///
-/// Hot-reload limitation: changing a bone's `blend_mode` after first build will not
-/// repartition the existing graph nodes' masks; restart the app to pick up mode changes.
+/// A hot-reload that changes a bone's `blend_mode` flips the override/additive partition,
+/// which the existing graph nodes' masks no longer match — the clip id is pushed onto
+/// `GraphRebuildQueue` so `build_anim_graphs` rebuilds affected graphs in place this frame.
 pub fn build_animation_clips(
     mut events: MessageReader<AssetEvent<SpriteAnimAsset>>,
     source_assets: Res<Assets<SpriteAnimAsset>>,
@@ -220,6 +229,7 @@ pub fn build_animation_clips(
     mut built: ResMut<BuiltAnimations>,
     loaded_handles: Res<LoadedAnimHandles>,
     bone_defaults: Res<AnimBoneDefaults>,
+    mut rebuild_queue: ResMut<GraphRebuildQueue>,
 ) {
     // Build pairs for newly-available source assets (polling handles hot-reload timing).
     for (_path, anim_handle) in loaded_handles.0.iter() {
@@ -250,7 +260,7 @@ pub fn build_animation_clips(
             let Some(source) = source_assets.get(*id) else {
                 continue;
             };
-            let Some(pair) = built.0.get(id) else {
+            let Some(pair) = built.0.get_mut(id) else {
                 continue;
             };
             let Some(bones) = bone_defaults.0.get(id) else {
@@ -259,10 +269,9 @@ pub fn build_animation_clips(
             let (override_clip, additive_clip, override_bones, additive_bones) =
                 build_clip_pair(source, bones);
             if override_bones != pair.override_bones || additive_bones != pair.additive_bones {
-                warn!(
-                    asset_id = ?id,
-                    "bone blend_mode partition changed on hot-reload; mask updates require app restart",
-                );
+                pair.override_bones = override_bones;
+                pair.additive_bones = additive_bones;
+                rebuild_queue.0.insert(*id);
             }
             let _ = clips.insert(pair.override_clip.id(), override_clip);
             let _ = clips.insert(pair.additive_clip.id(), additive_clip);
@@ -541,8 +550,16 @@ fn add_scale_curve(
     );
 }
 
-/// Builds per-animset `AnimationGraph` when all referenced clips are ready.
+/// Builds each animset's `AnimationGraph` once its clips are ready, and rebuilds it in place
+/// when the animset (or a referenced clip's blend_mode partition) changes. A single build
+/// path: the only branch is new-handle (`graphs.add`) vs in-place
+/// (`graphs.insert(existing_id, ..)` — mirrors the clip hot-reload idiom, preserving the
+/// `AnimationGraphHandle` every rig already holds). On rebuild, players bound to the animset
+/// are reset so stale `AnimationNodeIndex`es never leak; `start_locomotion_blend` re-seeds
+/// them later in this frame's chain.
 pub fn build_anim_graphs(
+    mut animset_events: MessageReader<AssetEvent<SpriteAnimSetAsset>>,
+    mut rebuild_queue: ResMut<GraphRebuildQueue>,
     registry: Res<RigRegistry>,
     animset_assets: Res<Assets<SpriteAnimSetAsset>>,
     built_anims: Res<BuiltAnimations>,
@@ -550,36 +567,139 @@ pub fn build_anim_graphs(
     bone_defaults: Res<AnimBoneDefaults>,
     mut built_graphs: ResMut<BuiltAnimGraphs>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
+    mut players: Query<(
+        &mut AnimationPlayer,
+        &mut crate::animset::ActiveAnimLayers,
+        &AnimSetRef,
+    )>,
 ) {
-    for entry in registry.entries.values() {
-        let animset_id = entry.animset_handle.id();
-        if built_graphs.0.contains_key(&animset_id) {
-            continue; // already built
-        }
+    let to_process = collect_animsets_to_build(
+        &mut animset_events,
+        &mut rebuild_queue,
+        &registry,
+        &animset_assets,
+        &loaded_handles,
+        &built_graphs,
+    );
 
+    for animset_id in to_process {
+        let Some(entry) = registry
+            .entries
+            .values()
+            .find(|e| e.animset_handle.id() == animset_id)
+        else {
+            trace!(
+                ?animset_id,
+                "(re)build requested for unknown animset; ignoring"
+            );
+            continue;
+        };
         let Some(animset) = animset_assets.get(&entry.animset_handle) else {
             continue; // not loaded yet — expected during startup
         };
-
-        if !all_clips_built(animset, &*loaded_handles, &*built_anims) {
-            continue; // clips not all built yet — expected during startup
+        if !all_clips_built(animset, &loaded_handles, &built_anims) {
+            continue; // clips not all built yet — expected during startup; first-build polls again
         }
 
-        let built =
-            build_graph_for_animset(animset, &*loaded_handles, &*built_anims, &*bone_defaults);
-        let graph_handle = graphs.add(built.0);
+        let (
+            graph,
+            node_map,
+            locomotion_entries,
+            locomotion_blend_node,
+            ability_nodes,
+            all_bones_mask,
+        ) = build_graph_for_animset(animset, &loaded_handles, &built_anims, &bone_defaults);
+
+        let graph_handle = match built_graphs.0.get(&animset_id) {
+            // Rebuild: swap in place at the existing handle, then reset bound players.
+            Some(existing) => {
+                let graph_handle = existing.graph_handle.clone();
+                let _ = graphs.insert(graph_handle.id(), graph);
+                reset_animation_players_for(animset_id, &mut players);
+                graph_handle
+            }
+            // First build: fresh handle, no players bound yet.
+            None => graphs.add(graph),
+        };
 
         built_graphs.0.insert(
             animset_id,
             BuiltAnimGraph {
                 graph_handle,
-                node_map: built.1,
-                locomotion_entries: built.2,
-                locomotion_blend_node: built.3,
-                ability_nodes: built.4,
-                all_bones_mask: built.5,
+                node_map,
+                locomotion_entries,
+                locomotion_blend_node,
+                ability_nodes,
+                all_bones_mask,
             },
         );
+    }
+}
+
+/// Collects the deduped set of animset ids to (re)build this frame:
+/// - first-build: any registry entry not yet in `built_graphs` (the per-frame poll);
+/// - rebuild: animset `Modified` events;
+/// - rebuild: drained `GraphRebuildQueue` clip ids (blend_mode partition flips), mapped to
+///   every animset whose clip paths resolve to a queued clip.
+fn collect_animsets_to_build(
+    animset_events: &mut MessageReader<AssetEvent<SpriteAnimSetAsset>>,
+    rebuild_queue: &mut GraphRebuildQueue,
+    registry: &RigRegistry,
+    animset_assets: &Assets<SpriteAnimSetAsset>,
+    loaded_handles: &LoadedAnimHandles,
+    built_graphs: &BuiltAnimGraphs,
+) -> HashSet<AssetId<SpriteAnimSetAsset>> {
+    let mut to_process = HashSet::new();
+    for entry in registry.entries.values() {
+        let id = entry.animset_handle.id();
+        if !built_graphs.0.contains_key(&id) {
+            to_process.insert(id);
+        }
+    }
+    for event in animset_events.read() {
+        if let AssetEvent::Modified { id } = event {
+            to_process.insert(*id);
+        }
+    }
+    if rebuild_queue.0.is_empty() {
+        return to_process;
+    }
+    let flipped_clips: HashSet<AssetId<SpriteAnimAsset>> = rebuild_queue.0.drain().collect();
+    for entry in registry.entries.values() {
+        let Some(animset) = animset_assets.get(&entry.animset_handle) else {
+            continue; // not loaded yet — expected during startup
+        };
+        let references_flipped_clip = collect_animset_clip_paths(animset).iter().any(|path| {
+            loaded_handles
+                .0
+                .get(*path)
+                .is_some_and(|handle| flipped_clips.contains(&handle.id()))
+        });
+        if references_flipped_clip {
+            to_process.insert(entry.animset_handle.id());
+        }
+    }
+    to_process
+}
+
+/// Clears active playback and layer state on every rig bound to `animset_id`, so that after
+/// an in-place graph swap `start_locomotion_blend` + `recompute_layer_masks` rebuild a clean
+/// stack against the new node indices later this frame. Ability casts in flight are dropped
+/// (acceptable: a graph rebuild is an authoring/hot-reload event, not a gameplay tick).
+fn reset_animation_players_for(
+    animset_id: AssetId<SpriteAnimSetAsset>,
+    players: &mut Query<(
+        &mut AnimationPlayer,
+        &mut crate::animset::ActiveAnimLayers,
+        &AnimSetRef,
+    )>,
+) {
+    for (mut player, mut layers, anim_set_ref) in players.iter_mut() {
+        if anim_set_ref.0.id() != animset_id {
+            continue; // rig bound to a different animset — untouched by this rebuild
+        }
+        player.stop_all();
+        layers.entries.clear();
     }
 }
 
@@ -818,24 +938,28 @@ pub fn attach_animation_players(
     }
 }
 
-/// Starts all locomotion clips on newly-added animation players, initializes blend weights,
-/// and seeds `ActiveAnimLayers` with the permanent locomotion layer entry.
+/// Starts all locomotion clips on players with an empty layer stack, initializes blend
+/// weights, and seeds `ActiveAnimLayers` with the permanent locomotion layer entry.
+///
+/// An empty stack means either a newly-attached player or one just reset by an in-place
+/// graph rebuild (`build_anim_graphs`) — the permanent locomotion entry is otherwise never
+/// removed, so emptiness is the re-seed signal for both cases.
 pub fn start_locomotion_blend(
     mut commands: Commands,
-    mut query: Query<
-        (
-            Entity,
-            &mut AnimationPlayer,
-            &AnimSetRef,
-            &AnimationGraphHandle,
-            &mut crate::animset::ActiveAnimLayers,
-        ),
-        Added<AnimationPlayer>,
-    >,
+    mut query: Query<(
+        Entity,
+        &mut AnimationPlayer,
+        &AnimSetRef,
+        &AnimationGraphHandle,
+        &mut crate::animset::ActiveAnimLayers,
+    )>,
     built_graphs: Res<BuiltAnimGraphs>,
     mut graph_assets: ResMut<Assets<AnimationGraph>>,
 ) {
     for (entity, mut player, animset_ref, graph_handle, mut layers) in &mut query {
+        if !layers.entries.is_empty() {
+            continue; // locomotion layer already seeded
+        }
         let built_graph = built_graphs
             .0
             .get(&animset_ref.0.id())
@@ -1015,5 +1139,309 @@ mod tests {
         let entries = make_entries(&[]);
         let w = compute_blend_weights(5.0, &entries);
         assert!(w.is_empty());
+    }
+
+    mod graph_rebuild {
+        use super::super::*;
+        use crate::asset::{
+            BoneBlendMode, BoneTimeline, CurveType, LocomotionConfig, LocomotionEntry,
+            RotationKeyframe,
+        };
+        use crate::RigRegistryEntry;
+        use protocol::CharacterType;
+
+        const IDLE_PATH: &str = "anims/test/idle.anim.ron";
+        const PUNCH_PATH: &str = "anims/test/punch.anim.ron";
+
+        fn test_anim(blend_mode: BoneBlendMode) -> SpriteAnimAsset {
+            let mut bone_timelines = HashMap::new();
+            bone_timelines.insert(
+                "root".to_string(),
+                BoneTimeline {
+                    blend_mode,
+                    rotation: vec![
+                        RotationKeyframe {
+                            time: 0.0,
+                            value: 0.0,
+                            curve: CurveType::Linear,
+                        },
+                        RotationKeyframe {
+                            time: 1.0,
+                            value: 90.0,
+                            curve: CurveType::Linear,
+                        },
+                    ],
+                    translation: vec![],
+                    scale: vec![],
+                },
+            );
+            SpriteAnimAsset {
+                name: "test".to_string(),
+                duration: 1.0,
+                looping: true,
+                bone_timelines,
+                events: vec![],
+            }
+        }
+
+        /// Builds an app with the clip+graph systems and one registered animset
+        /// (idle locomotion + punch ability), all assets inserted manually.
+        fn graph_test_app() -> (App, Handle<SpriteAnimSetAsset>, Handle<SpriteAnimAsset>) {
+            let (mut app, animset_handle, punch_handle) = clip_test_app();
+            app.add_systems(Update, build_anim_graphs.after(build_animation_clips));
+            (app, animset_handle, punch_handle)
+        }
+
+        /// Like `graph_test_app` but with only the clip builder registered, so
+        /// `GraphRebuildQueue` contents survive the frame for producer-side assertions.
+        fn clip_test_app() -> (App, Handle<SpriteAnimSetAsset>, Handle<SpriteAnimAsset>) {
+            let mut app = App::new();
+            app.add_plugins((MinimalPlugins, AssetPlugin::default()));
+            app.init_asset::<SpriteAnimAsset>();
+            app.init_asset::<SpriteAnimSetAsset>();
+            app.init_asset::<AnimationClip>();
+            app.init_asset::<AnimationGraph>();
+            app.init_resource::<BuiltAnimations>();
+            app.init_resource::<LoadedAnimHandles>();
+            app.init_resource::<BuiltAnimGraphs>();
+            app.init_resource::<AnimBoneDefaults>();
+            app.init_resource::<GraphRebuildQueue>();
+            app.add_systems(Update, build_animation_clips);
+
+            let world = app.world_mut();
+            let idle_handle = world
+                .resource_mut::<Assets<SpriteAnimAsset>>()
+                .add(test_anim(BoneBlendMode::Override));
+            let punch_handle = world
+                .resource_mut::<Assets<SpriteAnimAsset>>()
+                .add(test_anim(BoneBlendMode::Override));
+            let animset_handle =
+                world
+                    .resource_mut::<Assets<SpriteAnimSetAsset>>()
+                    .add(SpriteAnimSetAsset {
+                        rig: "rigs/test.rig.ron".to_string(),
+                        locomotion: LocomotionConfig {
+                            entries: vec![LocomotionEntry {
+                                clip: IDLE_PATH.to_string(),
+                                speed_threshold: 0.0,
+                            }],
+                        },
+                        ability_animations: HashMap::from([(
+                            "punch".to_string(),
+                            PUNCH_PATH.to_string(),
+                        )]),
+                        hit_react: None,
+                    });
+
+            let mut loaded = world.resource_mut::<LoadedAnimHandles>();
+            loaded.0.insert(IDLE_PATH.to_string(), idle_handle.clone());
+            loaded
+                .0
+                .insert(PUNCH_PATH.to_string(), punch_handle.clone());
+
+            let defaults = vec![BoneAnimDefault {
+                name: "root".to_string(),
+                default_xy: Vec2::ZERO,
+                z_order: 0.0,
+            }];
+            let mut bone_defaults = world.resource_mut::<AnimBoneDefaults>();
+            bone_defaults.0.insert(idle_handle.id(), defaults.clone());
+            bone_defaults.0.insert(punch_handle.id(), defaults);
+
+            world.insert_resource(RigRegistry {
+                entries: HashMap::from([(
+                    CharacterType::Humanoid,
+                    RigRegistryEntry {
+                        animset_handle: animset_handle.clone(),
+                        rig_handle: Handle::default(),
+                    },
+                )]),
+            });
+
+            (app, animset_handle, punch_handle)
+        }
+
+        /// Spawns a rig entity playing locomotion, with the given extra layers stacked on
+        /// top of the permanent locomotion entry.
+        fn spawn_playing_rig(
+            app: &mut App,
+            animset_handle: &Handle<SpriteAnimSetAsset>,
+            extra_layers: Vec<crate::animset::AnimLayer>,
+        ) -> Entity {
+            let built = app.world().resource::<BuiltAnimGraphs>();
+            let graph = built
+                .0
+                .get(&animset_handle.id())
+                .expect("graph must be built before spawning a rig");
+            let locomotion_node = graph.locomotion_entries[0].node_index;
+            let locomotion_blend_node = graph.locomotion_blend_node;
+            let all_bones_mask = graph.all_bones_mask;
+
+            let mut player = AnimationPlayer::default();
+            player.play(locomotion_node).repeat();
+            let mut layers = crate::animset::ActiveAnimLayers::default();
+            layers.entries.push(crate::animset::AnimLayer {
+                id: "locomotion".to_string(),
+                node_index: locomotion_blend_node,
+                claims: all_bones_mask,
+                priority: 0,
+                mode: crate::animset::AnimLayerMode::Override,
+                source: crate::animset::AnimLayerSource::Locomotion,
+            });
+            layers.entries.extend(extra_layers);
+
+            app.world_mut()
+                .spawn((player, layers, AnimSetRef(animset_handle.clone())))
+                .id()
+        }
+
+        /// Runs two updates: one for the asset-event flush, one for the systems to react.
+        fn update_twice(app: &mut App) {
+            app.update();
+            app.update();
+        }
+
+        #[test]
+        fn rebuild_mid_playback_preserves_graph_handle() {
+            let (mut app, animset_handle, _) = graph_test_app();
+            app.update();
+            let original_graph_id = app
+                .world()
+                .resource::<BuiltAnimGraphs>()
+                .0
+                .get(&animset_handle.id())
+                .expect("first build must succeed")
+                .graph_handle
+                .id();
+            let rig = spawn_playing_rig(&mut app, &animset_handle, vec![]);
+
+            app.world_mut()
+                .resource_mut::<Assets<SpriteAnimSetAsset>>()
+                .get_mut(&animset_handle)
+                .expect("animset exists");
+            update_twice(&mut app);
+
+            let built = app.world().resource::<BuiltAnimGraphs>();
+            let rebuilt = built
+                .0
+                .get(&animset_handle.id())
+                .expect("rebuild must keep the entry");
+            assert_eq!(rebuilt.graph_handle.id(), original_graph_id);
+            let layers = app
+                .world()
+                .entity(rig)
+                .get::<crate::animset::ActiveAnimLayers>()
+                .expect("rig keeps its layer stack");
+            assert!(
+                layers.entries.is_empty(),
+                "rebuild must reset the rig's layer stack"
+            );
+        }
+
+        #[test]
+        fn rebuild_clears_active_ability_layer() {
+            let (mut app, animset_handle, _) = graph_test_app();
+            app.update();
+            let punch_node = app
+                .world()
+                .resource::<BuiltAnimGraphs>()
+                .0
+                .get(&animset_handle.id())
+                .expect("first build must succeed")
+                .ability_nodes
+                .get("punch")
+                .expect("punch ability node exists")
+                .override_node;
+            let ability_entity = app.world_mut().spawn_empty().id();
+            let rig = spawn_playing_rig(
+                &mut app,
+                &animset_handle,
+                vec![crate::animset::AnimLayer {
+                    id: "punch".to_string(),
+                    node_index: punch_node,
+                    claims: 1,
+                    priority: 1,
+                    mode: crate::animset::AnimLayerMode::Override,
+                    source: crate::animset::AnimLayerSource::AbilityOverride { ability_entity },
+                }],
+            );
+
+            app.world_mut()
+                .resource_mut::<Assets<SpriteAnimSetAsset>>()
+                .get_mut(&animset_handle)
+                .expect("animset exists");
+            update_twice(&mut app);
+
+            let layers = app
+                .world()
+                .entity(rig)
+                .get::<crate::animset::ActiveAnimLayers>()
+                .expect("rig keeps its layer stack");
+            assert!(
+                layers.entries.is_empty(),
+                "rebuild must drop the in-flight ability layer"
+            );
+        }
+
+        #[test]
+        fn partition_flip_enqueues_clip_id() {
+            // Producer-only app (no build_anim_graphs draining the queue), so the
+            // enqueued clip id is observable after the flip.
+            let (mut app, _, punch_handle) = clip_test_app();
+            app.update();
+
+            app.world_mut()
+                .resource_mut::<Assets<SpriteAnimAsset>>()
+                .get_mut(&punch_handle)
+                .expect("punch clip exists")
+                .bone_timelines
+                .get_mut("root")
+                .expect("root timeline exists")
+                .blend_mode = BoneBlendMode::Additive;
+            update_twice(&mut app);
+
+            let queue = app.world().resource::<GraphRebuildQueue>();
+            assert!(
+                queue.0.contains(&punch_handle.id()),
+                "partition flip must enqueue the flipped clip id"
+            );
+        }
+
+        #[test]
+        fn partition_flip_rebuilds_graph_masks_in_place() {
+            let (mut app, animset_handle, punch_handle) = graph_test_app();
+            app.update();
+            let before = app
+                .world()
+                .resource::<BuiltAnimGraphs>()
+                .0
+                .get(&animset_handle.id())
+                .expect("first build must succeed");
+            let original_graph_id = before.graph_handle.id();
+            let punch_before = before.ability_nodes["punch"];
+            assert_ne!(punch_before.override_claims, 0);
+            assert_eq!(punch_before.additive_claims, 0);
+
+            app.world_mut()
+                .resource_mut::<Assets<SpriteAnimAsset>>()
+                .get_mut(&punch_handle)
+                .expect("punch clip exists")
+                .bone_timelines
+                .get_mut("root")
+                .expect("root timeline exists")
+                .blend_mode = BoneBlendMode::Additive;
+            update_twice(&mut app);
+
+            let after = app.world().resource::<BuiltAnimGraphs>();
+            let rebuilt = after
+                .0
+                .get(&animset_handle.id())
+                .expect("rebuild must keep the entry");
+            assert_eq!(rebuilt.graph_handle.id(), original_graph_id);
+            let punch_after = rebuilt.ability_nodes["punch"];
+            assert_eq!(punch_after.override_claims, 0);
+            assert_ne!(punch_after.additive_claims, 0);
+            assert!(app.world().resource::<GraphRebuildQueue>().0.is_empty());
+        }
     }
 }

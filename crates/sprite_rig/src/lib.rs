@@ -35,6 +35,7 @@ impl Plugin for SpriteRigPlugin {
         app.init_resource::<animation::LoadedAnimHandles>();
         app.init_resource::<animation::BuiltAnimGraphs>();
         app.init_resource::<animation::AnimBoneDefaults>();
+        app.init_resource::<animation::GraphRebuildQueue>();
         app.add_systems(Startup, load_rig_assets);
         app.add_observer(animset::on_animation_event_fired);
         app.add_systems(
