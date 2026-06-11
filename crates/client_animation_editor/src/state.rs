@@ -171,6 +171,13 @@ pub fn drive_player_from_playhead(
         state.playhead = (state.playhead + time.delta_secs()) % duration;
     }
 
+    // Strictly below the clip duration: bevy's advance wraps `seek_time %= duration` even
+    // at speed 0, which inverts the (last_seek_time, seek_time) pair when seeked exactly
+    // to the duration and panics the event-trigger system on the inverted slice range.
+    let applied_t = state
+        .playhead
+        .min(state.working.duration.next_down())
+        .max(0.0);
     for node in slot_nodes(&state.selected_clip, &state.working_set, built) {
         let anim = match player.animation_mut(node) {
             Some(anim) => anim,
@@ -178,14 +185,10 @@ pub fn drive_player_from_playhead(
         };
         anim.repeat();
         anim.set_speed(0.0);
-        if state.playhead >= anim.seek_time() {
-            // Forward: seek_to records [last, new) so clip events fire during playback.
-            anim.seek_to(state.playhead);
-        } else {
-            // Backward (scrub left or loop wrap): set both times equal — bevy's forward
-            // event-trigger path slices events[last..new] and panics when last > new.
-            anim.set_seek_time(state.playhead);
-        }
+        // set_seek_time (not seek_to): no event range is queued, so scrubbing fires no
+        // clip events. Transport-driven nodes can't fire them anyway — advance normalizes
+        // the seek pair before triggers run; Phase 10 adds editor-side event audio.
+        anim.set_seek_time(applied_t);
     }
 }
 
