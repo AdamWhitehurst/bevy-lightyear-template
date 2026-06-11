@@ -10,7 +10,7 @@ const CHANNEL_ROW_HEIGHT: f32 = 18.0;
 const BONE_HEADER_HEIGHT: f32 = 18.0;
 const DIAMOND_SIZE: f32 = 5.0;
 /// Pixel radius within which a click counts as hitting a diamond.
-const HIT_TOLERANCE: f32 = 7.0;
+const HIT_TOLERANCE: f32 = 10.0;
 
 /// Timeline panel: time ruler docked above the dope sheet, both sharing the same gutter
 /// and `t→x` mapping so the playhead lands at the identical x in each. The initial panel
@@ -196,7 +196,13 @@ fn draw_dope_sheet(
 
     if let Some(pos) = response.interact_pointer_pos() {
         if response.drag_started() {
-            match hit_test_diamond(pos, &diamonds) {
+            // Hit-test the press origin: drag_started fires after the drag threshold,
+            // by which time the pointer may have left the diamond.
+            let grab_pos = response
+                .ctx
+                .input(|i| i.pointer.press_origin())
+                .unwrap_or(pos);
+            match hit_test_diamond(grab_pos, &diamonds) {
                 Some(selection) => {
                     state.selection = selection;
                     *dragging_key = true;

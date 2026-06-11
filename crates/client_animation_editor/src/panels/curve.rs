@@ -17,7 +17,11 @@ const Y_COLOR: egui::Color32 = egui::Color32::from_rgb(110, 150, 230);
 const PLOT_SAMPLES: usize = 256;
 
 /// Pixel radius within which a drag/click grabs a key glyph.
-const GRAB_TOLERANCE: f32 = 7.0;
+const GRAB_TOLERANCE: f32 = 12.0;
+/// Vertical insets keeping glyphs clear of the pane edges (and the panel's resize
+/// handle), so edge-value keys stay grabbable.
+const VALUE_INSET_TOP: f32 = 18.0;
+const VALUE_INSET_BOTTOM: f32 = 10.0;
 
 /// What a curve-view drag edits.
 #[derive(Clone, Copy, Debug)]
@@ -207,7 +211,14 @@ fn apply_curve_interaction(
 ) {
     if let Some(pos) = response.interact_pointer_pos() {
         if response.drag_started() {
-            if let Some((idx, target)) = hit_test_glyph(pos, hit_targets) {
+            // Hit-test where the press began: egui fires drag_started only after the
+            // pointer has moved past its drag threshold, so the current position may
+            // already be off the glyph.
+            let grab_pos = response
+                .ctx
+                .input(|i| i.pointer.press_origin())
+                .unwrap_or(pos);
+            if let Some((idx, target)) = hit_test_glyph(grab_pos, hit_targets) {
                 state.selection = Selection::Key {
                     bone: bone.to_string(),
                     channel,
@@ -287,7 +298,8 @@ fn hit_test_glyph(
 
 /// Inverse of `value_to_y` over the same frozen range.
 fn y_to_value(y: f32, min: f32, max: f32, track: egui::Rect) -> f32 {
-    let frac = ((track.bottom() - y) / track.height()).clamp(0.0, 1.0);
+    let band = value_band(track);
+    let frac = ((band.bottom() - y) / band.height()).clamp(0.0, 1.0);
     min + frac * (max - min)
 }
 
@@ -330,10 +342,19 @@ fn scalar_range(values: impl Iterator<Item = f32>) -> (f32, f32) {
     (min - pad, max + pad)
 }
 
+/// The inset vertical band values map into, keeping glyphs clear of pane edges.
+fn value_band(track: egui::Rect) -> egui::Rect {
+    egui::Rect::from_min_max(
+        egui::pos2(track.left(), track.top() + VALUE_INSET_TOP),
+        egui::pos2(track.right(), track.bottom() - VALUE_INSET_BOTTOM),
+    )
+}
+
 /// Maps a channel value to a lane y (max at top).
 fn value_to_y(value: f32, min: f32, max: f32, track: egui::Rect) -> f32 {
+    let band = value_band(track);
     let frac = ((value - min) / (max - min)).clamp(0.0, 1.0);
-    track.bottom() - frac * track.height()
+    band.bottom() - frac * band.height()
 }
 
 /// Min/max axis labels in the gutter, aligned with the lane's value extremes.
