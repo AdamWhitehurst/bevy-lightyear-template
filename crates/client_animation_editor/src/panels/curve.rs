@@ -296,10 +296,12 @@ fn hit_test_glyph(
         .map(|(_, idx, target)| (*idx, *target))
 }
 
-/// Inverse of `value_to_y` over the same frozen range.
+/// Inverse of `value_to_y` over the same frozen range. Deliberately unclamped: dragging
+/// past the band edge keeps extending the value linearly (the plot's axis range re-derives
+/// from the keys each frame, so the view follows).
 fn y_to_value(y: f32, min: f32, max: f32, track: egui::Rect) -> f32 {
     let band = value_band(track);
-    let frac = ((band.bottom() - y) / band.height()).clamp(0.0, 1.0);
+    let frac = (band.bottom() - y) / band.height();
     min + frac * (max - min)
 }
 
