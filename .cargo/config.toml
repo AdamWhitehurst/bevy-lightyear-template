@@ -1,4 +1,5 @@
 [alias]
+anim-editor = "run -p client_animation_editor --example animation_editor"
 client = "run -p client"
 client-log = "make client-log"
 client-tracy = "run -p client --features tracy"

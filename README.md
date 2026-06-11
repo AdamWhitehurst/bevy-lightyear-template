@@ -65,7 +65,12 @@ cargo server-log      # run server and tee clean logs to server.log
 cargo client-log      # run client and tee clean logs to client.log
 cargo server-tracy    # run server with tracy feature
 cargo client-tracy    # run client with tracy feature
+cargo anim-editor     # run the standalone sprite-rig animation editor
 ```
+
+The animation editor (`crates/client_animation_editor`) previews a live humanoid rig
+through the real `sprite_rig` runtime (no physics or networking) for authoring
+`.anim.ron` clips.
 
 ## Nostr Identities
 

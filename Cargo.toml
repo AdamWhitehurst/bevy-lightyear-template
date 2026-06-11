@@ -2,6 +2,7 @@
 members = [
   "crates/protocol",
   "crates/client",
+  "crates/client_animation_editor",
   "crates/client_lightyear",
   "crates/server",
   "crates/server_lightyear",
