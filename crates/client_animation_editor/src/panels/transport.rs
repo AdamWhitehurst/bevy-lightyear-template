@@ -3,13 +3,15 @@ use bevy_egui::{egui, EguiContexts};
 use sprite_rig::asset::SpriteAnimAsset;
 use sprite_rig::LoadedAnimHandles;
 
+use crate::edit::AutoKey;
 use crate::state::{select_clip, ClipSlot, EditorState, Playback};
 
-/// Clip selector + play/pause + seek slider. Drives `EditorState`; the
+/// Clip selector + play/pause + seek slider + auto-key toggle. Drives `EditorState`; the
 /// `drive_player_from_playhead` system applies it to the rig's `AnimationPlayer`.
 pub fn draw_transport(
     mut contexts: EguiContexts,
     mut state: ResMut<EditorState>,
+    mut auto_key: ResMut<AutoKey>,
     anim_assets: Res<Assets<SpriteAnimAsset>>,
     loaded_handles: Res<LoadedAnimHandles>,
 ) {
@@ -22,6 +24,7 @@ pub fn draw_transport(
         ui.horizontal(|ui| {
             draw_clip_selector(ui, &mut state, &anim_assets, &loaded_handles);
             draw_play_pause(ui, &mut state);
+            ui.checkbox(&mut auto_key.0, "auto-key");
             draw_seek_slider(ui, &mut state);
         });
     });

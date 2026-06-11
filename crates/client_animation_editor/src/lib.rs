@@ -63,6 +63,9 @@ impl Plugin for AnimationEditorPlugin {
                 panels::timeline::draw_timeline,
                 panels::curve::draw_curve_editor,
                 sync_camera_viewport,
+                // After the panels so EguiWantsInput reflects this frame's UI, and after
+                // viewport sync so gizmo projection uses the final viewport rect.
+                panels::gizmo::draw_bone_gizmos,
             )
                 .chain()
                 .run_if(resource_exists::<state::EditorState>),
