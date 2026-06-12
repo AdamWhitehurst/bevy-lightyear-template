@@ -8,6 +8,18 @@ use crate::edit::{apply_key_edit, AutoKey, KeyValue};
 use crate::eval::{rotation_keys, sample_scalar, sample_vec2, vec2_keys};
 use crate::state::{Channel, EditorState, Selection};
 
+/// Which channel a gizmo drag edits: set by the transport's Move/Rotate/Scale toggle,
+/// the W/E/R hotkeys, or clicking a dope-sheet channel row (including empty rows — the
+/// only way to arm a channel that has no keys yet, which auto-key then bootstraps).
+#[derive(Resource)]
+pub struct GizmoMode(pub Channel);
+
+impl Default for GizmoMode {
+    fn default() -> Self {
+        Self(Channel::Translation)
+    }
+}
+
 /// Pixel radius of a bone gizmo handle and its grab tolerance.
 const GIZMO_RADIUS: f32 = 6.0;
 const GRAB_TOLERANCE: f32 = 10.0;
@@ -41,13 +53,16 @@ pub struct GizmoDrag {
 ///     authored value is degrees baked via `Quat::from_rotation_z` at build time);
 ///   - scale: world-XY delta → additive xy scale factors (z is forced 1.0 at build).
 ///
-/// The edited channel follows the current key selection when it is on the dragged bone,
-/// else translation. The edited key is the one at the playhead; with [`AutoKey`] on, a
-/// missing key is created at the playhead from the channel's sampled value. Drags that
-/// start over egui UI are ignored (`EguiWantsInput`).
+/// The edited channel is the current [`GizmoMode`] (W/E/R hotkeys handled here, gated on
+/// `wants_keyboard_input` so typing in a text field never switches modes). The edited
+/// key is the one at the playhead; with [`AutoKey`] on, a missing key is created at the
+/// playhead from the channel's sampled value. Drags that start over egui UI are ignored
+/// (`EguiWantsInput`).
+#[allow(clippy::too_many_arguments)]
 pub fn draw_bone_gizmos(
     mut contexts: EguiContexts,
     mut state: ResMut<EditorState>,
+    mut gizmo_mode: ResMut<GizmoMode>,
     auto_key: Res<AutoKey>,
     egui_wants_input: Res<EguiWantsInput>,
     rigs: Query<&BoneEntities>,
@@ -89,6 +104,7 @@ pub fn draw_bone_gizmos(
     }
 
     paint_gizmos(ctx, &state, &gizmos);
+    apply_mode_hotkeys(ctx, &mut gizmo_mode);
 
     let pointer_pos = ctx.input(|i| i.pointer.latest_pos());
     let primary_down = ctx.input(|i| i.pointer.primary_down());
@@ -114,6 +130,7 @@ pub fn draw_bone_gizmos(
                 .unwrap_or(Quat::IDENTITY);
             *drag = start_drag(
                 &mut state,
+                gizmo_mode.0,
                 auto_key.0,
                 bone,
                 bone_screen,
@@ -172,6 +189,26 @@ pub fn screen_delta_to_bone_value(drag: &GizmoDrag, pointer: egui::Pos2) -> KeyV
     }
 }
 
+/// Switches [`GizmoMode`] on W/E/R (move/rotate/scale, the DCC convention). Gated on
+/// `wants_keyboard_input`: while any egui widget (e.g. a text field) has keyboard focus,
+/// keystrokes are text, not hotkeys.
+fn apply_mode_hotkeys(ctx: &egui::Context, gizmo_mode: &mut GizmoMode) {
+    if ctx.wants_keyboard_input() {
+        return; // a text field owns the keyboard — expected, not a hotkey context
+    }
+    ctx.input(|i| {
+        if i.key_pressed(egui::Key::W) {
+            gizmo_mode.0 = Channel::Translation;
+        }
+        if i.key_pressed(egui::Key::E) {
+            gizmo_mode.0 = Channel::Rotation;
+        }
+        if i.key_pressed(egui::Key::R) {
+            gizmo_mode.0 = Channel::Scale;
+        }
+    });
+}
+
 /// Resolves the key a bone drag edits and captures the drag basis. Returns `None` (with a
 /// trace) when no key exists at the playhead and auto-key is off.
 #[expect(
@@ -180,6 +217,7 @@ pub fn screen_delta_to_bone_value(drag: &GizmoDrag, pointer: egui::Pos2) -> KeyV
 )]
 fn start_drag(
     state: &mut EditorState,
+    channel: Channel,
     auto_key: bool,
     bone: String,
     bone_screen: Vec2,
@@ -189,15 +227,6 @@ fn start_drag(
     viewport_offset: Vec2,
     parent_rotation: Quat,
 ) -> Option<GizmoDrag> {
-    let channel = match &state.selection {
-        Selection::Key {
-            bone: selected_bone,
-            channel,
-            ..
-        } if *selected_bone == bone => *channel,
-        _ => Channel::Translation,
-    };
-
     let Some((key_idx, key_time, start_value)) =
         resolve_target_key(state, &bone, channel, auto_key)
     else {

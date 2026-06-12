@@ -5,15 +5,18 @@ use sprite_rig::LoadedAnimHandles;
 
 use crate::edit::AutoKey;
 use crate::panels::audition::{draw_audition_controls, AuditionState};
-use crate::state::{select_clip, ClipSlot, EditorState, Playback};
+use crate::panels::gizmo::GizmoMode;
+use crate::state::{select_clip, Channel, ClipSlot, EditorState, Playback};
 
-/// Clip selector + play/pause + seek slider + auto-key toggle. Drives `EditorState`; the
-/// `drive_player_from_playhead` system applies it to the rig's `AnimationPlayer`.
+/// Clip selector + play/pause + gizmo mode toggle + seek slider + auto-key toggle.
+/// Drives `EditorState`; the `drive_player_from_playhead` system applies it to the
+/// rig's `AnimationPlayer`.
 pub fn draw_transport(
     mut contexts: EguiContexts,
     mut state: ResMut<EditorState>,
     mut auto_key: ResMut<AutoKey>,
     mut audition: ResMut<AuditionState>,
+    mut gizmo_mode: ResMut<GizmoMode>,
     anim_assets: Res<Assets<SpriteAnimAsset>>,
     loaded_handles: Res<LoadedAnimHandles>,
 ) {
@@ -26,11 +29,25 @@ pub fn draw_transport(
         ui.horizontal(|ui| {
             draw_clip_selector(ui, &mut state, &anim_assets, &loaded_handles);
             draw_play_pause(ui, &mut state);
+            draw_gizmo_mode_toggle(ui, &mut gizmo_mode);
             ui.checkbox(&mut auto_key.0, "auto-key");
             draw_audition_controls(ui, &mut audition, &state);
             draw_seek_slider(ui, &mut state);
         });
     });
+}
+
+/// Move/Rotate/Scale toggle for the bone gizmos (hotkeys W/E/R; clicking a dope-sheet
+/// channel row also sets the mode).
+fn draw_gizmo_mode_toggle(ui: &mut egui::Ui, gizmo_mode: &mut GizmoMode) {
+    for (channel, label, hotkey) in [
+        (Channel::Translation, "Move", "W"),
+        (Channel::Rotation, "Rotate", "E"),
+        (Channel::Scale, "Scale", "R"),
+    ] {
+        ui.selectable_value(&mut gizmo_mode.0, channel, label)
+            .on_hover_text(format!("gizmo drags edit the {label} channel ({hotkey})"));
+    }
 }
 
 /// ComboBox over every animset slot (locomotion entries, abilities, hit_react).

@@ -69,6 +69,7 @@ impl Plugin for AnimationEditorPlugin {
         );
         app.init_resource::<edit::AutoKey>();
         app.init_resource::<panels::audition::AuditionState>();
+        app.init_resource::<panels::gizmo::GizmoMode>();
         app.init_resource::<panels::save::SaveStatus>();
         // Panel order fixes the layout: the right inspector claims its column first so
         // every bottom panel spans the remaining width (keeping the shared t→x mapping
