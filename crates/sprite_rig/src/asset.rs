@@ -69,7 +69,7 @@ pub enum SpriteAnchorDef {
 }
 
 /// Keyframed animation for a set of bones.
-#[derive(Clone, Debug, Serialize, Deserialize, Asset, TypePath)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Asset, TypePath)]
 pub struct SpriteAnimAsset {
     pub name: String,
     pub duration: f32,
@@ -85,7 +85,7 @@ pub struct SpriteAnimAsset {
 /// at this layer's priority; `Additive` treats curves as deltas from rest and sums on top of
 /// whatever lower-priority layers wrote. See `doc/bug/per_bone_blend_modes.md` for authoring
 /// rules.
-#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct BoneTimeline {
     #[serde(default)]
     pub blend_mode: BoneBlendMode,
@@ -108,21 +108,21 @@ pub enum BoneBlendMode {
     Additive,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RotationKeyframe {
     pub time: f32,
     pub value: f32,
     pub curve: CurveType,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TranslationKeyframe {
     pub time: f32,
     pub value: Vec2,
     pub curve: CurveType,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScaleKeyframe {
     pub time: f32,
     pub value: Vec2,
@@ -138,14 +138,14 @@ pub enum CurveType {
 }
 
 /// A named event fired at a specific time during animation playback.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AnimEventKeyframe {
     pub time: f32,
     pub name: String,
 }
 
 /// Maps locomotion states and ability IDs to animation clips for a rig.
-#[derive(Clone, Debug, Serialize, Deserialize, Asset, TypePath)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Asset, TypePath)]
 pub struct SpriteAnimSetAsset {
     pub rig: String,
     pub locomotion: LocomotionConfig,
@@ -154,13 +154,13 @@ pub struct SpriteAnimSetAsset {
 }
 
 /// Locomotion blend tree configuration.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LocomotionConfig {
     pub entries: Vec<LocomotionEntry>,
 }
 
 /// A single entry in the locomotion blend tree.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LocomotionEntry {
     pub clip: String,
     pub speed_threshold: f32,

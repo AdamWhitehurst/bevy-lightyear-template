@@ -2,6 +2,7 @@ pub mod animation;
 pub mod animset;
 pub mod asset;
 pub mod curve;
+pub mod serialize;
 pub mod shadow_twin;
 pub mod spawn;
 
