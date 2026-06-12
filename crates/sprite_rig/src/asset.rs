@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Defines a character's bone hierarchy, sprite slots, and skin variants.
 #[derive(Clone, Debug, Serialize, Deserialize, Asset, TypePath)]
@@ -87,7 +87,7 @@ pub struct SpriteAnimAsset {
 /// rules.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 pub struct BoneTimeline {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "BoneBlendMode::is_default")]
     pub blend_mode: BoneBlendMode,
     pub rotation: Vec<RotationKeyframe>,
     pub translation: Vec<TranslationKeyframe>,
@@ -106,6 +106,14 @@ pub enum BoneBlendMode {
     /// curves as delta rotations (identity = no change). Scale is unsupported in this
     /// mode and emits a warning at build time.
     Additive,
+}
+
+impl BoneBlendMode {
+    /// `skip_serializing_if` predicate: the default (`Override`) is omitted from
+    /// serialized clips, matching the authored style.
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -145,11 +153,14 @@ pub struct AnimEventKeyframe {
 }
 
 /// Maps locomotion states and ability IDs to animation clips for a rig.
+///
+/// `ability_animations` is a `BTreeMap` so serialization is deterministic (sorted keys)
+/// without a custom serializer.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Asset, TypePath)]
 pub struct SpriteAnimSetAsset {
     pub rig: String,
     pub locomotion: LocomotionConfig,
-    pub ability_animations: HashMap<String, String>,
+    pub ability_animations: BTreeMap<String, String>,
     pub hit_react: Option<String>,
 }
 

@@ -1245,7 +1245,7 @@ mod tests {
                                 speed_threshold: 0.0,
                             }],
                         },
-                        ability_animations: HashMap::from([(
+                        ability_animations: std::collections::BTreeMap::from([(
                             "punch".to_string(),
                             PUNCH_PATH.to_string(),
                         )]),

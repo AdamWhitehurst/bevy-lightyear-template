@@ -178,7 +178,7 @@ mod tests {
             working_set: SpriteAnimSetAsset {
                 rig: String::new(),
                 locomotion: LocomotionConfig { entries: vec![] },
-                ability_animations: HashMap::new(),
+                ability_animations: std::collections::BTreeMap::new(),
                 hit_react: None,
             },
             selected_clip: ClipSlot::HitReact,
