@@ -1,5 +1,6 @@
 pub mod audition;
 pub mod curve;
+pub mod events;
 pub mod gizmo;
 pub mod inspector;
 pub mod paint;

@@ -1,3 +1,4 @@
+pub mod audio;
 pub mod edit;
 pub mod eval;
 pub mod panels;
@@ -37,7 +38,14 @@ impl Plugin for AnimationEditorPlugin {
         app.add_plugins(bevy::pbr::MaterialPlugin::<SpriteRigMaterial>::default());
         app.add_plugins(bevy::pbr::MaterialPlugin::<ShadowOnlyMaterial>::default());
         app.add_plugins(sprite_rig::SpriteRigPlugin);
-        app.add_systems(Startup, (satisfy_app_state_gates, setup_editor_scene));
+        app.add_systems(
+            Startup,
+            (
+                satisfy_app_state_gates,
+                setup_editor_scene,
+                audio::load_event_click_audio,
+            ),
+        );
         app.add_systems(Update, spawn_editor_rig);
         app.add_systems(
             Update,
@@ -48,6 +56,11 @@ impl Plugin for AnimationEditorPlugin {
                 state::drive_player_from_playhead.run_if(resource_exists::<state::EditorState>),
                 state::sync_ability_preview_layers.run_if(resource_exists::<state::EditorState>),
                 edit::rebuild_dirty_clip.run_if(resource_exists::<state::EditorState>),
+                // After the transport's advance so each crossing is detected the frame
+                // it happens.
+                audio::play_event_audio
+                    .run_if(resource_exists::<state::EditorState>)
+                    .after(state::drive_player_from_playhead),
                 panels::audition::set_audition_velocity,
             ),
         );
@@ -56,13 +69,15 @@ impl Plugin for AnimationEditorPlugin {
         // Panel order fixes the layout: the right inspector claims its column first so
         // every bottom panel spans the remaining width (keeping the shared t→x mapping
         // aligned across ruler/dope sheet/curve); bottom panels stack in registration
-        // order (transport lowest, then timeline, then curve). Viewport sync runs last
+        // order (transport lowest, then event lane, then timeline, then curve). Viewport
+        // sync runs last
         // so it sees the frame's final available_rect.
         app.add_systems(
             EguiPrimaryContextPass,
             (
                 panels::inspector::draw_inspector,
                 panels::transport::draw_transport,
+                panels::events::draw_event_lane,
                 panels::timeline::draw_timeline,
                 panels::curve::draw_curve_editor,
                 sync_camera_viewport,

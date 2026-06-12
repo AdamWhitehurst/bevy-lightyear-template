@@ -80,6 +80,23 @@ pub fn apply_key_edit(
     new_idx
 }
 
+/// Retimes the selected animation event: clamps `new_time` to `[0, duration]`, re-sorts
+/// `working.events` by time (dragged-last tie-break, like keys), selection follows, and
+/// marks the clip dirty so the rebake keeps the baked clip's events in sync. Returns the
+/// new index.
+///
+/// Panics without an event selection — drags originate from an event diamond.
+pub fn apply_event_retime(state: &mut EditorState, new_time: f32) -> usize {
+    let Selection::Event(idx) = state.selection else {
+        panic!("apply_event_retime without an event selection");
+    };
+    state.working.events[idx].time = new_time.clamp(0.0, state.working.duration);
+    let new_idx = reinsert_sorted(&mut state.working.events, idx, |e| e.time);
+    state.selection = Selection::Event(new_idx);
+    state.clip_dirty = true;
+    new_idx
+}
+
 /// Re-inserts `keys[idx]` at its time-sorted position and returns the new index. The
 /// moved key lands AFTER every key with time <= its own (dragged-last tie-break), so
 /// passing through a neighbor is deterministic.
@@ -234,6 +251,41 @@ mod tests {
         let rotation = &state.working.bone_timelines["root"].rotation;
         assert_eq!(rotation[0].value, 10.0);
         assert_eq!(rotation[1].value, 0.0);
+    }
+
+    fn with_events(times: &[f32]) -> EditorState {
+        let mut state = editor_state(&[0.0, 1.0]);
+        state.working.events = times
+            .iter()
+            .enumerate()
+            .map(|(i, &time)| sprite_rig::asset::AnimEventKeyframe {
+                time,
+                name: format!("ev{i}"),
+            })
+            .collect();
+        state
+    }
+
+    #[test]
+    fn event_retime_clamps_and_marks_dirty() {
+        let mut state = with_events(&[0.2, 0.8]);
+        state.selection = Selection::Event(1);
+        let idx = apply_event_retime(&mut state, 99.0);
+        assert_eq!(idx, 1);
+        assert_eq!(state.working.events[1].time, 1.0);
+        assert!(state.clip_dirty);
+    }
+
+    #[test]
+    fn event_retime_past_neighbor_resorts_and_selection_follows() {
+        let mut state = with_events(&[0.2, 0.8]);
+        state.selection = Selection::Event(1);
+        let idx = apply_event_retime(&mut state, 0.1);
+        assert_eq!(idx, 0);
+        // The dragged event kept its identity across the re-sort.
+        assert_eq!(state.working.events[0].name, "ev1");
+        assert_eq!(state.working.events[1].name, "ev0");
+        assert_eq!(state.selection, Selection::Event(0));
     }
 
     #[test]

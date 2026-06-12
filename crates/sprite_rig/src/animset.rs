@@ -549,4 +549,83 @@ mod tests {
         assert_eq!(masks[1] & breathe, 0);
         assert_eq!(masks[2] & aim, 0);
     }
+
+    /// Per-name `AnimationEventFired` counts observed during [`loop_wrap_event_fires_once`].
+    #[derive(Resource, Default)]
+    struct FireCounts(std::collections::HashMap<String, u32>);
+
+    /// At a loop wrap (`seek_time` crosses duration→0 under `.repeat()`), Bevy fires the
+    /// wrap tick's events from two slices: `time >= last_seek` (the tail, including an
+    /// event at exactly `duration`) and `time < seek` (the head, including `t = 0`). This
+    /// pins that an event at t=0 and one at t=duration each fire exactly once per loop —
+    /// no double-fire, no miss.
+    #[test]
+    fn loop_wrap_event_fires_once() {
+        use bevy::time::TimeUpdateStrategy;
+        use std::time::Duration;
+
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            bevy::animation::AnimationPlugin,
+        ));
+        // 250ms is Time<Virtual>'s default max_delta — anything larger gets clamped.
+        // 0.25 is exact in f32, so seek lands precisely on the 1.0s loop boundary.
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+            250,
+        )));
+        app.init_resource::<FireCounts>();
+        app.add_observer(
+            |trigger: On<AnimationEventFired>, mut counts: ResMut<FireCounts>| {
+                *counts
+                    .0
+                    .entry(trigger.event().event_name.clone())
+                    .or_default() += 1;
+            },
+        );
+
+        let mut clip = AnimationClip::default();
+        clip.set_duration(1.0);
+        add_events_to_clip(
+            &mut clip,
+            &[
+                AnimEventKeyframe {
+                    time: 0.0,
+                    name: "start".to_string(),
+                },
+                AnimEventKeyframe {
+                    time: 1.0,
+                    name: "end".to_string(),
+                },
+            ],
+        );
+        let clip_handle = app
+            .world_mut()
+            .resource_mut::<Assets<AnimationClip>>()
+            .add(clip);
+        let (graph, node) = AnimationGraph::from_clip(clip_handle);
+        let graph_handle = app
+            .world_mut()
+            .resource_mut::<Assets<AnimationGraph>>()
+            .add(graph);
+        let mut player = AnimationPlayer::default();
+        player.play(node).repeat();
+        app.world_mut()
+            .spawn((player, AnimationGraphHandle(graph_handle)));
+
+        // First update has zero delta (Time initializes); the next 9 advance 0.25s each,
+        // reaching t = 2.25s on a 1.0s clip — two loop completions, three loop entries.
+        for _ in 0..10 {
+            app.update();
+        }
+
+        let counts = app.world().resource::<FireCounts>();
+        // t=0 fires exactly once per loop entry (start of loops 0, 1, and 2) — the wrap's
+        // head slice (`time < seek`) never re-fires what the entering tick already fired.
+        assert_eq!(counts.0.get("start"), Some(&3));
+        // t=duration is only reachable via the wrap's tail slice (`time >= last_seek`) —
+        // exactly once per completion, never doubled by the head slice.
+        assert_eq!(counts.0.get("end"), Some(&2));
+    }
 }

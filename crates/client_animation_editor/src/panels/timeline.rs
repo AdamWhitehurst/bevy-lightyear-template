@@ -239,7 +239,8 @@ fn hit_test_diamond(pos: egui::Pos2, diamonds: &[(egui::Pos2, Selection)]) -> Op
 }
 
 /// Seeks the playhead to the time under `x`, pausing playback so the pose holds.
-fn scrub_to(state: &mut EditorState, x: f32, track: egui::Rect) {
+/// Shared with the event lane so empty-space drags scrub identically in every lane.
+pub(crate) fn scrub_to(state: &mut EditorState, x: f32, track: egui::Rect) {
     state.playhead = state.x_to_t(x, track);
     state.playback = Playback::Paused;
 }

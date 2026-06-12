@@ -9,8 +9,9 @@ use crate::state::{Channel, EditorState, Selection};
 const LOOP_EPSILON: f32 = 1e-4;
 
 /// Right-side inspector: value-at-playhead for the selected channel (via `eval`), the
-/// selected key's exact time/value, and the loop-continuity warning for looping clips.
-pub fn draw_inspector(mut contexts: EguiContexts, state: Res<EditorState>) {
+/// selected key's exact time/value, the selected event's time + editable name, and the
+/// loop-continuity warning for looping clips.
+pub fn draw_inspector(mut contexts: EguiContexts, mut state: ResMut<EditorState>) {
     let Ok(ctx) = contexts.ctx_mut() else {
         trace!("egui context not ready; skipping inspector frame");
         return;
@@ -24,12 +25,12 @@ pub fn draw_inspector(mut contexts: EguiContexts, state: Res<EditorState>) {
             ui.label(format!("looping: {}", state.working.looping));
             ui.separator();
 
-            match &state.selection {
+            match state.selection.clone() {
                 Selection::Key { bone, channel, idx } => {
-                    draw_key_details(ui, &state, bone, *channel, *idx);
+                    draw_key_details(ui, &state, &bone, channel, idx);
                 }
                 Selection::Event(idx) => {
-                    draw_event_details(ui, &state, *idx);
+                    draw_event_details(ui, &mut state, idx);
                 }
                 Selection::None => {
                     ui.weak("nothing selected");
@@ -88,14 +89,22 @@ fn draw_key_details(
     }
 }
 
-/// Selected animation event's time and name.
-fn draw_event_details(ui: &mut egui::Ui, state: &EditorState, idx: usize) {
+/// Selected animation event's time plus an editable name field. A rename marks the clip
+/// dirty so the rebake keeps the baked clip's events in sync.
+fn draw_event_details(ui: &mut egui::Ui, state: &mut EditorState, idx: usize) {
     let Some(event) = state.working.events.get(idx) else {
         debug_assert!(false, "selected event {idx} out of bounds");
         return;
     };
     ui.label(format!("event t: {:.4}s", event.time));
-    ui.label(format!("name: {}", event.name));
+    let mut name = event.name.clone();
+    ui.horizontal(|ui| {
+        ui.label("name:");
+        if ui.text_edit_singleline(&mut name).changed() {
+            state.working.events[idx].name = name;
+            state.clip_dirty = true;
+        }
+    });
 }
 
 /// For a `looping` clip, flags any channel whose value at t=0 differs from t=duration —
