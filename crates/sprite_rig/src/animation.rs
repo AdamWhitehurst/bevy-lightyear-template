@@ -356,7 +356,7 @@ fn build_override_clip(anim: &SpriteAnimAsset, bone_defaults: &[BoneAnimDefault]
                     bone_default.z_order,
                     anim.duration,
                 );
-                add_scale_curve(&mut clip, target_id, timeline);
+                add_scale_curve(&mut clip, target_id, timeline, anim.duration);
             }
             _ => {
                 add_hold_at_default_curves(
@@ -398,8 +398,8 @@ fn build_additive_clip(anim: &SpriteAnimAsset, bone_defaults: &[BoneAnimDefault]
 
         let target_id =
             AnimationTargetId::from_names(std::iter::once(&Name::new(bone_default.name.clone())));
-        add_additive_rotation_curve(&mut clip, target_id, timeline);
-        add_additive_translation_curve(&mut clip, target_id, timeline);
+        add_additive_rotation_curve(&mut clip, target_id, timeline, anim.duration);
+        add_additive_translation_curve(&mut clip, target_id, timeline, anim.duration);
         if !timeline.scale.is_empty() {
             warn!(
                 bone = %bone_default.name,
@@ -412,49 +412,86 @@ fn build_additive_clip(anim: &SpriteAnimAsset, bone_defaults: &[BoneAnimDefault]
     clip
 }
 
-/// Adds an additive rotation curve interpreting keyframe values as delta rotations.
+/// Adds an additive rotation curve interpreting keyframe values as delta rotations: two
+/// or more keys interpolate, exactly one holds its delta, none adds no curve (identity
+/// contribution under the `Add` node).
 fn add_additive_rotation_curve(
     clip: &mut AnimationClip,
     target_id: AnimationTargetId,
     timeline: &crate::asset::BoneTimeline,
+    duration: f32,
 ) {
-    if timeline.rotation.len() < 2 {
-        return;
+    let property = animated_field!(Transform::rotation);
+    match timeline.rotation.as_slice() {
+        [] => {}
+        [key] => add_constant_curve(
+            clip,
+            target_id,
+            property,
+            Quat::from_rotation_z(key.value.to_radians()),
+            duration,
+        ),
+        keyframes => {
+            let keys = keyframes
+                .iter()
+                .map(|k| (k.time, Quat::from_rotation_z(k.value.to_radians()), k.curve))
+                .collect();
+            let curve = SegmentedKeyframeCurve::new(keys)
+                .expect("Additive rotation timeline needs >= 2 keyframes");
+            clip.add_curve_to_target(target_id, AnimatableCurve::new(property, curve));
+        }
     }
-    let keys = timeline
-        .rotation
-        .iter()
-        .map(|k| (k.time, Quat::from_rotation_z(k.value.to_radians()), k.curve))
-        .collect();
-    let curve =
-        SegmentedKeyframeCurve::new(keys).expect("Additive rotation timeline needs >= 2 keyframes");
-    clip.add_curve_to_target(
-        target_id,
-        AnimatableCurve::new(animated_field!(Transform::rotation), curve),
-    );
 }
 
 /// Adds an additive translation curve interpreting keyframe values as deltas (no default
-/// offset, no z-order — those are owned by the override layer underneath).
+/// offset, no z-order — those are owned by the override layer underneath): two or more
+/// keys interpolate, exactly one holds its delta, none adds no curve.
 fn add_additive_translation_curve(
     clip: &mut AnimationClip,
     target_id: AnimationTargetId,
     timeline: &crate::asset::BoneTimeline,
+    duration: f32,
 ) {
-    if timeline.translation.len() < 2 {
-        return;
+    let property = animated_field!(Transform::translation);
+    match timeline.translation.as_slice() {
+        [] => {}
+        [key] => add_constant_curve(
+            clip,
+            target_id,
+            property,
+            Vec3::new(key.value.x, key.value.y, 0.0),
+            duration,
+        ),
+        keyframes => {
+            let keys = keyframes
+                .iter()
+                .map(|k| (k.time, Vec3::new(k.value.x, k.value.y, 0.0), k.curve))
+                .collect();
+            let curve = SegmentedKeyframeCurve::new(keys)
+                .expect("Additive translation timeline needs >= 2 keyframes");
+            clip.add_curve_to_target(target_id, AnimatableCurve::new(property, curve));
+        }
     }
-    let keys = timeline
-        .translation
-        .iter()
-        .map(|k| (k.time, Vec3::new(k.value.x, k.value.y, 0.0), k.curve))
-        .collect();
-    let curve = SegmentedKeyframeCurve::new(keys)
-        .expect("Additive translation timeline needs >= 2 keyframes");
-    clip.add_curve_to_target(
-        target_id,
-        AnimatableCurve::new(animated_field!(Transform::translation), curve),
-    );
+}
+
+/// Adds a constant curve holding `value` across the whole clip. Shared by the zero-key
+/// fallbacks (hold at default/identity) and the single-key bake (hold at the key — the
+/// standard one-key semantic, and what makes the editor's first auto-keyed key visible).
+fn add_constant_curve<P>(
+    clip: &mut AnimationClip,
+    target_id: AnimationTargetId,
+    property: P,
+    value: P::Property,
+    duration: f32,
+) where
+    P: bevy::animation::animation_curves::AnimatableProperty + Clone,
+    P::Property: Clone,
+    UnevenSampleAutoCurve<P::Property>:
+        bevy::animation::animation_curves::AnimationCompatibleCurve<P::Property>,
+{
+    let curve = UnevenSampleAutoCurve::new([(0.0, value.clone()), (duration, value)])
+        .expect("constant curve has two strictly increasing sample times");
+    clip.add_curve_to_target(target_id, AnimatableCurve::new(property, curve));
 }
 
 /// Adds identity rotation + default-position translation curves for bones not in the animation.
@@ -465,52 +502,55 @@ fn add_hold_at_default_curves(
     z_order: f32,
     duration: f32,
 ) {
-    let rot_curve = UnevenSampleAutoCurve::new([(0.0, Quat::IDENTITY), (duration, Quat::IDENTITY)])
-        .expect("Hold curve needs 2 keyframes");
-    clip.add_curve_to_target(
+    add_constant_curve(
+        clip,
         target_id,
-        AnimatableCurve::new(animated_field!(Transform::rotation), rot_curve),
+        animated_field!(Transform::rotation),
+        Quat::IDENTITY,
+        duration,
     );
-
-    let pos = Vec3::new(default_xy.x, default_xy.y, z_order);
-    let trans_curve = UnevenSampleAutoCurve::new([(0.0, pos), (duration, pos)])
-        .expect("Hold curve needs 2 keyframes");
-    clip.add_curve_to_target(
+    add_constant_curve(
+        clip,
         target_id,
-        AnimatableCurve::new(animated_field!(Transform::translation), trans_curve),
+        animated_field!(Transform::translation),
+        Vec3::new(default_xy.x, default_xy.y, z_order),
+        duration,
     );
 }
 
-/// Adds a rotation curve from keyframes, or a hold-at-identity curve if too few keyframes.
+/// Adds a rotation curve from keyframes: two or more interpolate, exactly one holds its
+/// value for the whole clip, none holds identity.
 fn add_rotation_curve(
     clip: &mut AnimationClip,
     target_id: AnimationTargetId,
     timeline: &crate::asset::BoneTimeline,
     duration: f32,
 ) {
-    if timeline.rotation.len() >= 2 {
-        let keys = timeline
-            .rotation
-            .iter()
-            .map(|k| (k.time, Quat::from_rotation_z(k.value.to_radians()), k.curve))
-            .collect();
-        let curve =
-            SegmentedKeyframeCurve::new(keys).expect("Rotation timeline needs >= 2 keyframes");
-        clip.add_curve_to_target(
+    let property = animated_field!(Transform::rotation);
+    match timeline.rotation.as_slice() {
+        [] => add_constant_curve(clip, target_id, property, Quat::IDENTITY, duration),
+        [key] => add_constant_curve(
+            clip,
             target_id,
-            AnimatableCurve::new(animated_field!(Transform::rotation), curve),
-        );
-    } else {
-        let curve = UnevenSampleAutoCurve::new([(0.0, Quat::IDENTITY), (duration, Quat::IDENTITY)])
-            .expect("Hold curve needs 2 keyframes");
-        clip.add_curve_to_target(
-            target_id,
-            AnimatableCurve::new(animated_field!(Transform::rotation), curve),
-        );
+            property,
+            Quat::from_rotation_z(key.value.to_radians()),
+            duration,
+        ),
+        keyframes => {
+            let keys = keyframes
+                .iter()
+                .map(|k| (k.time, Quat::from_rotation_z(k.value.to_radians()), k.curve))
+                .collect();
+            let curve =
+                SegmentedKeyframeCurve::new(keys).expect("Rotation timeline needs >= 2 keyframes");
+            clip.add_curve_to_target(target_id, AnimatableCurve::new(property, curve));
+        }
     }
 }
 
-/// Adds a translation curve with bone default offset and z-order baked in, or hold-at-default if too few keyframes.
+/// Adds a translation curve with bone default offset and z-order baked in: two or more
+/// keys interpolate, exactly one holds its offset for the whole clip, none holds the
+/// default position.
 fn add_translation_curve(
     clip: &mut AnimationClip,
     target_id: AnimationTargetId,
@@ -519,54 +559,58 @@ fn add_translation_curve(
     z_order: f32,
     duration: f32,
 ) {
-    if timeline.translation.len() >= 2 {
-        let keys = timeline
-            .translation
-            .iter()
-            .map(|k| {
-                (
-                    k.time,
-                    Vec3::new(default_xy.x + k.value.x, default_xy.y + k.value.y, z_order),
-                    k.curve,
-                )
-            })
-            .collect();
-        let curve =
-            SegmentedKeyframeCurve::new(keys).expect("Translation timeline needs >= 2 keyframes");
-        clip.add_curve_to_target(
+    let property = animated_field!(Transform::translation);
+    let position_of =
+        |value: Vec2| Vec3::new(default_xy.x + value.x, default_xy.y + value.y, z_order);
+    match timeline.translation.as_slice() {
+        [] => add_constant_curve(
+            clip,
             target_id,
-            AnimatableCurve::new(animated_field!(Transform::translation), curve),
-        );
-    } else {
-        let pos = Vec3::new(default_xy.x, default_xy.y, z_order);
-        let curve = UnevenSampleAutoCurve::new([(0.0, pos), (duration, pos)])
-            .expect("Hold curve needs 2 keyframes");
-        clip.add_curve_to_target(
-            target_id,
-            AnimatableCurve::new(animated_field!(Transform::translation), curve),
-        );
+            property,
+            Vec3::new(default_xy.x, default_xy.y, z_order),
+            duration,
+        ),
+        [key] => add_constant_curve(clip, target_id, property, position_of(key.value), duration),
+        keyframes => {
+            let keys = keyframes
+                .iter()
+                .map(|k| (k.time, position_of(k.value), k.curve))
+                .collect();
+            let curve = SegmentedKeyframeCurve::new(keys)
+                .expect("Translation timeline needs >= 2 keyframes");
+            clip.add_curve_to_target(target_id, AnimatableCurve::new(property, curve));
+        }
     }
 }
 
-/// Adds a scale curve from keyframes if enough exist. No auto-fill needed for scale.
+/// Adds a scale curve from keyframes: two or more interpolate, exactly one holds its
+/// value, none adds no curve (Bevy's default scale (1,1,1) is correct).
 fn add_scale_curve(
     clip: &mut AnimationClip,
     target_id: AnimationTargetId,
     timeline: &crate::asset::BoneTimeline,
+    duration: f32,
 ) {
-    if timeline.scale.len() < 2 {
-        return; // no scale animation — Bevy's default scale (1,1,1) is correct
+    let property = animated_field!(Transform::scale);
+    match timeline.scale.as_slice() {
+        [] => {}
+        [key] => add_constant_curve(
+            clip,
+            target_id,
+            property,
+            Vec3::new(key.value.x, key.value.y, 1.0),
+            duration,
+        ),
+        keyframes => {
+            let keys = keyframes
+                .iter()
+                .map(|k| (k.time, Vec3::new(k.value.x, k.value.y, 1.0), k.curve))
+                .collect();
+            let curve =
+                SegmentedKeyframeCurve::new(keys).expect("Scale timeline needs >= 2 keyframes");
+            clip.add_curve_to_target(target_id, AnimatableCurve::new(property, curve));
+        }
     }
-    let keys = timeline
-        .scale
-        .iter()
-        .map(|k| (k.time, Vec3::new(k.value.x, k.value.y, 1.0), k.curve))
-        .collect();
-    let curve = SegmentedKeyframeCurve::new(keys).expect("Scale timeline needs >= 2 keyframes");
-    clip.add_curve_to_target(
-        target_id,
-        AnimatableCurve::new(animated_field!(Transform::scale), curve),
-    );
 }
 
 /// Builds each animset's `AnimationGraph` once its clips are ready, and rebuilds it in place
@@ -1158,6 +1202,94 @@ mod tests {
         let entries = make_entries(&[]);
         let w = compute_blend_weights(5.0, &entries);
         assert!(w.is_empty());
+    }
+
+    /// Regression: a channel with exactly ONE keyframe must bake a constant curve at
+    /// that key's value — not the zero-key hold-at-default fallback. (The editor's
+    /// auto-key inserts a single key on first drag; it used to be invisible.)
+    /// Doc: doc/bug/single_key_channel_bakes_as_default.md
+    #[test]
+    fn single_key_channel_bakes_constant_at_key_value() {
+        use crate::asset::{BoneTimeline, CurveType, RotationKeyframe, TranslationKeyframe};
+
+        let mut bone_timelines = HashMap::new();
+        bone_timelines.insert(
+            "root".to_string(),
+            BoneTimeline {
+                rotation: vec![RotationKeyframe {
+                    time: 0.5,
+                    value: 90.0,
+                    curve: CurveType::Linear,
+                }],
+                translation: vec![TranslationKeyframe {
+                    time: 0.5,
+                    value: Vec2::new(1.0, 2.0),
+                    curve: CurveType::Linear,
+                }],
+                ..Default::default()
+            },
+        );
+        let anim = SpriteAnimAsset {
+            name: "single_key".to_string(),
+            duration: 1.0,
+            looping: true,
+            bone_timelines,
+            events: vec![],
+        };
+        let defaults = vec![BoneAnimDefault {
+            name: "root".to_string(),
+            default_xy: Vec2::new(10.0, 20.0),
+            z_order: 0.5,
+        }];
+
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            AssetPlugin::default(),
+            bevy::animation::AnimationPlugin,
+        ));
+        let clip = build_override_clip(&anim, &defaults);
+        let clip_handle = app
+            .world_mut()
+            .resource_mut::<Assets<AnimationClip>>()
+            .add(clip);
+        let (graph, node) = AnimationGraph::from_clip(clip_handle);
+        let graph_handle = app
+            .world_mut()
+            .resource_mut::<Assets<AnimationGraph>>()
+            .add(graph);
+        let mut player = AnimationPlayer::default();
+        player.play(node).repeat();
+        let player_entity = app
+            .world_mut()
+            .spawn((player, AnimationGraphHandle(graph_handle)))
+            .id();
+        let target_id =
+            AnimationTargetId::from_names(std::iter::once(&Name::new("root".to_string())));
+        let bone = app
+            .world_mut()
+            .spawn((target_id, AnimatedBy(player_entity), Transform::default()))
+            .id();
+
+        app.update();
+        app.update();
+
+        let transform = app.world().get::<Transform>(bone).expect("bone transform");
+        let expected_rotation = Quat::from_rotation_z(90f32.to_radians());
+        assert!(
+            transform.rotation.abs_diff_eq(expected_rotation, 1e-5),
+            "single rotation key must bake its value, got {:?}",
+            transform.rotation
+        );
+        // default_xy (10, 20) + key offset (1, 2), z from z_order.
+        let expected_translation = Vec3::new(11.0, 22.0, 0.5);
+        assert!(
+            transform
+                .translation
+                .abs_diff_eq(expected_translation, 1e-5),
+            "single translation key must bake default + offset, got {:?}",
+            transform.translation
+        );
     }
 
     mod graph_rebuild {
