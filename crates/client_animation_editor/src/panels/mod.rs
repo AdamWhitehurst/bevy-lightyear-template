@@ -4,5 +4,6 @@ pub mod events;
 pub mod gizmo;
 pub mod inspector;
 pub mod paint;
+pub mod save;
 pub mod timeline;
 pub mod transport;

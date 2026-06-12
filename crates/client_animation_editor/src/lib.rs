@@ -3,6 +3,7 @@ pub mod edit;
 pub mod eval;
 pub mod panels;
 pub mod state;
+pub mod store;
 
 use avian3d::prelude::LinearVelocity;
 use bevy::prelude::*;
@@ -44,6 +45,7 @@ impl Plugin for AnimationEditorPlugin {
                 satisfy_app_state_gates,
                 setup_editor_scene,
                 audio::load_event_click_audio,
+                setup_save_stores,
             ),
         );
         app.add_systems(Update, spawn_editor_rig);
@@ -62,10 +64,12 @@ impl Plugin for AnimationEditorPlugin {
                     .run_if(resource_exists::<state::EditorState>)
                     .after(state::drive_player_from_playhead),
                 panels::audition::set_audition_velocity,
+                panels::save::drain_save_results,
             ),
         );
         app.init_resource::<edit::AutoKey>();
         app.init_resource::<panels::audition::AuditionState>();
+        app.init_resource::<panels::save::SaveStatus>();
         // Panel order fixes the layout: the right inspector claims its column first so
         // every bottom panel spans the remaining width (keeping the shared t→x mapping
         // aligned across ruler/dope sheet/curve); bottom panels stack in registration
@@ -75,6 +79,7 @@ impl Plugin for AnimationEditorPlugin {
         app.add_systems(
             EguiPrimaryContextPass,
             (
+                panels::save::draw_save,
                 panels::inspector::draw_inspector,
                 panels::transport::draw_transport,
                 panels::events::draw_event_lane,
@@ -197,6 +202,29 @@ fn sync_camera_viewport(
         physical_size: size,
         ..default()
     });
+}
+
+/// Spawns the two persistence backend entities (clip + animset), each pairing a
+/// filesystem store rooted at the workspace `assets/` with its pending-ops component.
+/// bevy-persistence has no plugin — consumers own spawning, polling, and draining.
+fn setup_save_stores(mut commands: Commands) {
+    use persistence::{PendingStoreOps, StoreBackend};
+
+    let asset_root = store::editor_asset_root();
+    commands.spawn((
+        StoreBackend::<store::ClipPath, sprite_rig::asset::SpriteAnimAsset, _>::new(
+            store::FsAnimClipStore {
+                asset_root: asset_root.clone(),
+            },
+        ),
+        PendingStoreOps::<store::ClipPath, sprite_rig::asset::SpriteAnimAsset>::default(),
+    ));
+    commands.spawn((
+        StoreBackend::<String, sprite_rig::asset::SpriteAnimSetAsset, _>::new(
+            store::FsAnimSetStore { asset_root },
+        ),
+        PendingStoreOps::<String, sprite_rig::asset::SpriteAnimSetAsset>::default(),
+    ));
 }
 
 /// Static camera framing the rig at the origin, plus a directional light. The rig

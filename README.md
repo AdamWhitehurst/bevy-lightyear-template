@@ -70,7 +70,11 @@ cargo anim-editor     # run the standalone sprite-rig animation editor
 
 The animation editor (`crates/client_animation_editor`) previews a live humanoid rig
 through the real `sprite_rig` runtime (no physics or networking) for authoring
-`.anim.ron` clips.
+`.anim.ron` clips. The save bar writes the edited clip and the animset back to
+`assets/` as canonical deterministic RON (atomic tmp+rename; the first save of an
+authored file reformats it once, subsequent saves are byte-stable), and can assign the
+working clip to a new animset slot (locomotion entry, ability, or hit_react) with the
+live preview rebuilding its animation graph in place.
 
 ## Nostr Identities
 

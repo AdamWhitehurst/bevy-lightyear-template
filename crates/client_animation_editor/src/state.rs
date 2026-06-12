@@ -174,6 +174,126 @@ pub fn select_clip(
     state.selection = Selection::None;
 }
 
+/// How the new-clip form attaches the working clip to the animset.
+#[derive(Clone, Debug, PartialEq)]
+pub enum NewClipSlot {
+    Locomotion { speed_threshold: f32 },
+    Ability { id: String },
+    HitReact,
+}
+
+/// Assigns the current working clip to a NEW animset slot under `new_path` (the
+/// `.anim.ron` suffix is appended if missing). Registers the clip as a live asset first —
+/// source asset, `LoadedAnimHandles` entry, and bone defaults (copied from the selected
+/// clip; same rig) — so next frame's build chain (`load_animset_clips` →
+/// `build_animation_clips` → `build_anim_graphs`) treats it as already loaded instead of
+/// asking the asset server for a file that doesn't exist on disk yet. The animset
+/// write-back via `get_mut` emits `AssetEvent::Modified`, the real graph-rebuild trigger.
+/// Ends by selecting the new slot. Persisting is a separate step (Save clip + Save
+/// animset). Returns the resolved clip path, or a validation error for the status line.
+#[allow(clippy::too_many_arguments)]
+pub fn assign_new_clip(
+    state: &mut EditorState,
+    new_path: &str,
+    slot: NewClipSlot,
+    animset_ref: &AnimSetRef,
+    anim_assets: &mut Assets<SpriteAnimAsset>,
+    animset_assets: &mut Assets<SpriteAnimSetAsset>,
+    loaded_handles: &mut LoadedAnimHandles,
+    bone_defaults: &mut AnimBoneDefaults,
+) -> Result<String, String> {
+    let new_path = new_path.trim();
+    if new_path.is_empty() {
+        return Err("clip path is empty".to_string());
+    }
+    let new_path = if new_path.ends_with(".anim.ron") {
+        new_path.to_string()
+    } else {
+        format!("{new_path}.anim.ron")
+    };
+    if loaded_handles.0.contains_key(&new_path) {
+        return Err(format!("'{new_path}' is already assigned"));
+    }
+    validate_slot(&slot, &state.working_set)?;
+
+    let defaults = state
+        .selected_clip_path()
+        .and_then(|path| loaded_handles.0.get(path))
+        .and_then(|handle| bone_defaults.0.get(&handle.id()))
+        .cloned()
+        .expect("selected clip has bone defaults (rig resolved before the editor opened)");
+    let handle = anim_assets.add(state.working.clone());
+    bone_defaults.0.insert(handle.id(), defaults);
+    loaded_handles.0.insert(new_path.clone(), handle);
+
+    let new_slot = insert_slot_assignment(&mut state.working_set, slot, new_path.clone());
+    *animset_assets
+        .get_mut(&animset_ref.0)
+        .expect("editor animset asset exists") = state.working_set.clone();
+
+    select_clip(state, new_slot, anim_assets, loaded_handles);
+    Ok(new_path)
+}
+
+/// Rejects slot specs that would silently displace an existing assignment.
+fn validate_slot(slot: &NewClipSlot, working_set: &SpriteAnimSetAsset) -> Result<(), String> {
+    match slot {
+        NewClipSlot::Ability { id } if id.is_empty() => Err("ability id is empty".to_string()),
+        NewClipSlot::Ability { id } if working_set.ability_animations.contains_key(id) => {
+            Err(format!("ability '{id}' already has a clip"))
+        }
+        NewClipSlot::HitReact if working_set.hit_react.is_some() => {
+            Err("hit_react already has a clip".to_string())
+        }
+        NewClipSlot::Locomotion { speed_threshold }
+            if working_set
+                .locomotion
+                .entries
+                .iter()
+                .any(|e| e.speed_threshold == *speed_threshold) =>
+        {
+            Err(format!(
+                "a locomotion entry with threshold {speed_threshold} already exists (blend weights divide by threshold gaps)"
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Inserts the slot assignment into the working animset and returns the resulting
+/// `ClipSlot`. Locomotion entries stay sorted by `speed_threshold` (the blend tree
+/// requires ascending thresholds).
+pub(crate) fn insert_slot_assignment(
+    working_set: &mut SpriteAnimSetAsset,
+    slot: NewClipSlot,
+    path: String,
+) -> ClipSlot {
+    match slot {
+        NewClipSlot::Locomotion { speed_threshold } => {
+            let idx = working_set
+                .locomotion
+                .entries
+                .partition_point(|e| e.speed_threshold <= speed_threshold);
+            working_set.locomotion.entries.insert(
+                idx,
+                sprite_rig::asset::LocomotionEntry {
+                    clip: path,
+                    speed_threshold,
+                },
+            );
+            ClipSlot::Locomotion(idx)
+        }
+        NewClipSlot::Ability { id } => {
+            working_set.ability_animations.insert(id.clone(), path);
+            ClipSlot::Ability(id)
+        }
+        NewClipSlot::HitReact => {
+            working_set.hit_react = Some(path);
+            ClipSlot::HitReact
+        }
+    }
+}
+
 /// Drives the editor rig's `AnimationPlayer` from the transport: ensures the selected
 /// clip's node(s) are playing at speed 0 (the transport owns time for the selected clip —
 /// Bevy's natural advance would fight the playhead), advances the playhead by `dt` when
@@ -402,5 +522,107 @@ fn slot_nodes(
             .and_then(|path| built.node_map.get(path))
             .map(|&node| vec![node])
             .unwrap_or_default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sprite_rig::asset::{LocomotionConfig, LocomotionEntry};
+
+    fn animset_with_thresholds(thresholds: &[f32]) -> SpriteAnimSetAsset {
+        SpriteAnimSetAsset {
+            rig: String::new(),
+            locomotion: LocomotionConfig {
+                entries: thresholds
+                    .iter()
+                    .map(|&speed_threshold| LocomotionEntry {
+                        clip: format!("clip_{speed_threshold}"),
+                        speed_threshold,
+                    })
+                    .collect(),
+            },
+            ability_animations: std::collections::BTreeMap::new(),
+            hit_react: None,
+        }
+    }
+
+    #[test]
+    fn locomotion_assignment_inserts_sorted_by_threshold() {
+        let mut set = animset_with_thresholds(&[0.0, 6.0]);
+        let slot = insert_slot_assignment(
+            &mut set,
+            NewClipSlot::Locomotion {
+                speed_threshold: 2.0,
+            },
+            "walk.anim.ron".to_string(),
+        );
+        assert_eq!(slot, ClipSlot::Locomotion(1));
+        let thresholds: Vec<f32> = set
+            .locomotion
+            .entries
+            .iter()
+            .map(|e| e.speed_threshold)
+            .collect();
+        assert_eq!(thresholds, vec![0.0, 2.0, 6.0]);
+        assert_eq!(set.locomotion.entries[1].clip, "walk.anim.ron");
+    }
+
+    #[test]
+    fn ability_and_hit_react_assignments() {
+        let mut set = animset_with_thresholds(&[0.0]);
+        let slot = insert_slot_assignment(
+            &mut set,
+            NewClipSlot::Ability {
+                id: "kick".to_string(),
+            },
+            "kick.anim.ron".to_string(),
+        );
+        assert_eq!(slot, ClipSlot::Ability("kick".to_string()));
+        assert_eq!(set.ability_animations["kick"], "kick.anim.ron");
+
+        let slot =
+            insert_slot_assignment(&mut set, NewClipSlot::HitReact, "hit.anim.ron".to_string());
+        assert_eq!(slot, ClipSlot::HitReact);
+        assert_eq!(set.hit_react.as_deref(), Some("hit.anim.ron"));
+    }
+
+    #[test]
+    fn validate_slot_rejects_conflicts() {
+        let mut set = animset_with_thresholds(&[0.0, 2.0]);
+        set.ability_animations
+            .insert("punch".to_string(), "punch.anim.ron".to_string());
+        set.hit_react = Some("hit.anim.ron".to_string());
+
+        assert!(validate_slot(
+            &NewClipSlot::Ability {
+                id: "punch".to_string()
+            },
+            &set
+        )
+        .is_err());
+        assert!(validate_slot(&NewClipSlot::Ability { id: String::new() }, &set).is_err());
+        assert!(validate_slot(&NewClipSlot::HitReact, &set).is_err());
+        assert!(validate_slot(
+            &NewClipSlot::Locomotion {
+                speed_threshold: 2.0
+            },
+            &set
+        )
+        .is_err());
+        assert!(validate_slot(
+            &NewClipSlot::Locomotion {
+                speed_threshold: 4.0
+            },
+            &set
+        )
+        .is_ok());
+        assert!(validate_slot(
+            &NewClipSlot::Ability {
+                id: "kick".to_string()
+            },
+            &set
+        )
+        .is_ok());
     }
 }
