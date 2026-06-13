@@ -4,7 +4,7 @@ use bevy_egui::{egui, EguiContexts};
 use sprite_rig::asset::{CurveType, RotationKeyframe, ScaleKeyframe, TranslationKeyframe};
 use sprite_rig::BoneEntities;
 
-use crate::edit::{apply_key_edit, AutoKey, KeyValue};
+use crate::edit::{apply_key_edit, KeyValue};
 use crate::eval::{rotation_keys, sample_scalar, sample_vec2, vec2_keys};
 use crate::state::{Channel, EditorState, Selection};
 
@@ -55,15 +55,13 @@ pub struct GizmoDrag {
 ///
 /// The edited channel is the current [`GizmoMode`] (W/E/R hotkeys handled here, gated on
 /// `wants_keyboard_input` so typing in a text field never switches modes). The edited
-/// key is the one at the playhead; with [`AutoKey`] on, a missing key is created at the
-/// playhead from the channel's sampled value. Drags that start over egui UI are ignored
-/// (`EguiWantsInput`).
+/// key is the one at the playhead; a missing key is created at the playhead from the
+/// channel's sampled value. Drags that start over egui UI are ignored (`EguiWantsInput`).
 #[allow(clippy::too_many_arguments)]
 pub fn draw_bone_gizmos(
     mut contexts: EguiContexts,
     mut state: ResMut<EditorState>,
     mut gizmo_mode: ResMut<GizmoMode>,
-    auto_key: Res<AutoKey>,
     egui_wants_input: Res<EguiWantsInput>,
     rigs: Query<&BoneEntities>,
     bone_transforms: Query<&GlobalTransform>,
@@ -131,7 +129,6 @@ pub fn draw_bone_gizmos(
             *drag = start_drag(
                 &mut state,
                 gizmo_mode.0,
-                auto_key.0,
                 bone,
                 bone_screen,
                 pos,
@@ -209,8 +206,8 @@ fn apply_mode_hotkeys(ctx: &egui::Context, gizmo_mode: &mut GizmoMode) {
     });
 }
 
-/// Resolves the key a bone drag edits and captures the drag basis. Returns `None` (with a
-/// trace) when no key exists at the playhead and auto-key is off.
+/// Resolves the key a bone drag edits and captures the drag basis. Creates a key at the
+/// playhead when none exists; returns `None` (with a trace) only on projection failure.
 #[expect(
     clippy::too_many_arguments,
     reason = "drag-start capture needs the full projection context once"
@@ -218,7 +215,6 @@ fn apply_mode_hotkeys(ctx: &egui::Context, gizmo_mode: &mut GizmoMode) {
 fn start_drag(
     state: &mut EditorState,
     channel: Channel,
-    auto_key: bool,
     bone: String,
     bone_screen: Vec2,
     pointer: egui::Pos2,
@@ -227,16 +223,7 @@ fn start_drag(
     viewport_offset: Vec2,
     parent_rotation: Quat,
 ) -> Option<GizmoDrag> {
-    let Some((key_idx, key_time, start_value)) =
-        resolve_target_key(state, &bone, channel, auto_key)
-    else {
-        trace!(
-            bone,
-            ?channel,
-            "no key at playhead and auto-key off; drag ignored"
-        );
-        return None;
-    };
+    let (key_idx, key_time, start_value) = resolve_target_key(state, &bone, channel);
     state.selection = Selection::Key {
         bone: bone.clone(),
         channel,
@@ -284,14 +271,13 @@ fn state_bone_world(
     Some(ray.get_point(distance))
 }
 
-/// Finds (or, with auto-key, creates) the dragged channel's key at the playhead. Returns
+/// Finds, or creates at the playhead, the dragged channel's key. Returns
 /// `(index, time, authored value)`.
 fn resolve_target_key(
     state: &mut EditorState,
     bone: &str,
     channel: Channel,
-    auto_key: bool,
-) -> Option<(usize, f32, KeyValue)> {
+) -> (usize, f32, KeyValue) {
     let playhead = state.playhead;
     let timeline = state
         .working
@@ -334,14 +320,11 @@ fn resolve_target_key(
                 )
             }),
     };
-    if existing.is_some() {
+    if let Some(existing) = existing {
         return existing;
     }
-    if !auto_key {
-        return None;
-    }
 
-    // Auto-key: insert a key at the playhead holding the channel's current sampled value
+    // Insert a key at the playhead holding the channel's current sampled value
     // (or the channel identity when the channel has no keys yet).
     let inserted = match channel {
         Channel::Rotation => {
@@ -400,7 +383,7 @@ fn resolve_target_key(
         }
     };
     state.clip_dirty = true;
-    Some(inserted)
+    inserted
 }
 
 /// Paints a circle per bone, highlighted when the bone owns the current selection.

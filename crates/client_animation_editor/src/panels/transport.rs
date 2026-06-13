@@ -3,18 +3,16 @@ use bevy_egui::{egui, EguiContexts};
 use sprite_rig::asset::SpriteAnimAsset;
 use sprite_rig::LoadedAnimHandles;
 
-use crate::edit::AutoKey;
 use crate::panels::audition::{draw_audition_controls, AuditionState};
 use crate::panels::gizmo::GizmoMode;
 use crate::state::{select_clip, Channel, ClipSlot, EditorState, Playback};
 
-/// Clip selector + play/pause + gizmo mode toggle + seek slider + auto-key toggle.
+/// Clip selector + play/pause + gizmo mode toggle + seek slider.
 /// Drives `EditorState`; the `drive_player_from_playhead` system applies it to the
 /// rig's `AnimationPlayer`.
 pub fn draw_transport(
     mut contexts: EguiContexts,
     mut state: ResMut<EditorState>,
-    mut auto_key: ResMut<AutoKey>,
     mut audition: ResMut<AuditionState>,
     mut gizmo_mode: ResMut<GizmoMode>,
     anim_assets: Res<Assets<SpriteAnimAsset>>,
@@ -30,7 +28,6 @@ pub fn draw_transport(
             draw_clip_selector(ui, &mut state, &anim_assets, &loaded_handles);
             draw_play_pause(ui, &mut state);
             draw_gizmo_mode_toggle(ui, &mut gizmo_mode);
-            ui.checkbox(&mut auto_key.0, "auto-key");
             draw_audition_controls(ui, &mut audition, &state);
             draw_seek_slider(ui, &mut state);
         });

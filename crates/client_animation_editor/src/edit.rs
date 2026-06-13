@@ -3,11 +3,6 @@ use sprite_rig::{AnimBoneDefaults, BuiltAnimations, LoadedAnimHandles};
 
 use crate::state::{Channel, EditorState, Selection};
 
-/// When true, viewport/curve drags create or update a key at the playhead automatically
-/// (consumed by the bone-gizmo overlay, Phase 8).
-#[derive(Resource, Default)]
-pub struct AutoKey(pub bool);
-
 /// A keyframe value: scalar for rotation (degrees), vec2 for translation/scale.
 #[derive(Clone, Copy, Debug)]
 pub enum KeyValue {

@@ -60,7 +60,6 @@ impl Plugin for AnimationEditorPlugin {
                 panels::save::drain_save_results,
             ),
         );
-        app.init_resource::<edit::AutoKey>();
         app.init_resource::<panels::audition::AuditionState>();
         app.init_resource::<panels::gizmo::GizmoMode>();
         app.init_resource::<panels::save::SaveStatus>();
