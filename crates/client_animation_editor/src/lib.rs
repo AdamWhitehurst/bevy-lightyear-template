@@ -80,6 +80,8 @@ impl Plugin for AnimationEditorPlugin {
         app.add_systems(
             EguiPrimaryContextPass,
             (
+                // Before the panels so the frame draws the post-delete state.
+                edit::apply_delete_hotkey,
                 panels::save::draw_save,
                 panels::inspector::draw_inspector,
                 panels::transport::draw_transport,

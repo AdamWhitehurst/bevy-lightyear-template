@@ -97,6 +97,55 @@ pub fn apply_event_retime(state: &mut EditorState, new_time: f32) -> usize {
     new_idx
 }
 
+/// Deletes the selected keyframe or event on Delete. Gated on `wants_keyboard_input`
+/// (typing in a text field is text, not a hotkey) and on no active pointer press (the
+/// gizmo and timeline drags hold the selection — deleting mid-drag would yank the key
+/// out from under them).
+pub fn apply_delete_hotkey(mut contexts: bevy_egui::EguiContexts, mut state: ResMut<EditorState>) {
+    let Ok(ctx) = contexts.ctx_mut() else {
+        trace!("egui context not ready; skipping delete hotkey");
+        return;
+    };
+    if ctx.wants_keyboard_input() {
+        return; // a text field owns the keyboard — expected, not a hotkey context
+    }
+    if ctx.input(|i| i.pointer.primary_down()) {
+        trace!("delete pressed during a pointer press; ignored (drag owns the selection)");
+        return;
+    }
+    if ctx.input(|i| i.key_pressed(bevy_egui::egui::Key::Delete)) {
+        delete_selected(&mut state);
+    }
+}
+
+/// Deletes the selected keyframe (or event) from the working clip, clears the selection,
+/// and marks the clip dirty so the live rig rebakes. No-op when nothing is selected.
+pub fn delete_selected(state: &mut EditorState) {
+    match state.selection.clone() {
+        Selection::Key { bone, channel, idx } => {
+            let timeline = state
+                .working
+                .bone_timelines
+                .get_mut(&bone)
+                .unwrap_or_else(|| panic!("selected bone '{bone}' missing from working clip"));
+            match channel {
+                Channel::Rotation => drop(timeline.rotation.remove(idx)),
+                Channel::Translation => drop(timeline.translation.remove(idx)),
+                Channel::Scale => drop(timeline.scale.remove(idx)),
+            }
+        }
+        Selection::Event(idx) => {
+            state.working.events.remove(idx);
+        }
+        Selection::None => {
+            trace!("delete pressed with nothing selected; ignoring");
+            return;
+        }
+    }
+    state.selection = Selection::None;
+    state.clip_dirty = true;
+}
+
 /// Re-inserts `keys[idx]` at its time-sorted position and returns the new index. The
 /// moved key lands AFTER every key with time <= its own (dragged-last tie-break), so
 /// passing through a neighbor is deterministic.
@@ -264,6 +313,35 @@ mod tests {
             })
             .collect();
         state
+    }
+
+    #[test]
+    fn delete_selected_key_removes_and_clears_selection() {
+        let mut state = editor_state(&[0.0, 0.5, 1.0]);
+        select(&mut state, 1);
+        delete_selected(&mut state);
+        assert_eq!(times(&state), vec![0.0, 1.0]);
+        assert_eq!(state.selection, Selection::None);
+        assert!(state.clip_dirty);
+    }
+
+    #[test]
+    fn delete_selected_event_removes_and_clears_selection() {
+        let mut state = with_events(&[0.2, 0.8]);
+        state.selection = Selection::Event(0);
+        delete_selected(&mut state);
+        assert_eq!(state.working.events.len(), 1);
+        assert_eq!(state.working.events[0].name, "ev1");
+        assert_eq!(state.selection, Selection::None);
+        assert!(state.clip_dirty);
+    }
+
+    #[test]
+    fn delete_with_no_selection_is_a_no_op() {
+        let mut state = editor_state(&[0.0, 1.0]);
+        delete_selected(&mut state);
+        assert_eq!(times(&state), vec![0.0, 1.0]);
+        assert!(!state.clip_dirty);
     }
 
     #[test]
