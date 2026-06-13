@@ -350,7 +350,7 @@ pub fn drive_player_from_playhead(
         anim.set_speed(0.0);
         // set_seek_time (not seek_to): no event range is queued, so scrubbing fires no
         // clip events. Transport-driven nodes can't fire them anyway — advance normalizes
-        // the seek pair before triggers run; Phase 10 adds editor-side event audio.
+        // the seek pair before triggers run.
         anim.set_seek_time(applied_t);
     }
 

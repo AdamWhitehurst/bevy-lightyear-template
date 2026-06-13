@@ -1,4 +1,3 @@
-pub mod audio;
 pub mod edit;
 pub mod eval;
 pub mod panels;
@@ -44,7 +43,6 @@ impl Plugin for AnimationEditorPlugin {
             (
                 satisfy_app_state_gates,
                 setup_editor_scene,
-                audio::load_event_click_audio,
                 setup_save_stores,
             ),
         );
@@ -58,11 +56,6 @@ impl Plugin for AnimationEditorPlugin {
                 state::drive_player_from_playhead.run_if(resource_exists::<state::EditorState>),
                 state::sync_ability_preview_layers.run_if(resource_exists::<state::EditorState>),
                 edit::rebuild_dirty_clip.run_if(resource_exists::<state::EditorState>),
-                // After the transport's advance so each crossing is detected the frame
-                // it happens.
-                audio::play_event_audio
-                    .run_if(resource_exists::<state::EditorState>)
-                    .after(state::drive_player_from_playhead),
                 panels::audition::set_audition_velocity,
                 panels::save::drain_save_results,
             ),
