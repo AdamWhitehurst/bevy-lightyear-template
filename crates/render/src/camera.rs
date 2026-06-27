@@ -1,20 +1,30 @@
-use std::f32::consts::{FRAC_PI_2, PI, TAU};
+use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
 
-use avian3d::prelude::{Position, SpatialQuery, SpatialQueryFilter};
+use avian3d::prelude::Position;
+use bevy::camera::ScalingMode;
 use bevy::image::{ImageAddressMode, ImageLoaderSettings};
 use bevy::light::{NotShadowCaster, NotShadowReceiver};
 use bevy::mesh::Indices;
 use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
 use lightyear::prelude::*;
-use protocol::{MapInstanceId, RespawnTimer, VoxelChunk, WorldObjectId};
+use protocol::RespawnTimer;
 
-const BASE_OFFSET: Vec3 = Vec3::new(0.0, 18.0, -36.0);
+/// Camera down-tilt in degrees, measured from the horizontal. Common choices:
+/// 26.57° (2:1 pixel iso), 30° (≈ reference), 35.26° (true iso), 45° (military),
+/// 60° (near overhead). Yaw stays the 45° corner view regardless of this value.
+const CAMERA_PITCH_DEGREES: f32 = 30.0;
 const BASE_LIGHT_OFFSET: Vec3 = Vec3::new(8.0, 16.0, 8.0);
 const ORBIT_LERP_SPEED: f32 = 20.0;
-const CAMERA_OCCLUSION_PADDING: f32 = 0.75;
-const CAMERA_MIN_DISTANCE: f32 = 6.0;
-const CAMERA_COLLISION_LERP_SPEED: f32 = 18.0;
+/// Fixed camera arm length. Under orthographic projection, distance along the view
+/// axis does not change the image, so the camera sits far enough back that the whole
+/// scene stays at positive depth (in front of the `near = 0` plane) — well clear of
+/// any terrain rising toward it, yet inside the background sphere so it stays a backdrop.
+const CAMERA_DISTANCE: f32 = 100.0;
+/// World-space vertical extent the orthographic camera shows at base zoom (`scale = 1.0`).
+const CAMERA_VIEW_HEIGHT: f32 = 33.0;
+/// Frame-rate-independent approach speed for the orthographic zoom (lock-on framing).
+const CAMERA_ZOOM_LERP_SPEED: f32 = 8.0;
 /// Lock-on releases automatically beyond this player↔target distance.
 const LOCK_ON_BREAK_DISTANCE: f32 = 60.0;
 /// Extra world-space margin kept around both characters when framing a lock-on.
@@ -29,20 +39,17 @@ const BACKGROUND_TILES_Y: f32 = 4.0;
 /// Orbital camera state for discrete 90° rotation around the player.
 #[derive(Component)]
 pub struct CameraOrbitState {
-    /// Target angle in radians (one of 0, π/2, π, 3π/2)
+    /// Target yaw in radians (one of the corner rest angles 45°/135°/225°/315°).
     pub target_angle: f32,
-    /// Current angle in radians (lerps toward target)
+    /// Current yaw in radians (lerps toward target).
     pub current_angle: f32,
-    /// Current camera arm length after occlusion avoidance.
-    pub current_distance: f32,
 }
 
 impl Default for CameraOrbitState {
     fn default() -> Self {
         Self {
-            target_angle: 0.0,
-            current_angle: 0.0,
-            current_distance: BASE_OFFSET.length(),
+            target_angle: FRAC_PI_4,
+            current_angle: FRAC_PI_4,
         }
     }
 }
@@ -56,14 +63,20 @@ pub struct LockOnTarget {
     pub side: f32,
 }
 
-/// Removes the lock and snaps the orbit target back onto the discrete 90° grid.
+/// Removes the lock and snaps the orbit target back onto the discrete corner grid.
 pub fn release_lock_on(
     commands: &mut Commands,
     camera_entity: Entity,
     orbit: &mut CameraOrbitState,
 ) {
-    orbit.target_angle = (orbit.target_angle / FRAC_PI_2).round() * FRAC_PI_2;
+    orbit.target_angle = nearest_orbit_rest_angle(orbit.target_angle);
     commands.entity(camera_entity).remove::<LockOnTarget>();
+}
+
+/// Snaps a yaw to the nearest 45°-offset corner rest angle (45°/135°/225°/315°),
+/// the orientations that view axis-aligned world geometry corner-on.
+fn nearest_orbit_rest_angle(angle: f32) -> f32 {
+    ((angle - FRAC_PI_4) / FRAC_PI_2).round() * FRAC_PI_2 + FRAC_PI_4
 }
 
 /// Marker for the main scene light that follows camera rotation.
@@ -74,15 +87,30 @@ pub struct MainLight;
 #[derive(Component)]
 pub struct BackgroundSphere;
 
+/// Unit camera-arm direction (camera position relative to its anchor) at the rest yaw,
+/// before the orbit yaw is applied. Tilt comes from [`CAMERA_PITCH_DEGREES`].
+fn base_camera_direction() -> Vec3 {
+    let pitch = CAMERA_PITCH_DEGREES.to_radians();
+    Vec3::new(0.0, pitch.sin(), -pitch.cos())
+}
+
 pub(crate) fn setup_camera(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let camera_transform = Transform::from_xyz(0.0, 18.0, -36.0).looking_at(Vec3::ZERO, Dir3::Y);
+    let rest_direction = Quat::from_rotation_y(FRAC_PI_4) * base_camera_direction();
+    let camera_transform = Transform::from_translation(rest_direction * CAMERA_DISTANCE)
+        .looking_at(Vec3::ZERO, Dir3::Y);
     commands.spawn((
         Camera3d::default(),
+        Projection::Orthographic(OrthographicProjection {
+            scaling_mode: ScalingMode::FixedVertical {
+                viewport_height: CAMERA_VIEW_HEIGHT,
+            },
+            ..OrthographicProjection::default_3d()
+        }),
         camera_transform,
         CameraOrbitState::default(),
     ));
@@ -255,153 +283,77 @@ fn lock_on_target_angle(to_target: Vec3, side: f32) -> f32 {
 
 pub(crate) fn follow_player(
     time: Res<Time>,
-    spatial_query: SpatialQuery,
-    player_query: Query<(Entity, &Position, Option<&MapInstanceId>), With<Controlled>>,
+    player_query: Query<&Position, With<Controlled>>,
     target_positions: Query<&Position, Without<Controlled>>,
-    map_ids: Query<&MapInstanceId>,
-    occluders: Query<(), Or<(With<WorldObjectId>, With<VoxelChunk>, With<Mesh3d>)>>,
     mut camera_query: Query<
         (
             &mut Transform,
-            &mut CameraOrbitState,
+            &CameraOrbitState,
             Option<&LockOnTarget>,
-            &Projection,
+            &mut Projection,
         ),
         With<Camera3d>,
     >,
 ) {
-    let Ok((player_entity, player_pos, player_map)) = player_query.single() else {
+    let Ok(player_pos) = player_query.single() else {
         trace!("follow_player: controlled player is not available yet");
         return;
     };
-    let Ok((mut camera_transform, mut orbit, lock, projection)) = camera_query.single_mut() else {
+    let Ok((mut camera_transform, orbit, lock, mut projection)) = camera_query.single_mut() else {
         trace!("follow_player: camera is not available yet");
         return;
     };
 
-    let frame = camera_frame(
-        player_entity,
-        player_pos.0,
-        lock,
-        &target_positions,
-        projection,
-    );
-    let desired_offset = Quat::from_rotation_y(orbit.current_angle) * BASE_OFFSET;
-    let desired_direction = Dir3::new(desired_offset.normalize())
-        .expect("BASE_OFFSET must be non-zero so the camera can follow the player");
-    let target_distance = occlusion_adjusted_camera_distance(
-        frame.anchor,
-        &frame.excluded,
-        player_map,
-        desired_direction,
-        frame.desired_distance,
-        &spatial_query,
-        &map_ids,
-        &occluders,
-    );
-
-    let lerp_factor = (CAMERA_COLLISION_LERP_SPEED * time.delta_secs()).min(1.0);
-    orbit.current_distance += (target_distance - orbit.current_distance) * lerp_factor;
-    camera_transform.translation =
-        frame.anchor + desired_direction.as_vec3() * orbit.current_distance;
+    let frame = camera_frame(player_pos.0, lock, &target_positions);
+    let desired_offset = Quat::from_rotation_y(orbit.current_angle) * base_camera_direction();
+    let desired_direction = Dir3::new(desired_offset)
+        .expect("base_camera_direction must be non-zero so the camera can follow the player");
+    // Orthographic distance does not affect the image, so the camera sits at a fixed
+    // far arm length that keeps the whole scene at positive depth (`near = 0`).
+    camera_transform.translation = frame.anchor + desired_direction.as_vec3() * CAMERA_DISTANCE;
     camera_transform.look_at(frame.anchor, Dir3::Y);
+
+    let zoom_lerp = (CAMERA_ZOOM_LERP_SPEED * time.delta_secs()).min(1.0);
+    let Projection::Orthographic(ortho) = &mut *projection else {
+        panic!("isometric camera requires an orthographic projection");
+    };
+    ortho.scale += (frame.desired_scale - ortho.scale) * zoom_lerp;
 }
 
-/// Where the camera looks, how far back it sits, and which entities its occlusion ray ignores.
+/// Where the camera looks and how far the orthographic projection is zoomed out.
 struct CameraFrame {
     anchor: Vec3,
-    desired_distance: f32,
-    excluded: Vec<Entity>,
+    desired_scale: f32,
 }
 
-/// Frames the player alone, or the midpoint of player and lock-on target with enough
-/// arm length to keep both visible.
+/// Frames the player alone, or the midpoint of player and lock-on target zoomed out
+/// enough to keep both visible.
 fn camera_frame(
-    player_entity: Entity,
     player_pos: Vec3,
     lock: Option<&LockOnTarget>,
     target_positions: &Query<&Position, Without<Controlled>>,
-    projection: &Projection,
 ) -> CameraFrame {
-    let locked_target = lock.and_then(|lock| {
-        target_positions
-            .get(lock.target)
-            .ok()
-            .map(|pos| (lock.target, pos.0))
-    });
+    let locked_target =
+        lock.and_then(|lock| target_positions.get(lock.target).ok().map(|pos| pos.0));
     match locked_target {
-        Some((target_entity, target_pos)) => CameraFrame {
+        Some(target_pos) => CameraFrame {
             anchor: player_pos.midpoint(target_pos),
-            desired_distance: lock_on_framing_distance(
-                player_pos.distance(target_pos),
-                tan_half_horizontal_fov(projection),
-            ),
-            excluded: vec![player_entity, target_entity],
+            desired_scale: lock_on_framing_scale(player_pos.distance(target_pos)),
         },
         // steer_lock_on_camera releases stale locks; a dangling lock this frame
         // simply frames the player until the release command applies.
         None => CameraFrame {
             anchor: player_pos,
-            desired_distance: BASE_OFFSET.length(),
-            excluded: vec![player_entity],
+            desired_scale: 1.0,
         },
     }
 }
 
-/// Arm length that keeps both lock-on participants inside the horizontal FOV,
-/// never closer than the base orbit distance.
-fn lock_on_framing_distance(separation: f32, tan_half_hfov: f32) -> f32 {
-    let required = (separation * 0.5 + LOCK_ON_FRAME_MARGIN) / tan_half_hfov;
-    required.max(BASE_OFFSET.length())
-}
-
-/// Half-FOV tangent along the screen's horizontal axis.
-fn tan_half_horizontal_fov(projection: &Projection) -> f32 {
-    let Projection::Perspective(perspective) = projection else {
-        panic!("lock-on camera framing requires a perspective projection");
-    };
-    (perspective.fov * 0.5).tan() * perspective.aspect_ratio
-}
-
-/// Returns the camera arm length clamped in front of the nearest opaque-ish collider.
-fn occlusion_adjusted_camera_distance(
-    anchor: Vec3,
-    excluded: &[Entity],
-    player_map: Option<&MapInstanceId>,
-    desired_direction: Dir3,
-    desired_distance: f32,
-    spatial_query: &SpatialQuery,
-    map_ids: &Query<&MapInstanceId>,
-    occluders: &Query<(), Or<(With<WorldObjectId>, With<VoxelChunk>, With<Mesh3d>)>>,
-) -> f32 {
-    let filter = SpatialQueryFilter::from_excluded_entities(excluded.iter().copied());
-    spatial_query
-        .cast_ray_predicate(
-            anchor,
-            desired_direction,
-            desired_distance,
-            true,
-            &filter,
-            &|entity| is_camera_occluder(entity, player_map, map_ids, occluders),
-        )
-        .map(|hit| (hit.distance - CAMERA_OCCLUSION_PADDING).max(CAMERA_MIN_DISTANCE))
-        .unwrap_or(desired_distance)
-}
-
-/// Treats world objects, voxel chunks, and mesh collider entities as camera occluders.
-fn is_camera_occluder(
-    entity: Entity,
-    player_map: Option<&MapInstanceId>,
-    map_ids: &Query<&MapInstanceId>,
-    occluders: &Query<(), Or<(With<WorldObjectId>, With<VoxelChunk>, With<Mesh3d>)>>,
-) -> bool {
-    if !occluders.contains(entity) {
-        return false;
-    }
-    match (player_map, map_ids.get(entity).ok()) {
-        (Some(player_map), Some(entity_map)) => player_map == entity_map,
-        _ => true,
-    }
+/// Orthographic zoom multiplier that keeps both lock-on participants in frame,
+/// never tighter than the base zoom. Fits the separation to the vertical extent,
+/// which guarantees both stay visible on landscape windows (slightly conservative).
+fn lock_on_framing_scale(separation: f32) -> f32 {
+    ((separation + 2.0 * LOCK_ON_FRAME_MARGIN) / CAMERA_VIEW_HEIGHT).max(1.0)
 }
 
 /// Centers the spherical background on the camera without copying camera rotation.
@@ -452,7 +404,7 @@ mod tests {
         let to_target = Vec3::new(3.0, 0.5, -7.0);
         for side in [1.0, -1.0] {
             let angle = lock_on_target_angle(to_target, side);
-            let offset = Quat::from_rotation_y(angle) * BASE_OFFSET;
+            let offset = Quat::from_rotation_y(angle) * base_camera_direction();
             let dot = offset.xz().normalize().dot(to_target.xz().normalize());
             assert!(dot.abs() < 1e-5, "side {side}: dot {dot}");
         }
@@ -473,15 +425,20 @@ mod tests {
         assert!((shortest_angle_diff(PI + 0.1) + PI - 0.1).abs() < 1e-6);
     }
 
-    /// Framing never pulls closer than the base orbit arm and grows with separation.
+    /// Framing never zooms tighter than the base zoom and grows with separation.
     #[test]
-    fn framing_distance_grows_with_separation() {
-        let tan_half = 1.0;
-        assert_eq!(
-            lock_on_framing_distance(0.0, tan_half),
-            BASE_OFFSET.length()
-        );
-        let far = lock_on_framing_distance(200.0, tan_half);
-        assert!((far - (100.0 + LOCK_ON_FRAME_MARGIN)).abs() < 1e-4);
+    fn framing_scale_grows_with_separation() {
+        assert_eq!(lock_on_framing_scale(0.0), 1.0);
+        let far = lock_on_framing_scale(200.0);
+        assert!((far - (200.0 + 2.0 * LOCK_ON_FRAME_MARGIN) / CAMERA_VIEW_HEIGHT).abs() < 1e-4);
+        assert!(far > 1.0);
+    }
+
+    /// Release snaps yaw onto the 45°-offset corner grid, rounding halves up.
+    #[test]
+    fn orbit_rest_angle_snaps_to_corner_grid() {
+        assert!((nearest_orbit_rest_angle(0.4) - FRAC_PI_4).abs() < 1e-6);
+        assert!((nearest_orbit_rest_angle(FRAC_PI_4 + 0.3) - FRAC_PI_4).abs() < 1e-6);
+        assert!((nearest_orbit_rest_angle(FRAC_PI_2) - (FRAC_PI_2 + FRAC_PI_4)).abs() < 1e-6);
     }
 }
