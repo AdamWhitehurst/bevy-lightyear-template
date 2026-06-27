@@ -4,4 +4,5 @@ lcov.info
 *.bin.corrupt
 .pi-lens/
 **/*/active_revision
-
+server.log
+client.log
